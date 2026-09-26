@@ -82,7 +82,7 @@ enum ActivityPayload: Equatable {
     case hint(title: String, detail: String)
     case power(phase: PowerPhase, percent: Int)
     case agent(tool: AgentTool, outcome: AgentOutcome, title: String, detail: String, openBundleIDs: [String])
-    /// F2 본연출 전, 호버 목록에서 모양만 확인하는 자리표시자.
+    /// 노치 오른쪽의 작은 원. 자세한 내용은 펼친 목록에서 본다.
     case notice(appName: String, title: String, body: String, bundleID: String?)
 }
 
@@ -100,6 +100,11 @@ struct IslandActivity: Identifiable, Equatable {
 
     var isFailure: Bool {
         if case .agent(_, .failed, _, _, _) = payload { return true }
+        return false
+    }
+
+    var isNotice: Bool {
+        if case .notice = payload { return true }
         return false
     }
 

@@ -9,6 +9,17 @@ struct IslandRootView: View {
         let radius = model.metrics.radius
         let animation: Animation = reduceMotion ? .easeInOut(duration: 0.18) : IslandMotion.morph
 
+        Group {
+            if model.metrics.chrome == .badge, let activity = model.badgeActivity {
+                NoticeBadge(activity: activity)
+                    .onTapGesture { model.expandNow() }
+            } else {
+                plate(radius: radius, animation: animation)
+            }
+        }
+    }
+
+    private func plate(radius: CGFloat, animation: Animation) -> some View {
         ZStack {
             RoundedRectangle(cornerRadius: radius, style: .continuous)
                 .fill(IslandColor.plate)
@@ -37,6 +48,37 @@ struct IslandRootView: View {
                 CubicKeyframe(-6.0, duration: 0.08)
                 CubicKeyframe(4.0, duration: 0.07)
                 CubicKeyframe(0.0, duration: 0.12)
+            }
+        }
+    }
+}
+
+private struct NoticeBadge: View {
+    var activity: IslandActivity
+    @State private var popped = false
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            ActivityIcon(activity: activity, size: IslandMetrics.badgeIcon, circular: true)
+                .background {
+                    Circle()
+                        .fill(Color.black)
+                        .padding(-1)
+                }
+
+            Circle()
+                .fill(IslandColor.danger)
+                .frame(width: IslandMetrics.badgeDot, height: IslandMetrics.badgeDot)
+                .overlay {
+                    Circle().strokeBorder(Color.black, lineWidth: 0.6)
+                }
+                .offset(x: 1.5, y: -1.5)
+        }
+        .frame(width: IslandMetrics.badgeSide, height: IslandMetrics.badgeSide, alignment: .bottomLeading)
+        .scaleEffect(popped ? 1 : 0.35, anchor: .bottomLeading)
+        .onAppear {
+            withAnimation(IslandMotion.morph) {
+                popped = true
             }
         }
     }
@@ -249,6 +291,7 @@ private struct ActivityIcon: View {
     @Environment(AppModel.self) private var model
     var activity: IslandActivity
     var size: CGFloat
+    var circular: Bool = false
 
     var body: some View {
         if activity.showsAppIcon, let image = Self.appIcon(activity.iconBundleIDs) {
@@ -256,18 +299,25 @@ private struct ActivityIcon: View {
                 .resizable()
                 .interpolation(.high)
                 .frame(width: size, height: size)
-                .clipShape(RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
+                .clipShape(iconShape)
         } else {
             ZStack {
-                RoundedRectangle(cornerRadius: size * 0.32, style: .continuous)
+                iconShape
                     .fill(activity.tint.opacity(activity.payloadIsPower ? 0.18 : 1))
                 Image(systemName: activity.symbol)
-                    .font(.system(size: size * 0.48, weight: .bold))
+                    .font(.system(size: size * (circular ? 0.42 : 0.48), weight: .bold))
                     .foregroundStyle(activity.payloadIsPower ? activity.tint : Color.white)
                     .symbolEffect(.bounce, value: model.chargePulse)
             }
             .frame(width: size, height: size)
         }
+    }
+
+    private var iconShape: AnyShape {
+        if circular {
+            return AnyShape(Circle())
+        }
+        return AnyShape(RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
     }
 
     private static func appIcon(_ bundleIDs: [String]) -> NSImage? {

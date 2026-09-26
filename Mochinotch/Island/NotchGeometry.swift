@@ -58,6 +58,18 @@ enum NotchGeometry {
     }
 }
 
+enum IslandChrome: Equatable {
+    /// 창 전체를 채우는 검은 판.
+    case fill
+    /// 노치 오른쪽 끝에 붙는 작은 원. 알림 하나.
+    case badge
+}
+
+enum IslandAnchor: Equatable {
+    case centerTop
+    case trailing
+}
+
 struct IslandMetrics: Equatable {
     var width: CGFloat
     var height: CGFloat
@@ -65,39 +77,95 @@ struct IslandMetrics: Equatable {
     /// 노치 좌우로 뻗는 귀의 너비. 글자는 이 안에만 둔다.
     var ear: CGFloat
     var camera: CGFloat
+    var chrome: IslandChrome
+    var anchor: IslandAnchor
 
-    static func resolve(notch: NotchInfo, presentation: IslandPresentation, rowCount: Int) -> IslandMetrics {
+    /// 시안 A보다 작게. 아이콘 14pt, 점은 그 안에 걸친다.
+    static let badgeIcon: CGFloat = 14
+    static let badgeDot: CGFloat = 4.5
+    static let badgeSide: CGFloat = 17
+
+    static func resolve(
+        notch: NotchInfo,
+        presentation: IslandPresentation,
+        rowCount: Int,
+        badge: Bool = false
+    ) -> IslandMetrics {
+        if badge {
+            return IslandMetrics(
+                width: badgeSide,
+                height: badgeSide,
+                radius: badgeSide / 2,
+                ear: 0,
+                camera: 0,
+                chrome: .badge,
+                anchor: .trailing
+            )
+        }
+
         let cameraW = notch.cameraWidth
         let cameraH = max(notch.anchorHeight, 28)
 
         switch presentation {
         case .idle:
             if notch.hasNotch {
-                return IslandMetrics(width: cameraW, height: cameraH, radius: cameraH / 2, ear: 0, camera: cameraW)
+                return fill(width: cameraW, height: cameraH, radius: cameraH / 2, ear: 0, camera: cameraW)
             }
-            return IslandMetrics(width: 148, height: 32, radius: 16, ear: 74, camera: 0)
+            return fill(width: 148, height: 32, radius: 16, ear: 74, camera: 0)
 
         case .compact:
             let ear: CGFloat = 112
             let height = max(cameraH, 32)
             if notch.hasNotch {
-                let width = cameraW + ear * 2
-                return IslandMetrics(width: width, height: height, radius: height / 2, ear: ear, camera: cameraW)
+                return fill(width: cameraW + ear * 2, height: height, radius: height / 2, ear: ear, camera: cameraW)
             }
-            return IslandMetrics(width: 300, height: 36, radius: 18, ear: 150, camera: 0)
+            return fill(width: 300, height: 36, radius: 18, ear: 150, camera: 0)
 
         case .expanded:
             let rows = max(rowCount, 1)
             let header: CGFloat = notch.hasNotch ? cameraH + 36 : 52
             let height = min(520, header + CGFloat(rows) * 68 + 18)
-            return IslandMetrics(width: 386, height: height, radius: 32, ear: 0, camera: 0)
+            return fill(width: 386, height: height, radius: 32, ear: 0, camera: 0)
         }
+    }
+
+    private static func fill(
+        width: CGFloat,
+        height: CGFloat,
+        radius: CGFloat,
+        ear: CGFloat,
+        camera: CGFloat
+    ) -> IslandMetrics {
+        IslandMetrics(
+            width: width,
+            height: height,
+            radius: radius,
+            ear: ear,
+            camera: camera,
+            chrome: .fill,
+            anchor: .centerTop
+        )
     }
 
     func screenRect(notch: NotchInfo) -> CGRect {
         guard notch.screenFrame.width > 0 else { return .zero }
-        let x = notch.centerX - width / 2
-        let y = notch.screenFrame.maxY - height
-        return CGRect(x: x, y: y, width: width, height: height)
+        switch anchor {
+        case .centerTop:
+            return CGRect(
+                x: notch.centerX - width / 2,
+                y: notch.screenFrame.maxY - height,
+                width: width,
+                height: height
+            )
+        case .trailing:
+            let rightEdge = notch.notchFrame?.maxX ?? (notch.centerX + 74)
+            let band = notch.anchorHeight
+            return CGRect(
+                x: rightEdge - 2,
+                y: notch.screenFrame.maxY - band + (band - height) / 2,
+                width: width,
+                height: height
+            )
+        }
     }
 }

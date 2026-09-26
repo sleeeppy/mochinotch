@@ -34,7 +34,29 @@ final class AppModel {
     }
 
     var metrics: IslandMetrics {
-        IslandMetrics.resolve(notch: notch, presentation: presentation, rowCount: activities.count)
+        IslandMetrics.resolve(
+            notch: notch,
+            presentation: presentation,
+            rowCount: activities.count,
+            badge: badgeActivity != nil
+        )
+    }
+
+    /// 노치 본체와 오른쪽 뱃지를 함께 호버 영역으로 잡는다.
+    var hoverScreenRect: CGRect {
+        let visible = metrics.screenRect(notch: notch)
+        guard metrics.chrome == .badge else { return visible }
+        let plate = IslandMetrics
+            .resolve(notch: notch, presentation: .idle, rowCount: 0, badge: false)
+            .screenRect(notch: notch)
+        return visible.union(plate)
+    }
+
+    /// 충전·작업 표시 중이 아닐 때, 가장 최근 알림을 오른쪽 원으로 보여 준다.
+    var badgeActivity: IslandActivity? {
+        if presentation == .expanded { return nil }
+        if presentation == .compact, featured?.isNotice != true { return nil }
+        return activities.first(where: \.isNotice)
     }
 
     var launchAtLogin: Bool {
@@ -47,7 +69,7 @@ final class AppModel {
             rootView: IslandRootView().environment(self)
         )
         controller.hoverRectProvider = { [weak self] in
-            self?.metrics.screenRect(notch: self?.notch ?? .placeholder) ?? .zero
+            self?.hoverScreenRect ?? .zero
         }
         controller.onHoverChange = { [weak self] inside in
             self?.setHover(inside)
@@ -139,12 +161,13 @@ final class AppModel {
     }
 
     func clearHistory() {
+        let badge = metrics.chrome == .badge
         activities.removeAll()
         featuredID = nil
         if isHovering {
             refreshPanel(animated: true)
         } else {
-            setPresentation(.idle)
+            setPresentation(.idle, animated: !badge)
         }
     }
 
@@ -211,7 +234,7 @@ final class AppModel {
             createdAt: Date(),
             keepsHistory: true
         )
-        present(activity, seconds: 4.5)
+        present(activity, seconds: 0)
     }
 
     func runNotificationProbe() {
@@ -280,15 +303,23 @@ final class AppModel {
     private func present(_ activity: IslandActivity, seconds: Double) {
         hoverTask?.cancel()
         leaveTask?.cancel()
-        dismissTask?.cancel()
+        let keepCurrentCompact = activity.isNotice && presentation == .compact && featured?.isNotice != true
+        if !keepCurrentCompact {
+            dismissTask?.cancel()
+        }
         activities.insert(activity, at: 0)
         activities = Array(activities.prefix(MochinotchConfig.historyLimit))
+        if keepCurrentCompact {
+            return
+        }
         featuredID = activity.id
         if activity.isFailure {
             shakeToken += 1
         }
         if isHovering {
             setPresentation(.expanded)
+        } else if activity.isNotice {
+            setPresentation(.idle, animated: false)
         } else {
             setPresentation(.compact)
             dismissTask = Task { [weak self] in
@@ -326,7 +357,7 @@ final class AppModel {
         }
     }
 
-    private func setPresentation(_ next: IslandPresentation) {
+    private func setPresentation(_ next: IslandPresentation, animated: Bool = true) {
         presentation = next
         if next == .idle {
             activities.removeAll { !$0.keepsHistory }
@@ -334,13 +365,13 @@ final class AppModel {
                 featuredID = activities.first?.id
             }
         }
-        refreshPanel(animated: true)
+        refreshPanel(animated: animated)
     }
 
     private func refreshPanel(animated: Bool) {
         panel?.sync(
             frame: metrics.screenRect(notch: notch),
-            acceptsMouse: presentation != .idle,
+            acceptsMouse: presentation != .idle || metrics.chrome == .badge,
             showsShadow: presentation == .expanded,
             animated: animated
         )
