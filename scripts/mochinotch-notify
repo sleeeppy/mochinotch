@@ -1,0 +1,162 @@
+#!/bin/bash
+# Mochinotch로 작업 완료/실패를 보낸다. 앱이 꺼져 있으면 조용히 끝난다.
+# Cursor hook은 표준 출력에 {} 만 내야 이어서 질문을 던지지 않는다.
+
+set -u
+
+SOURCE=""
+TOOL=""
+TITLE=""
+DETAIL=""
+KIND=""
+SUCCESS=""
+BUNDLE=""
+POSITIONAL=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --source) SOURCE="$2"; shift 2 ;;
+    --tool) TOOL="$2"; shift 2 ;;
+    --title) TITLE="$2"; shift 2 ;;
+    --detail) DETAIL="$2"; shift 2 ;;
+    --kind) KIND="$2"; shift 2 ;;
+    --bundle-id) BUNDLE="$2"; shift 2 ;;
+    --success) SUCCESS="true"; shift ;;
+    --failure) SUCCESS="false"; KIND="${KIND:-failed}"; shift ;;
+    --needs-input) KIND="needsInput"; shift ;;
+    --) shift; break ;;
+    *) POSITIONAL+=("$1"); shift ;;
+  esac
+done
+
+if [[ -z "$BUNDLE" && -n "${TERM_PROGRAM:-}" ]]; then
+  case "$TERM_PROGRAM" in
+    Apple_Terminal) BUNDLE="com.apple.Terminal" ;;
+    iTerm.app) BUNDLE="com.googlecode.iterm2" ;;
+    ghostty) BUNDLE="com.mitchellh.ghostty" ;;
+    WarpTerminal) BUNDLE="dev.warp.Warp-Stable" ;;
+  esac
+fi
+
+STDIN_PAYLOAD=""
+if [[ ! -t 0 ]]; then
+  STDIN_PAYLOAD="$(cat || true)"
+fi
+
+ARG_PAYLOAD=""
+if [[ ${#POSITIONAL[@]} -gt 0 ]]; then
+  ARG_PAYLOAD="${POSITIONAL[$((${#POSITIONAL[@]} - 1))]}"
+fi
+
+export MOCHINOTCH_SOURCE="$SOURCE"
+export MOCHINOTCH_TOOL="$TOOL"
+export MOCHINOTCH_TITLE="$TITLE"
+export MOCHINOTCH_DETAIL="$DETAIL"
+export MOCHINOTCH_KIND="$KIND"
+export MOCHINOTCH_SUCCESS="$SUCCESS"
+export MOCHINOTCH_BUNDLE="$BUNDLE"
+export MOCHINOTCH_STDIN="$STDIN_PAYLOAD"
+export MOCHINOTCH_ARG="$ARG_PAYLOAD"
+
+python3 - <<'PY'
+import json, os, urllib.request
+
+def load(raw):
+    raw = (raw or "").strip()
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except Exception:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+source = os.environ.get("MOCHINOTCH_SOURCE", "")
+tool = os.environ.get("MOCHINOTCH_TOOL", "")
+title = os.environ.get("MOCHINOTCH_TITLE", "")
+detail = os.environ.get("MOCHINOTCH_DETAIL", "")
+kind = os.environ.get("MOCHINOTCH_KIND", "")
+success = os.environ.get("MOCHINOTCH_SUCCESS", "")
+bundle = os.environ.get("MOCHINOTCH_BUNDLE", "")
+stdin_event = load(os.environ.get("MOCHINOTCH_STDIN", ""))
+arg_event = load(os.environ.get("MOCHINOTCH_ARG", ""))
+
+def first_line(text, limit=90):
+    text = (text or "").strip()
+    if not text:
+        return ""
+    return text.splitlines()[0][:limit]
+
+if source == "claude":
+    tool = tool or "claude"
+    name = stdin_event.get("hook_event_name", "")
+    if name == "Notification":
+        kind = kind or "needsInput"
+        title = title or stdin_event.get("title") or "Claude Code"
+        detail = detail or first_line(stdin_event.get("message") or "")
+    elif name == "StopFailure":
+        kind = kind or "failed"
+        title = title or "Claude Code 실패"
+    else:
+        kind = kind or "completed"
+        title = title or "Claude Code 작업 완료"
+        cwd = stdin_event.get("cwd") or ""
+        detail = detail or (os.path.basename(cwd) if cwd else "")
+elif source == "cursor":
+    tool = tool or "cursor"
+    status = (stdin_event.get("status") or "completed").lower()
+    if status == "error":
+        kind = kind or "failed"
+        title = title or "Cursor 작업 실패"
+    elif status in ("aborted", "cancelled", "canceled"):
+        kind = kind or "cancelled"
+        title = title or "Cursor 작업 중단"
+    else:
+        kind = kind or "completed"
+        title = title or "Cursor 작업 완료"
+elif source == "codex":
+    event = arg_event or stdin_event
+    if event and event.get("type") not in (None, "agent-turn-complete"):
+        raise SystemExit(0)
+    tool = tool or "codex"
+    kind = kind or "completed"
+    title = title or "Codex 작업 완료"
+    detail = detail or first_line(event.get("last-assistant-message") if event else "")
+    if not detail and event:
+        cwd = event.get("cwd") or ""
+        detail = os.path.basename(cwd) if cwd else ""
+else:
+    tool = tool or "custom"
+    kind = kind or ("failed" if success == "false" else "completed")
+    title = title or "작업 완료"
+
+if success == "true" and not kind:
+    kind = "completed"
+if success == "false":
+    kind = "failed"
+
+payload = {
+    "tool": tool,
+    "title": title,
+    "detail": detail,
+    "kind": kind or "completed",
+    "success": kind not in ("failed",),
+    "bundleID": bundle or None,
+}
+data = json.dumps(payload).encode()
+request = urllib.request.Request(
+    "http://127.0.0.1:47321/event",
+    data=data,
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+try:
+    urllib.request.urlopen(request, timeout=1.5).read()
+except Exception:
+    pass
+PY
+
+if [[ "$SOURCE" == "cursor" ]]; then
+  printf '{}\n'
+fi
+exit 0

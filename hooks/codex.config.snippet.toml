@@ -1,0 +1,2 @@
+# ~/.codex/config.toml  (프로젝트 로컬 설정이 아니라 사용자 설정)
+notify = ["/Users/YOU/.local/bin/mochinotch-notify", "--source", "codex"]

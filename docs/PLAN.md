@@ -12,7 +12,7 @@ AI API는 사용하지 않으며, 모든 기능은 로컬에서 동작한다.
 |---|---|---|---|
 | F1 | 충전기 연결 시 애니메이션 | IOKit 전원 알림(`IOPSNotificationCreateRunLoopSource`)으로 연결/해제 감지 | 쉬움 |
 | F2 | 알림이 노치 쪽에 쌓이는 UI | 아래 "F2 제약" 참고 | **어려움** |
-| F3 | Cursor / Claude Code / Codex 작업 완료 표시 (로고 강조) | 각 앱의 공식 hook → `mochinotch://` URL 스킴 또는 로컬 소켓으로 이벤트 전달 | 보통 |
+| F3 | Cursor / Claude Code / Codex 작업 완료 표시 (로고 강조) | 각 앱의 공식 hook → `mochinotch://` URL 스킴 또는 `127.0.0.1:47321` HTTP로 이벤트 전달 | 보통 |
 | F4 | 노치 호버 시 확장, 상세 알림 확인, 클릭 시 해당 앱으로 이동 | 트래킹 영역 + 목록 UI + `NSWorkspace` 앱 활성화 | 보통 |
 
 ### F2 제약
@@ -52,49 +52,50 @@ macOS는 서드파티 앱이 다른 앱의 알림을 읽는 공개 API를 제공
 
 ### Phase 0 — 기반
 
-- [ ] XcodeGen(`project.yml`) 기반 프로젝트 구성. 메뉴바 상주 앱(`LSUIElement`), macOS 14+
-- [ ] 노치 지오메트리 감지 (`NSScreen.safeAreaInsets`, `auxiliaryTopLeftArea` / `auxiliaryTopRightArea`)
-- [ ] 노치 없는 맥 / 외부 모니터 폴백: 상단 중앙에 떠 있는 알약 형태
-- [ ] 노치 패널 (`NSPanel`)
+- [x] XcodeGen(`project.yml`) 기반 프로젝트 구성. 메뉴바 상주 앱(`LSUIElement`), macOS 14+
+- [x] 노치 지오메트리 감지 (`NSScreen.safeAreaInsets`, `auxiliaryTopLeftArea` / `auxiliaryTopRightArea`)
+- [x] 노치 없는 맥 / 외부 모니터 폴백: 상단 중앙에 떠 있는 알약 형태
+- [x] 노치 패널 (`NSPanel`)
   - `.nonactivatingPanel`, `.borderless`
-  - `level = .statusBar` 이상
-  - `collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]`
+  - 메뉴 바보다 위 (`CGWindowLevelForKey(.mainMenuWindow) + 3`)
+  - `collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle, .transient]`
   - 접힌 상태에서는 `ignoresMouseEvents`로 클릭을 통과시킨다
-- [ ] **아일랜드 모핑 엔진**
-  - 하나의 검은 도형이 `minimal → compact(leading/trailing) → expanded`로 변형된다
-  - Live Activity 레이아웃 체계를 따른다
-  - 상단은 노치와 이어지는 형태, 하단은 continuous corner로 처리한다
-- [ ] 디자인 토큰: 스프링 프리셋, 코너 반경, 색상, 타이포를 한곳에서 관리
-- [ ] 메뉴바 아이콘: 설정, 종료, 디버그용 가짜 이벤트 트리거
+- [x] **아일랜드 모핑 엔진**
+  - 하나의 검은 도형이 `idle → compact → expanded`로 변형된다
+  - 컴팩트 상태의 글자는 노치 좌우 귀에만 둔다
+  - 상단은 화면 끝에 붙고, 모서리는 continuous corner
+- [x] 디자인 토큰: 스프링 프리셋, 코너 반경, 색상 (`IslandMotion`, `IslandColor`)
+- [x] 메뉴바 아이콘: 설정, 종료, 디버그용 가짜 이벤트 트리거
 
 ### Phase 1 — 충전 애니메이션 (F1)
 
-- [ ] 전원 소스 감시 (연결 / 해제 / 완충)
-- [ ] 연출: 노치 좌우 확장 → 초록 번개 아이콘 + 배터리 % 숫자 롤링(`.contentTransition(.numericText())`) → 수 초 후 자동 수축
-- [ ] 해제 시에는 짧은 축소 연출
+- [x] 전원 소스 감시 (연결 / 해제 / 완충)
+- [x] 연출: 노치 좌우 확장 → 초록 번개 아이콘 + 배터리 % 숫자 롤링(`.contentTransition(.numericText())`) → 수 초 후 자동 수축
+- [x] 해제 시에는 짧은 축소 연출
 
 ### Phase 2 — 에이전트 작업 완료 (F3)
 
-- [ ] 이벤트 수신부: URL 스킴(`mochinotch://event?...`) + 로컬 Unix 소켓
-- [ ] CLI 헬퍼 `mochinotch-notify` 및 각 도구별 hook 설치 스크립트
-- [ ] 상태 연출
-  - 성공: 체크가 그려지는 모션
+- [x] 이벤트 수신부: URL 스킴(`mochinotch://event?...`) + 루프백 HTTP `POST /event` (포트 47321)
+  - Unix 소켓 대신 HTTP를 쓴다. hook에서 `curl`/`python`으로 보내기 쉽고, `Application Support` 경로의 공백을 피한다.
+- [x] CLI 헬퍼 `scripts/mochinotch-notify` 및 `scripts/install-hooks.sh`
+- [x] 상태 연출
+  - 성공: 완료 라벨
   - 실패: 좌우 흔들림 + 붉은 글로우
-  - 입력 대기: 맥박 효과
-- [ ] 클릭 시 원래 앱 / 터미널로 이동
+  - 입력 대기: 경고색 라벨, 더 오래 유지
+- [x] 클릭 시 원래 앱 / 터미널로 이동 (`bundleID`, 없으면 도구 앱 번들)
 
 ### Phase 3 — 호버 확장 + 알림 목록 (F4)
 
-- [ ] 이벤트 우선순위 큐 (Live Activity처럼 동시에 여러 개 관리)
-- [ ] 호버 진입 시 짧은 지연 후 확장, 이탈 시 수축 (오작동 방지)
-- [ ] 확장 상태의 목록 UI: 앱 아이콘, 제목, 본문, 시간
-- [ ] `matchedGeometryEffect`로 compact 아이콘이 목록 아이콘으로 이어지는 전환
-- [ ] 항목 클릭 시 해당 앱 활성화
+- [x] 이벤트 목록 (동시에 여러 개, 최신 12개)
+- [x] 호버 진입 시 짧은 지연 후 확장, 이탈 시 수축
+- [x] 확장 상태의 목록 UI: 앱 아이콘, 제목, 본문, 시간
+- [x] 항목 클릭 시 해당 앱 활성화
+- [ ] `matchedGeometryEffect`로 compact 아이콘이 목록 아이콘으로 이어지는 전환 (다음 다듬기)
 
 ### Phase 4 — 시스템 알림 쌓기 (F2)
 
-- [ ] **4a. 실험**: 알림 센터 DB / Accessibility 방식으로 알림 읽기가 가능한지 검증하고 방식 결정
-- [ ] **4b. UI**: 사용자가 그린 레퍼런스를 받은 뒤 구현 (구현 전에 그림 요청)
+- [x] **4a. 실험**: 메뉴의 "알림 데이터베이스 실험…"이 DB 경로, 권한, 테이블 이름을 보고한다. 알림 본문은 아직 해석하지 않는다.
+- [ ] **4b. UI**: 사용자가 그린 레퍼런스를 받은 뒤 구현 (구현 전에 그림 요청). 그 전까지 알림은 호버 목록의 자리표시자 행으로만 미리볼 수 있다.
 
 ---
 
