@@ -9,6 +9,7 @@ AI API는 쓰지 않습니다. Claude Code, Cursor, Codex는 각 도구의 hook�
 Xcode 15 이상, macOS 14 이상이 필요합니다.
 
 ```bash
+cd project
 brew install xcodegen
 xcodegen generate
 open Mochinotch.xcodeproj
@@ -62,8 +63,8 @@ mochinotch://event?tool=cursor&title=Cursor%20%EC%99%84%EB%A3%8C&kind=completed
 
 | 경로 | 역할 |
 |---|---|
-| `project.yml` | XcodeGen 프로젝트 |
-| `Mochinotch/` | 앱 소스 |
+| `project/project.yml` | XcodeGen 프로젝트 |
+| `project/Mochinotch/` | 앱 소스 |
 | `scripts/mochinotch-notify` | hook이 호출하는 전달 스크립트 |
 | `scripts/install-hooks.sh` | 스크립트 설치와 hook 병합 |
 | `hooks/` | 설정 예시 |

@@ -52,7 +52,7 @@ macOS는 서드파티 앱이 다른 앱의 알림을 읽는 공개 API를 제공
 
 ### Phase 0 — 기반
 
-- [x] XcodeGen(`project.yml`) 기반 프로젝트 구성. 메뉴바 상주 앱(`LSUIElement`), macOS 14+
+- [x] XcodeGen(`project/project.yml`) 기반 프로젝트 구성. 메뉴바 상주 앱(`LSUIElement`), macOS 14+
 - [x] 노치 지오메트리 감지 (`NSScreen.safeAreaInsets`, `auxiliaryTopLeftArea` / `auxiliaryTopRightArea`)
 - [x] 노치 없는 맥 / 외부 모니터 폴백: 상단 중앙에 떠 있는 알약 형태
 - [x] 노치 패널 (`NSPanel`)
@@ -106,7 +106,7 @@ macOS는 서드파티 앱이 다른 앱의 알림을 읽는 공개 API를 제공
 |---|---|
 | 언어 / UI | Swift, SwiftUI (창 제어는 AppKit) |
 | 최소 OS | macOS 14 Sonoma (`phaseAnimator`, `keyframeAnimator`, `.blurReplace`, `@Observable`) |
-| 프로젝트 | XcodeGen `project.yml` → `xcodegen generate`로 `.xcodeproj` 생성 |
+| 프로젝트 | XcodeGen `project/project.yml` → `project/`에서 `xcodegen generate`로 `.xcodeproj` 생성 |
 | 배포 | Developer ID 직접 배포 또는 개인용 (F2 때문에 앱스토어 불가) |
 
 ## 4. 애니메이션 원칙
