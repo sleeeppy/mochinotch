@@ -24,13 +24,28 @@ enum AgentTool: String, Equatable {
     var iconBundleIDs: [String] {
         switch self {
         case .cursor:
-            return ["com.todesktop.230313mzl4w4tx"]
+            return ["com.todesktop.230313mzl4w4u92"]
         case .claude:
             return ["com.anthropic.claudefordesktop", "com.anthropic.claude"]
         case .codex:
             return ["com.openai.codex"]
         case .custom:
             return []
+        }
+    }
+
+    /// 펼친 목록 제목. 좁은 귀에는 `displayName`을 쓴다.
+    var appTitle: String {
+        self == .claude ? "Claude Code" : displayName
+    }
+
+    /// 번들 ID가 바뀌었을 때 `/Applications`에서 찾을 이름.
+    var appNames: [String] {
+        switch self {
+        case .cursor: return ["Cursor"]
+        case .claude: return ["Claude"]
+        case .codex: return ["Codex"]
+        case .custom: return []
         }
     }
 
@@ -65,6 +80,15 @@ enum AgentOutcome: Equatable {
         case .failed: return "실패"
         case .needsInput: return "확인"
         case .cancelled: return "중단"
+        }
+    }
+
+    var detailLabel: String {
+        switch self {
+        case .completed: return "작업 완료"
+        case .failed: return "작업 실패"
+        case .needsInput: return "확인 필요"
+        case .cancelled: return "작업 중단"
         }
     }
 
@@ -148,9 +172,10 @@ struct IslandActivity: Identifiable, Equatable {
             case .unplugged: return "충전기 분리 · \(percent)%"
             case .full: return "완충 · \(percent)%"
             }
-        case .agent(let tool, let outcome, let title, _, _):
-            let name = title.isEmpty ? tool.displayName : title
-            return name
+        case .agent(let tool, _, let title, _, _):
+            // 알려진 도구는 앱 이름만. 결과는 아래 줄과 색으로 보인다.
+            if tool != .custom || title.isEmpty { return tool.appTitle }
+            return title
         case .notice(_, let title, _, _):
             return title
         }
@@ -166,11 +191,14 @@ struct IslandActivity: Identifiable, Equatable {
             case .unplugged: return "배터리로 전환됐어요"
             case .full: return "배터리가 가득 찼어요"
             }
-        case .agent(let tool, let outcome, _, let detail, _):
+        case .agent(_, let outcome, _, let detail, _):
             if detail.isEmpty {
-                return "\(tool.displayName) · \(outcome.shortLabel)"
+                return outcome.detailLabel
             }
-            return detail
+            if outcome == .completed {
+                return detail
+            }
+            return "\(outcome.detailLabel) · \(detail)"
         case .notice(let appName, _, let body, _):
             return body.isEmpty ? appName : body
         }
@@ -220,6 +248,11 @@ struct IslandActivity: Identifiable, Equatable {
         default:
             return []
         }
+    }
+
+    var iconAppNames: [String] {
+        if case .agent(let tool, _, _, _, _) = payload { return tool.appNames }
+        return []
     }
 
     var openBundleIDs: [String] {

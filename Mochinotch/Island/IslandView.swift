@@ -6,40 +6,37 @@ struct IslandRootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let radius = model.metrics.radius
         let animation: Animation = reduceMotion ? .easeInOut(duration: 0.18) : IslandMotion.morph
 
-        Group {
-            if model.metrics.chrome == .badge, let activity = model.badgeActivity {
-                NoticeBadge(activity: activity)
-                    .onTapGesture { model.expandNow() }
-            } else {
-                plate(radius: radius, animation: animation)
-            }
-        }
+        plate(metrics: model.metrics, animation: animation)
     }
 
-    private func plate(radius: CGFloat, animation: Animation) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .fill(IslandColor.plate)
-                .overlay {
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .strokeBorder(IslandColor.hairline.opacity(model.presentation == .idle ? 0 : 1), lineWidth: 1)
-                }
-                .overlay {
-                    if model.featured?.isFailure == true && model.presentation != .idle {
-                        RoundedRectangle(cornerRadius: radius, style: .continuous)
-                            .strokeBorder(IslandColor.danger.opacity(0.85), lineWidth: 1.5)
-                            .blur(radius: 0.4)
-                    }
+    /// 창은 고정이고, 모양은 그 안 위 가운데에 붙어 자란다. 글자는 최종 크기로 먼저 놓이고 모양이 그걸 드러낸다.
+    private func plate(metrics: IslandMetrics, animation: Animation) -> some View {
+        MorphingNotch(target: metrics, animation: animation) { shown in
+            let shape = NotchShape(shoulder: shown.shoulder, radius: shown.radius)
+            let depth = min(1, max(0, (shown.height - 70) / 140))
+
+            ZStack(alignment: .top) {
+                shape
+                    .fill(IslandColor.plate)
+                    .frame(width: shown.width, height: shown.height)
+                    .shadow(color: .black.opacity(0.45 * depth), radius: 18, y: 8)
+
+                if model.featured?.isFailure == true && model.presentation != .idle {
+                    NotchShape(shoulder: shown.shoulder, radius: shown.radius, closesTop: false)
+                        .stroke(IslandColor.danger.opacity(0.85), lineWidth: 1.5)
+                        .blur(radius: 0.4)
+                        .frame(width: shown.width, height: shown.height)
                 }
 
-            IslandFace()
-                .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+                IslandFace(shape: shown)
+                    .mask(alignment: .top) {
+                        shape.frame(width: shown.width, height: shown.height)
+                    }
+            }
+            .offset(x: shown.shift)
         }
-        .animation(animation, value: model.presentation)
-        .animation(animation, value: model.metrics.radius)
         .keyframeAnimator(initialValue: Shake(), trigger: model.shakeToken) { content, value in
             content.offset(x: value.x)
         } keyframes: { _ in
@@ -50,37 +47,90 @@ struct IslandRootView: View {
                 CubicKeyframe(0.0, duration: 0.12)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
-private struct NoticeBadge: View {
-    var activity: IslandActivity
-    @State private var popped = false
+/// 모양을 목표까지 직접 보간한다. 진행 중에 목표가 바뀌면 지금 보이는 모양에서 다시 출발한다.
+private struct MorphingNotch<Content: View>: View {
+    let target: IslandMetrics
+    let animation: Animation
+    @ViewBuilder var content: (IslandMetrics) -> Content
+
+    @State private var base: IslandMetrics?
+    @State private var goal: IslandMetrics?
+    @State private var progress: CGFloat = 1
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            ActivityIcon(activity: activity, size: IslandMetrics.badgeIcon, circular: true)
-                .background {
-                    Circle()
-                        .fill(Color.black)
-                        .padding(-1)
+        content(shown)
+            .onChange(of: target, initial: true) { _, new in
+                guard let base, let goal else {
+                    base = new
+                    goal = new
+                    progress = 1
+                    return
                 }
+                self.base = base.morphed(to: goal, progress: progress)
+                self.goal = new
+                guard self.base != new else { return }
+                progress = 0
+                withAnimation(animation) { progress = 1 }
+            }
+    }
 
-            Circle()
-                .fill(IslandColor.danger)
-                .frame(width: IslandMetrics.badgeDot, height: IslandMetrics.badgeDot)
-                .overlay {
-                    Circle().strokeBorder(Color.black, lineWidth: 0.6)
-                }
-                .offset(x: 1.5, y: -1.5)
-        }
-        .frame(width: IslandMetrics.badgeSide, height: IslandMetrics.badgeSide, alignment: .bottomLeading)
-        .scaleEffect(popped ? 1 : 0.35, anchor: .bottomLeading)
-        .onAppear {
-            withAnimation(IslandMotion.morph) {
-                popped = true
+    private var shown: IslandMetrics {
+        guard let base, let goal else { return target }
+        return base.morphed(to: goal, progress: progress)
+    }
+}
+
+/// 오른쪽으로 늘어난 노치 끝. 알림 온 앱마다 아이콘 하나와 Dock 같은 개수 배지.
+private struct PeekContent: View {
+    @Environment(AppModel.self) private var model
+    let metrics: IslandMetrics
+    let groups: [NoticeGroup]
+
+    var body: some View {
+        HStack(spacing: IslandMetrics.peekSpacing) {
+            ForEach(groups) { group in
+                ActivityIcon(activity: group.latest, size: IslandMetrics.peekIcon)
+                    .overlay(alignment: .topTrailing) {
+                        DockBadge(count: group.count)
+                            .offset(x: 3, y: -3)
+                    }
+                    .transition(.scale(scale: 0.4).combined(with: .opacity))
             }
         }
+        .padding(.trailing, metrics.shoulder + IslandMetrics.peekInset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        .animation(IslandMotion.morph, value: groups.map(\.id))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            model.expandNow()
+        }
+    }
+}
+
+/// macOS Dock 앱 아이콘의 빨간 개수 배지. 한 자리는 원, 두 자리부터는 옆으로 늘어난다.
+private struct DockBadge: View {
+    let count: Int
+
+    var body: some View {
+        let side = IslandMetrics.peekBadge
+        Text(count > 99 ? "99+" : "\(count)")
+            .font(.system(size: side * 0.66, weight: .medium))
+            .monospacedDigit()
+            .foregroundStyle(Color.white)
+            .contentTransition(.numericText(value: Double(count)))
+            .padding(.horizontal, side * 0.24)
+            .frame(minWidth: side, minHeight: side, maxHeight: side)
+            .background {
+                Capsule()
+                    .fill(IslandColor.dockBadge)
+                    .shadow(color: .black.opacity(0.35), radius: 0.8, y: 0.5)
+            }
+            .fixedSize()
+            .animation(.snappy(duration: 0.3), value: count)
     }
 }
 
@@ -90,39 +140,52 @@ private struct Shake {
 
 private struct IslandFace: View {
     @Environment(AppModel.self) private var model
+    /// 지금 보이는 모양. 알림 아이콘은 이 너비를 따라 오른쪽 끝에 붙는다.
+    let shape: IslandMetrics
 
+    /// 각 콘텐츠는 자기 상태의 크기를 값으로 받는다. 사라지는 도중에 모델의 새 크기로 다시 배치되면 글자가 찌그러진다.
     var body: some View {
-        Group {
+        let metrics = model.metrics
+        let groups = model.noticeGroups
+
+        ZStack(alignment: .top) {
             switch model.presentation {
             case .idle:
-                Color.clear
+                if metrics.chrome == .peek, !groups.isEmpty {
+                    PeekContent(metrics: shape, groups: groups)
+                        .frame(width: shape.width, height: shape.height)
+                        .transition(IslandMotion.contentTransition)
+                }
             case .compact:
-                CompactIslandContent()
-                    .transition(.opacity)
+                CompactIslandContent(metrics: metrics, activity: model.featured)
+                    .frame(width: metrics.width, height: metrics.height)
+                    .transition(IslandMotion.contentTransition)
             case .expanded:
-                ExpandedIslandContent()
-                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+                ExpandedIslandContent(metrics: metrics)
+                    .frame(width: metrics.width, height: metrics.height, alignment: .top)
+                    .transition(IslandMotion.contentTransition)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .animation(IslandMotion.content, value: model.presentation)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
 private struct CompactIslandContent: View {
     @Environment(AppModel.self) private var model
+    let metrics: IslandMetrics
+    let activity: IslandActivity?
 
     var body: some View {
-        let metrics = model.metrics
-        let activity = model.featured
-
+        // 귀가 비어도 폭을 지키도록 빈 칸 위에 얹는다. 빈 뷰에 건 frame은 폭이 사라져 글자가 노치 밑으로 밀린다.
         HStack(spacing: 0) {
-            ear(activity, alignment: .leading)
-                .frame(width: metrics.ear, alignment: .leading)
+            Color.clear
+                .frame(width: metrics.ear)
+                .overlay(alignment: .leading) { ear(activity, alignment: .leading) }
             Color.clear
                 .frame(width: metrics.camera)
-            ear(activity, alignment: .trailing)
-                .frame(width: metrics.ear, alignment: .trailing)
+            Color.clear
+                .frame(width: metrics.ear)
+                .overlay(alignment: .trailing) { ear(activity, alignment: .trailing) }
         }
         .padding(.horizontal, metrics.camera > 0 ? 0 : 4)
         .font(.system(size: 13, weight: .semibold, design: .rounded))
@@ -171,6 +234,7 @@ private struct CompactIslandContent: View {
 
 private struct ExpandedIslandContent: View {
     @Environment(AppModel.self) private var model
+    let metrics: IslandMetrics
 
     var body: some View {
         let topInset = model.notch.hasNotch ? model.notch.anchorHeight : 14
@@ -193,6 +257,7 @@ private struct ExpandedIslandContent: View {
                 }
             }
         }
+        .padding(.horizontal, metrics.shoulder)
     }
 
     private var header: some View {
@@ -291,10 +356,9 @@ private struct ActivityIcon: View {
     @Environment(AppModel.self) private var model
     var activity: IslandActivity
     var size: CGFloat
-    var circular: Bool = false
 
     var body: some View {
-        if activity.showsAppIcon, let image = Self.appIcon(activity.iconBundleIDs) {
+        if activity.showsAppIcon, let image = Self.appIcon(activity.iconBundleIDs, names: activity.iconAppNames) {
             Image(nsImage: image)
                 .resizable()
                 .interpolation(.high)
@@ -303,37 +367,38 @@ private struct ActivityIcon: View {
         } else {
             ZStack {
                 iconShape
-                    .fill(activity.tint.opacity(activity.payloadIsPower ? 0.18 : 1))
+                    .fill(activity.tint.opacity(activity.usesSoftTile ? 0.18 : 1))
                 Image(systemName: activity.symbol)
-                    .font(.system(size: size * (circular ? 0.42 : 0.48), weight: .bold))
-                    .foregroundStyle(activity.payloadIsPower ? activity.tint : Color.white)
+                    .font(.system(size: size * 0.48, weight: .bold))
+                    .foregroundStyle(activity.usesSoftTile ? activity.tint : Color.white)
                     .symbolEffect(.bounce, value: model.chargePulse)
             }
             .frame(width: size, height: size)
         }
     }
 
-    private var iconShape: AnyShape {
-        if circular {
-            return AnyShape(Circle())
-        }
-        return AnyShape(RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
+    private var iconShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
     }
 
-    private static func appIcon(_ bundleIDs: [String]) -> NSImage? {
-        for id in bundleIDs {
-            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else { continue }
-            let image = NSWorkspace.shared.icon(forFile: url.path)
-            image.size = NSSize(width: 128, height: 128)
-            return image
-        }
-        return nil
+    private static func appIcon(_ bundleIDs: [String], names: [String]) -> NSImage? {
+        let byID = bundleIDs.lazy.compactMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
+        let folders = ["/Applications", NSHomeDirectory() + "/Applications"]
+        let byName = names.lazy.flatMap { name in folders.lazy.map { URL(fileURLWithPath: "\($0)/\(name).app") } }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard let url = byID.first ?? byName.first else { return nil }
+        let image = NSWorkspace.shared.icon(forFile: url.path)
+        image.size = NSSize(width: 128, height: 128)
+        return image
     }
 }
 
 private extension IslandActivity {
-    var payloadIsPower: Bool {
-        if case .power = payload { return true }
-        return false
+    /// 옅은 바탕에 색 기호. 안내(흰색)를 진한 바탕에 두면 기호가 바탕에 묻힌다.
+    var usesSoftTile: Bool {
+        switch payload {
+        case .power, .hint: return true
+        default: return false
+        }
     }
 }

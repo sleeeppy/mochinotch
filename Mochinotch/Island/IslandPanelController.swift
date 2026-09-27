@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// 노치 위에 붙는 비활성 패널. 창 크기가 곧 아일랜드 크기다.
+/// 노치 위에 붙는 비활성 패널. 창은 모든 상태를 담는 크기로 고정하고, 모양은 SwiftUI가 그 안에서 모핑한다.
+/// 창이 움직이거나 크기를 바꾸면 모양이 한쪽으로 쏠려 보이므로, 화면이 바뀔 때만 다시 놓는다.
 @MainActor
 final class IslandPanelController {
     private let panel: NSPanel
@@ -10,6 +11,8 @@ final class IslandPanelController {
     private var localMonitor: Any?
     private var lastInside: Bool?
     var hoverRectProvider: () -> CGRect = { .zero }
+    /// 클릭을 받을 화면 영역. `nil`이면 모든 클릭을 아래 창으로 흘려보낸다.
+    var interactiveRectProvider: () -> CGRect? = { nil }
     var onHoverChange: (Bool) -> Void = { _ in }
 
     init<Content: View>(rootView: Content) {
@@ -45,7 +48,7 @@ final class IslandPanelController {
     func start() {
         let handler: (NSEvent) -> Void = { [weak self] _ in
             Task { @MainActor in
-                self?.trackHover()
+                self?.trackPointer()
             }
         }
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged], handler: handler)
@@ -72,27 +75,26 @@ final class IslandPanelController {
         localMonitor = nil
     }
 
-    func sync(frame: CGRect, acceptsMouse: Bool, showsShadow: Bool, animated: Bool) {
+    func place(frame: CGRect) {
         guard frame.width > 2, frame.height > 2 else { return }
-        let same = panel.frame.standardized.equalTo(frame.standardized)
-        panel.ignoresMouseEvents = !acceptsMouse
-        panel.hasShadow = showsShadow
-        if !same {
-            if animated {
-                NSAnimationContext.runAnimationGroup { context in
-                    context.duration = IslandMotion.windowDuration
-                    context.timingFunction = IslandMotion.windowTiming
-                    context.allowsImplicitAnimation = true
-                    panel.animator().setFrame(frame, display: true)
-                }
-            } else {
-                panel.setFrame(frame, display: true)
-            }
+        if !panel.frame.standardized.equalTo(frame.standardized) {
+            panel.setFrame(frame, display: true)
         }
+        updateMouse()
         panel.orderFrontRegardless()
     }
 
-    private func trackHover() {
+    /// 창이 커도 보이는 모양 위에서만 클릭을 막는다.
+    func updateMouse() {
+        let point = NSEvent.mouseLocation
+        let accepts = interactiveRectProvider()?.contains(point) ?? false
+        if panel.ignoresMouseEvents == accepts {
+            panel.ignoresMouseEvents = !accepts
+        }
+    }
+
+    private func trackPointer() {
+        updateMouse()
         let point = NSEvent.mouseLocation
         let inside = hoverRectProvider().insetBy(dx: -8, dy: -6).contains(point)
         guard lastInside != inside else { return }

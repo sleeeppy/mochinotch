@@ -22,6 +22,14 @@ struct MenuContent: View {
                 .padding(.horizontal, 12)
         }
 
+        Text(model.notificationAccess.label)
+            .font(.caption)
+            .foregroundStyle(model.notificationAccess == .watching ? Color.secondary : Color.orange)
+            .padding(.horizontal, 12)
+        if model.notificationAccess == .denied {
+            Button("전체 디스크 접근 권한 열기…") { model.openFullDiskAccessSettings() }
+        }
+
         Divider()
 
         Button("충전 연결 테스트") { model.simulateCharge() }
@@ -66,7 +74,7 @@ struct SettingsView: View {
             } header: {
                 Text("もちノッチ")
             } footer: {
-                Text("노치에 마우스를 올리면 쌓인 항목이 펼쳐져요. 항목을 누르면 그 앱으로 이동해요. 시스템 알림이 노치에 쌓이는 모양은 레퍼런스 그림을 받은 뒤에 넣어요.")
+                Text("노치에 마우스를 올리면 쌓인 항목이 펼쳐져요. 항목을 누르면 그 앱으로 이동해요. 시스템 알림을 받으려면 전체 디스크 접근 권한에 Mochinotch를 넣어 주세요.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -80,5 +88,17 @@ struct SettingsView: View {
             get: { model.launchAtLogin },
             set: { model.setLaunchAtLogin($0) }
         )
+    }
+}
+
+private extension NotificationAccess {
+    var label: String {
+        switch self {
+        case .starting: return "시스템 알림 · 확인 중"
+        case .watching: return "시스템 알림 · 받는 중"
+        case .missingDatabase: return "시스템 알림 · 데이터베이스 없음"
+        case .denied: return "시스템 알림 · 전체 디스크 접근 권한 필요"
+        case .failed(let message): return "시스템 알림 · 읽기 실패 (\(message))"
+        }
     }
 }

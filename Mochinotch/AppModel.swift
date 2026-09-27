@@ -14,15 +14,18 @@ final class AppModel {
     private(set) var serverError: String?
     private(set) var shakeToken = 0
     private(set) var chargePulse = 0
+    private(set) var notificationAccess: NotificationAccess = .starting
     var launchAtLoginError: String?
 
     private var featuredID: UUID?
+    private var noticesSeenAt = Date.distantPast
     private var isHovering = false
     private var hoverTask: Task<Void, Never>?
     private var leaveTask: Task<Void, Never>?
     private var dismissTask: Task<Void, Never>?
     private let power = PowerMonitor()
     private let server = EventServer()
+    private let notifications = NotificationWatcher()
     private var panel: IslandPanelController?
     private var screenObserver: NSObjectProtocol?
 
@@ -38,25 +41,34 @@ final class AppModel {
             notch: notch,
             presentation: presentation,
             rowCount: activities.count,
-            badge: badgeActivity != nil
+            peekSlots: noticeGroups.count
         )
     }
 
-    /// 노치 본체와 오른쪽 뱃지를 함께 호버 영역으로 잡는다.
     var hoverScreenRect: CGRect {
-        let visible = metrics.screenRect(notch: notch)
-        guard metrics.chrome == .badge else { return visible }
-        let plate = IslandMetrics
-            .resolve(notch: notch, presentation: .idle, rowCount: 0, badge: false)
-            .screenRect(notch: notch)
-        return visible.union(plate)
+        metrics.screenRect(notch: notch)
     }
 
-    /// 충전·작업 표시 중이 아닐 때, 가장 최근 알림을 오른쪽 원으로 보여 준다.
-    var badgeActivity: IslandActivity? {
-        if presentation == .expanded { return nil }
-        if presentation == .compact, featured?.isNotice != true { return nil }
-        return activities.first(where: \.isNotice)
+    /// 접혀 있을 때는 노치 뒤라 클릭을 받지 않는다. 호버는 전역 모니터가 따로 본다.
+    private var interactiveScreenRect: CGRect? {
+        guard presentation != .idle || metrics.chrome == .peek else { return nil }
+        return hoverScreenRect
+    }
+
+    /// 목록을 펼쳐 본 뒤에 온 알림을 앱별로 묶는다. 먼저 온 앱이 노치에 가깝고, 새 앱은 오른쪽 끝에 붙는다.
+    var noticeGroups: [NoticeGroup] {
+        var groups: [NoticeGroup] = []
+        let unseen = activities.filter { $0.isNotice && $0.createdAt > noticesSeenAt }
+        for activity in unseen.reversed() {
+            let key = activity.iconBundleIDs.first ?? activity.leadingText
+            if let index = groups.firstIndex(where: { $0.id == key }) {
+                groups[index].latest = activity
+                groups[index].count += 1
+            } else {
+                groups.append(NoticeGroup(id: key, latest: activity, count: 1))
+            }
+        }
+        return Array(groups.suffix(IslandMetrics.maxPeekSlots))
     }
 
     var launchAtLogin: Bool {
@@ -70,6 +82,9 @@ final class AppModel {
         )
         controller.hoverRectProvider = { [weak self] in
             self?.hoverScreenRect ?? .zero
+        }
+        controller.interactiveRectProvider = { [weak self] in
+            self?.interactiveScreenRect
         }
         controller.onHoverChange = { [weak self] inside in
             self?.setHover(inside)
@@ -90,6 +105,14 @@ final class AppModel {
         }
         server.start(port: MochinotchConfig.port)
 
+        notifications.onNotice = { [weak self] notice in
+            self?.ingest(notice)
+        }
+        notifications.onAccessChange = { [weak self] access in
+            self?.notificationAccess = access
+        }
+        notifications.start()
+
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -97,11 +120,11 @@ final class AppModel {
         ) { [weak self] _ in
             Task { @MainActor in
                 self?.notch = NotchGeometry.current()
-                self?.refreshPanel(animated: false)
+                self?.refreshPanel()
             }
         }
 
-        refreshPanel(animated: false)
+        refreshPanel()
         showWelcome()
     }
 
@@ -160,14 +183,39 @@ final class AppModel {
         present(activity, seconds: seconds)
     }
 
+    func ingest(_ notice: SystemNotice) {
+        let title = [notice.title, notice.subtitle].filter { !$0.isEmpty }.joined(separator: " · ")
+        let activity = IslandActivity(
+            id: UUID(),
+            payload: .notice(
+                appName: Self.appName(notice.bundleID),
+                title: title.isEmpty ? Self.appName(notice.bundleID) : title,
+                body: notice.body,
+                bundleID: notice.bundleID
+            ),
+            createdAt: Date(),
+            keepsHistory: true
+        )
+        present(activity, seconds: 0)
+    }
+
+    func openFullDiskAccessSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private static func appName(_ bundleID: String) -> String {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return bundleID }
+        return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+    }
+
     func clearHistory() {
-        let badge = metrics.chrome == .badge
         activities.removeAll()
         featuredID = nil
         if isHovering {
-            refreshPanel(animated: true)
+            refreshPanel()
         } else {
-            setPresentation(.idle, animated: !badge)
+            setPresentation(.idle)
         }
     }
 
@@ -319,7 +367,7 @@ final class AppModel {
         if isHovering {
             setPresentation(.expanded)
         } else if activity.isNotice {
-            setPresentation(.idle, animated: false)
+            setPresentation(.idle)
         } else {
             setPresentation(.compact)
             dismissTask = Task { [weak self] in
@@ -357,7 +405,10 @@ final class AppModel {
         }
     }
 
-    private func setPresentation(_ next: IslandPresentation, animated: Bool = true) {
+    private func setPresentation(_ next: IslandPresentation) {
+        if presentation == .expanded, next != .expanded {
+            noticesSeenAt = Date()
+        }
         presentation = next
         if next == .idle {
             activities.removeAll { !$0.keepsHistory }
@@ -365,16 +416,11 @@ final class AppModel {
                 featuredID = activities.first?.id
             }
         }
-        refreshPanel(animated: animated)
+        refreshPanel()
     }
 
-    private func refreshPanel(animated: Bool) {
-        panel?.sync(
-            frame: metrics.screenRect(notch: notch),
-            acceptsMouse: presentation != .idle || metrics.chrome == .badge,
-            showsShadow: presentation == .expanded,
-            animated: animated
-        )
+    private func refreshPanel() {
+        panel?.place(frame: IslandMetrics.canvas(notch: notch))
     }
 
     private func outcome(for event: IncomingEvent) -> AgentOutcome {
@@ -398,6 +444,13 @@ final class AppModel {
         case .cancelled: return "cancelled"
         }
     }
+}
+
+struct NoticeGroup: Identifiable, Equatable {
+    /// 앱 번들 ID.
+    let id: String
+    var latest: IslandActivity
+    var count: Int
 }
 
 private extension String {

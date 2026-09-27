@@ -89,23 +89,44 @@ def merge_cursor():
     print(f"Cursor: {path}")
 
 def merge_codex():
+    import re
+    import tomllib
+
     path = os.path.expanduser("~/.codex/config.toml")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     existing = ""
     if os.path.exists(path):
-        backup(path)
         with open(path) as handle:
             existing = handle.read()
-    if "\nnotify " in "\n" + existing or existing.startswith("notify ") or "\nnotify=" in "\n" + existing:
-        print(f"Codex: 이미 notify 가 있어 건너뜀 ({path})")
+    if target in existing:
+        print(f"Codex: 이미 연결됨 ({path})")
         return
-    line = f'notify = ["{target}", "--source", "codex"]\n'
-    with open(path, "a") as handle:
-        if existing and not existing.endswith("\n"):
-            handle.write("\n")
-        handle.write("\n# Mochinotch\n")
-        handle.write(line)
-    print(f"Codex: {path}")
+
+    current = tomllib.loads(existing).get("notify") if existing else None
+    command = [target, "--source", "codex"]
+    # notify는 하나만 받으니, 원래 명령은 --chain으로 넘겨 그대로 이어서 실행한다.
+    if isinstance(current, list) and current:
+        command += ["--chain", json.dumps(current, ensure_ascii=False)]
+    line = "notify = " + json.dumps(command, ensure_ascii=False)
+
+    backup(path)
+    # notify는 맨 위 테이블 키다. 첫 [섹션] 앞에서만 찾는다.
+    header = re.search(r"^\s*\[", existing, flags=re.M)
+    head, tail = (existing[: header.start()], existing[header.start():]) if header else (existing, "")
+    pattern = re.compile(r"^notify\s*=\s*\[.*?\][ \t]*$", flags=re.M | re.S)
+    if current is not None and pattern.search(head):
+        head = pattern.sub(lambda _: line, head, count=1)
+    else:
+        if head and not head.endswith("\n"):
+            head += "\n"
+        head += f"# Mochinotch\n{line}\n"
+        if tail:
+            head += "\n"
+    updated = head + tail
+    tomllib.loads(updated)
+    with open(path, "w") as handle:
+        handle.write(updated)
+    print(f"Codex: {path}" + (" (기존 notify 는 이어서 실행)" if current else ""))
 
 try:
     merge_claude()
