@@ -79,33 +79,34 @@ struct IslandMetrics: Equatable {
     /// 노치 가운데에서 모양 가운데까지의 가로 거리. 오른쪽으로만 늘어날 때 쓴다.
     var shift: CGFloat = 0
 
-    static let peekIcon: CGFloat = 22
+    static let peekIcon: CGFloat = 26
     static let peekSpacing: CGFloat = 9
     /// 노치 끝과 첫 아이콘, 마지막 아이콘과 몸통 끝 사이.
     static let peekInset: CGFloat = 6
     static let maxPeekSlots = 5
     /// Dock 배지처럼 아이콘 폭의 절반쯤. 더 작으면 숫자가 안 읽힌다.
-    static let peekBadge: CGFloat = 12
+    static let peekBadge: CGFloat = 11
 
-    /// `peekSlots`는 접혀 있을 때만 쓴다. 늘어나거나 펼쳐지면 그 모양이 우선이다.
+    /// `peekSlots`와 `agentSlots`는 접혀 있을 때만 쓴다. 늘어나거나 펼쳐지면 그 모양이 우선이다.
     static func resolve(
         notch: NotchInfo,
         presentation: IslandPresentation,
         rowCount: Int,
-        peekSlots: Int = 0
+        peekSlots: Int = 0,
+        agentSlots: Int = 0
     ) -> IslandMetrics {
         let cameraW = notch.cameraWidth
         let cameraH = max(notch.anchorHeight, 28)
 
         switch presentation {
-        case .idle where peekSlots > 0:
-            // 왼쪽 끝은 접힌 노치 그대로 두고, 알림 앱 하나마다 오른쪽 끝을 한 칸씩 민다.
+        case .idle where peekSlots > 0 || agentSlots > 0:
+            // 일반 알림은 오른쪽으로, 에이전트 작업은 왼쪽으로. 노치 몸통은 그 자리에 둔다.
             var metrics = resolve(notch: notch, presentation: .idle, rowCount: rowCount)
-            let slots = CGFloat(min(peekSlots, maxPeekSlots))
-            let ear = peekInset * 2 + notchShoulder + slots * peekIcon + (slots - 1) * peekSpacing
-            metrics.width += ear
-            metrics.ear = ear
-            metrics.shift = ear / 2
+            let right = peekEar(slots: peekSlots)
+            let left = peekEar(slots: agentSlots)
+            metrics.width += left + right
+            metrics.ear = right
+            metrics.shift = (right - left) / 2
             metrics.chrome = .peek
             return metrics
 
@@ -146,6 +147,13 @@ struct IslandMetrics: Equatable {
         }
     }
 
+    /// 노치 밖으로 아이콘 칸만큼 뻗는 폭. 0칸이면 그 방향은 접힌 노치 그대로다.
+    private static func peekEar(slots: Int) -> CGFloat {
+        guard slots > 0 else { return 0 }
+        let count = CGFloat(min(slots, maxPeekSlots))
+        return peekInset * 2 + notchShoulder + count * peekIcon + (count - 1) * peekSpacing
+    }
+
     /// 실제 노치 아래 모서리에 가까운 반경.
     private static let notchRadius: CGFloat = 10
     private static let notchShoulder: CGFloat = 6
@@ -180,7 +188,7 @@ struct IslandMetrics: Equatable {
         guard notch.screenFrame.width > 0 else { return .zero }
         let plates: [IslandPresentation] = [.idle, .compact, .expanded]
         let widest = plates
-            .map { resolve(notch: notch, presentation: $0, rowCount: 0, peekSlots: maxPeekSlots) }
+            .map { resolve(notch: notch, presentation: $0, rowCount: 0, peekSlots: maxPeekSlots, agentSlots: maxPeekSlots) }
             .map { ($0.width / 2 + abs($0.shift)) * 2 }
             .max() ?? 0
         let width = widest + shadowMargin * 2
@@ -194,15 +202,18 @@ struct IslandMetrics: Equatable {
     }
 
     /// 두 모양 사이를 `progress`(0은 지금 모양, 1은 `target`)로 잇는다.
-    /// 알림이 늘어날 때는 끝과 끝을 그대로 잇는다. 오른쪽으로 치우친 상태에서 펼칠 때만,
+    /// 알림이 늘어날 때는 끝과 끝을 그대로 잇는다. 왼쪽이나 오른쪽으로 치우친 상태에서 펼칠 때는,
     /// 먼저 노치 한가운데로 모은 다음 그 가운데에서 양쪽으로 벌린다.
     func morphed(to target: IslandMetrics, progress: CGFloat) -> IslandMetrics {
         func lerp(_ from: CGFloat, _ to: CGFloat, _ progress: CGFloat) -> CGFloat {
             from + (to - from) * progress
         }
+        let left = shift - width / 2
+        let right = shift + width / 2
+        let anchor = gatherAnchor(left: left, right: right)
         let expanding = target.height > height + 4
-        let recenters = expanding && abs(shift) > 1
-        // 치우친 채로 아래로 커지면 오른쪽에서 열리는 느낌이 난다. 가운데로 모인 뒤에 키운다.
+        let recenters = expanding && anchor.needed
+        // 치우친 채로 아래로 커지면 늘어난 쪽에서 열리는 느낌이 난다. 가운데로 모인 뒤에 키운다.
         let bloom = recenters ? Self.smooth(progress, from: 0.14) : progress
         var shown = target
         shown.height = lerp(height, target.height, bloom)
@@ -211,21 +222,38 @@ struct IslandMetrics: Equatable {
         shown.ear = lerp(ear, target.ear, progress)
         shown.camera = lerp(camera, target.camera, progress)
 
-        let left = shift - width / 2
-        let right = shift + width / 2
-        guard recenters else {
+        guard recenters, let anchorLeft = anchor.left, let anchorRight = anchor.right else {
             shown.width = max(1, lerp(width, target.width, progress))
             shown.shift = lerp(shift, target.shift, progress)
             return shown
         }
 
         let gather = Self.smooth(progress, until: 0.14)
-        let gatheredRight = lerp(right, -left, gather)
-        let shownLeft = lerp(left, target.shift - target.width / 2, bloom)
+        let gatheredLeft = lerp(left, anchorLeft, gather)
+        let gatheredRight = lerp(right, anchorRight, gather)
+        let shownLeft = lerp(gatheredLeft, target.shift - target.width / 2, bloom)
         let shownRight = lerp(gatheredRight, target.shift + target.width / 2, bloom)
         shown.width = max(1, shownRight - shownLeft)
         shown.shift = (shownLeft + shownRight) / 2
         return shown
+    }
+
+    /// 펼치기 전에 돌아올 노치 가장자리. 오른쪽만 늘어났으면 오른쪽 끝을, 왼쪽만 늘어났으면 왼쪽 끝을 당긴다.
+    private func gatherAnchor(left: CGFloat, right: CGFloat) -> (needed: Bool, left: CGFloat?, right: CGFloat?) {
+        let anchorLeft: CGFloat
+        let anchorRight: CGFloat
+        if camera > 1 {
+            anchorLeft = -camera / 2
+            anchorRight = camera / 2
+        } else if left < -right {
+            anchorLeft = -right
+            anchorRight = right
+        } else {
+            anchorLeft = left
+            anchorRight = -left
+        }
+        let needed = left < anchorLeft - 1 || right > anchorRight + 1
+        return (needed, anchorLeft, anchorRight)
     }
 
     /// `until`에 1이 되고 그 뒤로는 1을 유지한다. 스프링이 0 아래로 튀면 0이다.

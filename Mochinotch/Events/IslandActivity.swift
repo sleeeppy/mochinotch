@@ -66,6 +66,19 @@ enum AgentTool: String, Equatable {
         case .custom: return Color.white.opacity(0.85)
         }
     }
+
+    /// 이 앱에서 온 시스템 알림은 일반 알림이 아니라 작업 완료로 본다.
+    static let noticeBundleIDs: Set<String> = Set(
+        [AgentTool.cursor, .claude, .codex].flatMap(\.iconBundleIDs)
+    )
+
+    /// 화면 가장자리 왜곡은 이 세 도구에만 쓴다.
+    var playsDuo: Bool {
+        switch self {
+        case .claude, .cursor, .codex: return true
+        case .custom: return false
+        }
+    }
 }
 
 enum AgentOutcome: Equatable {
@@ -121,6 +134,28 @@ struct IslandActivity: Identifiable, Equatable {
     var payload: ActivityPayload
     var createdAt: Date
     var keepsHistory: Bool
+    /// 접힌 노치에는 더 보여 주지 않는다. 오른쪽은 알림센터에서 지웠을 때, 왼쪽은 그 앱을 포커스했을 때.
+    var hidesPeek = false
+
+    /// 왼쪽 작업 완료. 시스템 알림이거나, Cursor·Claude·Codex 작업이 끝난 경우.
+    var staysOnLeft: Bool {
+        if isAgentNotice { return true }
+        if case .agent(let tool, let outcome, _, _, _) = payload {
+            return tool.playsDuo && outcome != .cancelled
+        }
+        return false
+    }
+
+    /// 왼쪽 작업 완료. 이 앱을 앞으로 가져오면 접힌다.
+    func clearsWhenFocused(_ bundleID: String) -> Bool {
+        guard staysOnLeft else { return false }
+        if case .agent(let tool, _, _, _, _) = payload, tool.iconBundleIDs.contains(bundleID) { return true }
+        if iconBundleIDs.contains(bundleID) { return true }
+        let tools: [AgentTool] = [.cursor, .claude, .codex]
+        guard let tool = tools.first(where: { $0.iconBundleIDs.contains(bundleID) }) else { return false }
+        if tool.iconBundleIDs.contains(where: iconBundleIDs.contains) { return true }
+        return tool.appNames.contains { $0.caseInsensitiveCompare(leadingText) == .orderedSame }
+    }
 
     var isFailure: Bool {
         if case .agent(_, .failed, _, _, _) = payload { return true }
@@ -130,6 +165,16 @@ struct IslandActivity: Identifiable, Equatable {
     var isNotice: Bool {
         if case .notice = payload { return true }
         return false
+    }
+
+    /// Cursor, Claude, Codex 알림. 오른쪽 개수 배지 대신 노치 왼쪽에 아이콘만 둔다.
+    var isAgentNotice: Bool {
+        guard case .notice(let appName, _, _, let bundleID) = payload else { return false }
+        if let bundleID, AgentTool.noticeBundleIDs.contains(bundleID) { return true }
+        switch appName.lowercased() {
+        case "cursor", "claude", "claude code", "codex": return true
+        default: return false
+        }
     }
 
     var leadingText: String {
@@ -233,6 +278,9 @@ struct IslandActivity: Identifiable, Equatable {
         case .agent(let tool, let outcome, _, _, _):
             if outcome == .failed { return IslandColor.danger }
             if outcome == .needsInput { return IslandColor.warning }
+            if tool == .cursor, outcome == .completed {
+                return Color(red: 0.73, green: 0.74, blue: 0.76)
+            }
             return tool.tint
         case .notice:
             return Color.white

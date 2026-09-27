@@ -84,26 +84,41 @@ private struct MorphingNotch<Content: View>: View {
     }
 }
 
-/// 오른쪽으로 늘어난 노치 끝. 알림 온 앱마다 아이콘 하나와 Dock 같은 개수 배지.
+/// 접힌 노치의 양쪽 끝. 에이전트 작업은 왼쪽 아이콘만, 그 외 알림은 오른쪽 아이콘과 개수 배지.
 private struct PeekContent: View {
     @Environment(AppModel.self) private var model
     let metrics: IslandMetrics
-    let groups: [NoticeGroup]
+    let notices: [NoticeGroup]
+    let agents: [NoticeGroup]
 
     var body: some View {
-        HStack(spacing: IslandMetrics.peekSpacing) {
-            ForEach(groups) { group in
-                ActivityIcon(activity: group.latest, size: IslandMetrics.peekIcon)
-                    .overlay(alignment: .topTrailing) {
-                        DockBadge(count: group.count)
-                            .offset(x: 3, y: -3)
+        HStack(spacing: 0) {
+            if !agents.isEmpty {
+                HStack(spacing: IslandMetrics.peekSpacing) {
+                    ForEach(agents.reversed()) { group in
+                        ActivityIcon(activity: group.latest, size: IslandMetrics.peekIcon)
+                            .transition(.scale(scale: 0.4).combined(with: .opacity))
                     }
-                    .transition(.scale(scale: 0.4).combined(with: .opacity))
+                }
+                .padding(.leading, metrics.shoulder + IslandMetrics.peekInset)
+            }
+            Spacer(minLength: 0)
+            if !notices.isEmpty {
+                HStack(spacing: IslandMetrics.peekSpacing) {
+                    ForEach(notices) { group in
+                        ActivityIcon(activity: group.latest, size: IslandMetrics.peekIcon)
+                            .overlay(alignment: .topTrailing) {
+                                DockBadge(count: group.count)
+                                    .offset(x: 3, y: -3)
+                            }
+                            .transition(.scale(scale: 0.4).combined(with: .opacity))
+                    }
+                }
+                .padding(.trailing, metrics.shoulder + IslandMetrics.peekInset)
             }
         }
-        .padding(.trailing, metrics.shoulder + IslandMetrics.peekInset)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-        .animation(IslandMotion.morph, value: groups.map(\.id))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(IslandMotion.morph, value: notices.map(\.id) + agents.map(\.id))
         .contentShape(Rectangle())
         .onTapGesture {
             model.expandNow()
@@ -146,13 +161,14 @@ private struct IslandFace: View {
     /// 각 콘텐츠는 자기 상태의 크기를 값으로 받는다. 사라지는 도중에 모델의 새 크기로 다시 배치되면 글자가 찌그러진다.
     var body: some View {
         let metrics = model.metrics
-        let groups = model.noticeGroups
+        let notices = model.noticeGroups
+        let agents = model.agentGroups
 
         ZStack(alignment: .top) {
             switch model.presentation {
             case .idle:
-                if metrics.chrome == .peek, !groups.isEmpty {
-                    PeekContent(metrics: shape, groups: groups)
+                if metrics.chrome == .peek, !notices.isEmpty || !agents.isEmpty {
+                    PeekContent(metrics: shape, notices: notices, agents: agents)
                         .frame(width: shape.width, height: shape.height)
                         .transition(IslandMotion.contentTransition)
                 }
@@ -235,6 +251,7 @@ private struct CompactIslandContent: View {
 private struct ExpandedIslandContent: View {
     @Environment(AppModel.self) private var model
     let metrics: IslandMetrics
+    @State private var clearHovered = false
 
     var body: some View {
         let topInset = model.notch.hasNotch ? model.notch.anchorHeight : 14
@@ -243,19 +260,22 @@ private struct ExpandedIslandContent: View {
             header
                 .padding(.horizontal, 18)
                 .padding(.bottom, 8)
-            if model.activities.isEmpty {
-                empty
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 2) {
-                        ForEach(model.activities) { activity in
-                            ActivityRow(activity: activity)
-                        }
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 10)
+            ZStack(alignment: .topLeading) {
+                if model.activities.isEmpty {
+                    empty
+                        .transition(.opacity.animation(.easeOut(duration: 0.26).delay(0.14)))
+                } else {
+                    history
+                        .transition(
+                            .asymmetric(
+                                insertion: .opacity,
+                                removal: .opacity.combined(with: .offset(y: -8))
+                            )
+                        )
                 }
             }
+            .animation(.easeInOut(duration: 0.32), value: model.activities.isEmpty)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .padding(.horizontal, metrics.shoulder)
     }
@@ -267,13 +287,35 @@ private struct ExpandedIslandContent: View {
                 .foregroundStyle(IslandColor.secondary)
             Spacer()
             if !model.activities.isEmpty {
-                Button("지우기") {
+                Button {
                     model.clearHistory()
+                } label: {
+                    Text("지우기")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(clearHovered ? IslandColor.primary : IslandColor.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(clearHovered ? IslandColor.rowHighlight : Color.clear))
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(IslandColor.secondary)
+                .onHover { hovering in
+                    withAnimation(.easeOut(duration: 0.15)) { clearHovered = hovering }
+                }
+                .transition(.opacity)
             }
+        }
+        .animation(.easeInOut(duration: 0.22), value: model.activities.isEmpty)
+    }
+
+    private var history: some View {
+        ScrollView {
+            VStack(spacing: 2) {
+                ForEach(model.activities) { activity in
+                    ActivityRow(activity: activity)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 10)
         }
     }
 

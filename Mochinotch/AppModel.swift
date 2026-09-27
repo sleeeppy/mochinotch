@@ -15,6 +15,7 @@ final class AppModel {
     private(set) var shakeToken = 0
     private(set) var chargePulse = 0
     private(set) var notificationAccess: NotificationAccess = .starting
+    private(set) var duoMessage: String?
     var launchAtLoginError: String?
 
     private var featuredID: UUID?
@@ -23,11 +24,15 @@ final class AppModel {
     private var hoverTask: Task<Void, Never>?
     private var leaveTask: Task<Void, Never>?
     private var dismissTask: Task<Void, Never>?
+    private var clearTask: Task<Void, Never>?
+    /// 지우기 직후 높이를 잠깐 유지한다. 글자가 사라진 뒤에 모양이 따라 줄어든다.
+    private var frozenRows: Int?
     private let power = PowerMonitor()
     private let server = EventServer()
     private let notifications = NotificationWatcher()
     private var panel: IslandPanelController?
     private var screenObserver: NSObjectProtocol?
+    private var activationObserver: NSObjectProtocol?
 
     var featured: IslandActivity? {
         if let featuredID, let match = activities.first(where: { $0.id == featuredID }) {
@@ -40,8 +45,9 @@ final class AppModel {
         IslandMetrics.resolve(
             notch: notch,
             presentation: presentation,
-            rowCount: activities.count,
-            peekSlots: noticeGroups.count
+            rowCount: frozenRows ?? activities.count,
+            peekSlots: noticeGroups.count,
+            agentSlots: agentGroups.count
         )
     }
 
@@ -55,10 +61,24 @@ final class AppModel {
         return hoverScreenRect
     }
 
-    /// 목록을 펼쳐 본 뒤에 온 알림을 앱별로 묶는다. 먼저 온 앱이 노치에 가깝고, 새 앱은 오른쪽 끝에 붙는다.
+    /// 일반 알림. 노치 오른쪽에 개수 배지와 함께 붙는다.
     var noticeGroups: [NoticeGroup] {
+        groupedNotices(agent: false)
+    }
+
+    /// 에이전트 작업 알림. 노치 왼쪽에 배지 없이 붙는다.
+    var agentGroups: [NoticeGroup] {
+        groupedNotices(agent: true)
+    }
+
+    /// 먼저 온 앱이 노치에 가깝다. 일반 알림은 오른쪽으로, 에이전트는 왼쪽으로 뻗는다.
+    private func groupedNotices(agent: Bool) -> [NoticeGroup] {
         var groups: [NoticeGroup] = []
-        let unseen = activities.filter { $0.isNotice && $0.createdAt > noticesSeenAt }
+        let unseen = activities.filter { activity in
+            guard !activity.hidesPeek else { return false }
+            if agent { return activity.staysOnLeft }
+            return activity.isNotice && !activity.staysOnLeft && activity.createdAt > noticesSeenAt
+        }
         for activity in unseen.reversed() {
             let key = activity.iconBundleIDs.first ?? activity.leadingText
             if let index = groups.firstIndex(where: { $0.id == key }) {
@@ -108,10 +128,29 @@ final class AppModel {
         notifications.onNotice = { [weak self] notice in
             self?.ingest(notice)
         }
+        notifications.onDismiss = { [weak self] title, body in
+            self?.acknowledgeStoredNotice(title: title, body: body)
+        }
         notifications.onAccessChange = { [weak self] access in
             self?.notificationAccess = access
         }
         notifications.start()
+
+        DuoPulse.shared.onStatus = { [weak self] message in
+            self?.duoMessage = message
+        }
+
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  let bundleID = app.bundleIdentifier else { return }
+            Task { @MainActor in
+                self?.acknowledgeAgent(bundleID: bundleID)
+            }
+        }
 
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
@@ -209,12 +248,63 @@ final class AppModel {
         return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
     }
 
+    /// 왼쪽 AI 작업만. 그 앱을 앞으로 가져오면 접힌다. 오른쪽 알림은 그대로 둔다.
+    private func acknowledgeAgent(bundleID: String) {
+        let indexes = activities.indices.filter { activities[$0].clearsWhenFocused(bundleID) && !activities[$0].hidesPeek }
+        let foldCompact: Bool = {
+            guard presentation == .compact, !isHovering, let featured else { return false }
+            if case .agent(let tool, _, _, _, _) = featured.payload {
+                return tool.iconBundleIDs.contains(bundleID)
+            }
+            return false
+        }()
+        guard !indexes.isEmpty || foldCompact else { return }
+        withAnimation(IslandMotion.morph) {
+            for index in indexes {
+                activities[index].hidesPeek = true
+            }
+            if foldCompact {
+                setPresentation(.idle)
+            }
+        }
+    }
+
+    /// 알림센터에서 지워진 오른쪽 알림. 왼쪽 작업 완료는 포커스로만 접힌다.
+    private func acknowledgeStoredNotice(title: String, body: String) {
+        let indexes = activities.indices.filter { index in
+            guard !activities[index].hidesPeek, !activities[index].isAgentNotice,
+                  case .notice(_, let storedTitle, let storedBody, _) = activities[index].payload else {
+                return false
+            }
+            return storedTitle == title && storedBody == body
+        }
+        guard !indexes.isEmpty else { return }
+        withAnimation(IslandMotion.morph) {
+            for index in indexes {
+                activities[index].hidesPeek = true
+            }
+        }
+    }
+
     func clearHistory() {
-        activities.removeAll()
-        featuredID = nil
+        clearTask?.cancel()
+        let rows = activities.count
+        if isHovering, rows > 0 {
+            frozenRows = rows
+        }
+        withAnimation(.easeInOut(duration: 0.32)) {
+            activities.removeAll()
+            featuredID = nil
+        }
         if isHovering {
             refreshPanel()
+            clearTask = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(260))
+                guard !Task.isCancelled, let self else { return }
+                self.frozenRows = nil
+            }
         } else {
+            frozenRows = nil
             setPresentation(.idle)
         }
     }
@@ -264,6 +354,21 @@ final class AppModel {
             kind: kindString(outcome),
             bundleID: tool.iconBundleIDs.first
         ))
+    }
+
+    private static func duoTint(for tool: AgentTool, outcome: AgentOutcome) -> NSColor {
+        if tool == .cursor, outcome == .completed {
+            return NSColor(srgbRed: 0.73, green: 0.74, blue: 0.76, alpha: 1)
+        }
+        return IconTint.color(for: tool)
+    }
+
+    func previewDuo(_ study: DuoStudy = .focus) {
+        DuoPulse.shared.play(tint: Self.duoTint(for: .cursor, outcome: .completed), study: study)
+    }
+
+    func openScreenRecordingSettings() {
+        DuoPulse.shared.openSettings()
     }
 
     func simulateNotice() {
@@ -351,6 +456,8 @@ final class AppModel {
     private func present(_ activity: IslandActivity, seconds: Double) {
         hoverTask?.cancel()
         leaveTask?.cancel()
+        clearTask?.cancel()
+        frozenRows = nil
         let keepCurrentCompact = activity.isNotice && presentation == .compact && featured?.isNotice != true
         if !keepCurrentCompact {
             dismissTask?.cancel()
@@ -361,8 +468,16 @@ final class AppModel {
             return
         }
         featuredID = activity.id
+        if case .agent(let tool, let outcome, _, _, _) = activity.payload, tool.playsDuo, outcome != .cancelled {
+            DuoPulse.shared.play(tint: Self.duoTint(for: tool, outcome: outcome))
+        }
         if activity.isFailure {
             shakeToken += 1
+        }
+        if let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+           activity.clearsWhenFocused(front),
+           let index = activities.firstIndex(where: { $0.id == activity.id }) {
+            activities[index].hidesPeek = true
         }
         if isHovering {
             setPresentation(.expanded)
@@ -408,6 +523,8 @@ final class AppModel {
     private func setPresentation(_ next: IslandPresentation) {
         if presentation == .expanded, next != .expanded {
             noticesSeenAt = Date()
+            clearTask?.cancel()
+            frozenRows = nil
         }
         presentation = next
         if next == .idle {
