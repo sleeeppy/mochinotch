@@ -33,3 +33,5 @@ targets:
           - "@executable_path/../Frameworks"
         OTHER_LDFLAGS:
           - "-lsqlite3"
+    dependencies:
+      - sdk: ScreenCaptureKit.framework
