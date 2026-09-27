@@ -6,6 +6,8 @@
 	<string>ko</string>
 	<key>CFBundleDisplayName</key>
 	<string>Mochinotch</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
