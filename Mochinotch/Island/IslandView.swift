@@ -23,6 +23,19 @@ struct IslandRootView: View {
                     .frame(width: shown.width, height: shown.height)
                     .shadow(color: .black.opacity(0.45 * depth), radius: 18, y: 8)
 
+                NotchGlow(
+                    style: model.glowStyle,
+                    shoulder: shown.shoulder,
+                    radius: shown.radius,
+                    width: shown.width,
+                    height: shown.height,
+                    cover: model.notch.hasNotch ? model.notch.anchorHeight : 0,
+                    camera: model.notch.cameraWidth,
+                    envelope: model.edgeGlow,
+                    travel: model.edgeGlowTravel,
+                    color: model.edgeGlowColor
+                )
+
                 if model.featured?.isFailure == true && model.presentation != .idle {
                     NotchShape(shoulder: shown.shoulder, radius: shown.radius, closesTop: false)
                         .stroke(IslandColor.danger.opacity(0.85), lineWidth: 1.5)
@@ -49,6 +62,118 @@ struct IslandRootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
+}
+
+enum NotchGlowStyle: String, CaseIterable, Identifiable {
+    case snap
+    case bead
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .snap: return "튕김"
+        case .bead: return "방울"
+        }
+    }
+}
+
+/// 화면 효과와 함께 노치 윤곽을 그대로 따라가는 빛.
+private struct NotchGlow: View {
+    var style: NotchGlowStyle
+    var shoulder: CGFloat
+    var radius: CGFloat
+    var width: CGFloat
+    var height: CGFloat
+    /// 하드웨어 노치 높이. 그 경계가 보이지 않게 빛은 닿기 전에 사라진다.
+    var cover: CGFloat
+    var camera: CGFloat
+    var envelope: Double
+    var travel: Double
+    var color: Color
+
+    var body: some View {
+        let shape = NotchShape(shoulder: shoulder, radius: radius, closesTop: false)
+        Group {
+            switch style {
+            case .snap:
+                snap(shape)
+            case .bead:
+                bead(shape)
+            }
+        }
+        .scaleEffect(x: 1, y: 1.03, anchor: .top)
+        .opacity(lineOpacity)
+        .frame(width: width, height: height)
+        .mask {
+            ZStack {
+                Rectangle()
+                if cover > 0, camera > 0 {
+                    // 좌우 테두리는 노치에 붙이고, 위쪽만 닿기 전에 사그라진다.
+                    RoundedRectangle(cornerRadius: cover * 0.45, style: .continuous)
+                        .fill(Color.black)
+                        .frame(width: camera + 8, height: cover + 6)
+                        .blur(radius: 10)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .blendMode(.destinationOut)
+                }
+            }
+            .compositingGroup()
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// 잠깐 당겼다가 튕기며 나간다. 가는 동안 길이가 줄어 오른쪽 끝에서 0이 된다.
+    private func snap(_ shape: NotchShape) -> some View {
+        let run = roll(length: 0.16, finish: 0.5)
+        return streak(shape, from: run.tail, to: run.head, width: 1.35, blur: 2.6)
+    }
+
+    /// 짧은 방울이 가속했다가 테두리에 붙는다. 가는 동안 길이가 줄어 오른쪽 끝에서 0이 된다.
+    private func bead(_ shape: NotchShape) -> some View {
+        let run = roll(length: 0.07, finish: 0.5)
+        return streak(shape, from: run.tail, to: run.head, width: 1.5, blur: 2.8)
+    }
+
+    /// 화면이 천천히 밝아지는 동안에도 선은 바로 보인다. 사라질 때만 같이 꺼진다.
+    private var lineOpacity: Double {
+        guard envelope > 0.001 else { return 0 }
+        if travel < 0.47 { return 1 }
+        return envelope
+    }
+
+    /// 왼쪽 위 모서리에서 길이가 0부터 같은 속도로 늘어나고, 오른쪽 끝에서는 0으로 말린다.
+    private func roll(length: CGFloat, finish: Double) -> (tail: CGFloat, head: CGFloat) {
+        let lead = 0.055
+        let phase = min(1, max(0, (travel - lead) / finish))
+        let moveEnd = 0.74
+        if phase <= moveEnd {
+            let head = CGFloat(phase / moveEnd)
+            return (max(0, head - length), head)
+        }
+        let tuck = (phase - moveEnd) / (1 - moveEnd)
+        let curled = 1 - pow(1 - tuck, 2)
+        let tail = min(1, (1 - length) + length * curled)
+        return (CGFloat(tail), 1)
+    }
+
+    @ViewBuilder
+    private func streak(_ shape: NotchShape, from: CGFloat, to: CGFloat, width: CGFloat, blur: CGFloat) -> some View {
+        let start = min(max(0, from), 1)
+        let end = min(max(start, to), 1)
+        if end > start + 0.0008 {
+            ZStack {
+                shape
+                    .trim(from: start, to: end)
+                    .stroke(color.opacity(0.9), style: StrokeStyle(lineWidth: width * 3.2, lineCap: .round))
+                    .blur(radius: blur)
+                shape
+                    .trim(from: start, to: end)
+                    .stroke(color, style: StrokeStyle(lineWidth: width, lineCap: .round))
+            }
+        }
+    }
+
 }
 
 /// 모양을 목표까지 직접 보간한다. 진행 중에 목표가 바뀌면 지금 보이는 모양에서 다시 출발한다.
@@ -94,9 +219,10 @@ private struct PeekContent: View {
     var body: some View {
         HStack(spacing: 0) {
             if !agents.isEmpty {
-                HStack(spacing: IslandMetrics.peekSpacing) {
+                HStack(spacing: IslandMetrics.peekAgentSpacing) {
                     ForEach(agents.reversed()) { group in
                         ActivityIcon(activity: group.latest, size: IslandMetrics.peekIcon)
+                            .background { AgentAura(size: IslandMetrics.peekIcon, color: group.latest.peekAura) }
                             .transition(.scale(scale: 0.4).combined(with: .opacity))
                     }
                 }
@@ -123,6 +249,26 @@ private struct PeekContent: View {
         .onTapGesture {
             model.expandNow()
         }
+    }
+}
+
+/// 왼쪽 아이콘 뒤의 옅은 빛. 아이콘과 같은 둥근 사각형이고, 아주 조금 숨 쉰다.
+private struct AgentAura: View {
+    var size: CGFloat
+    var color: Color
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
+            .fill(color.opacity(0.7))
+            .frame(width: size, height: size)
+            .blur(radius: 1.4)
+            .phaseAnimator([false, true]) { content, inhaling in
+                content
+                    .scaleEffect(inhaling ? 1.018 : 0.988)
+                    .opacity(inhaling ? 1 : 0.78)
+            } animation: { _ in
+                .easeInOut(duration: 2.6)
+            }
     }
 }
 
@@ -424,6 +570,10 @@ private struct ActivityIcon: View {
     }
 
     private static func appIcon(_ bundleIDs: [String], names: [String]) -> NSImage? {
+        if bundleIDs.contains(Bundle.main.bundleIdentifier ?? ""), let image = NSApp.applicationIconImage {
+            image.size = NSSize(width: 128, height: 128)
+            return image
+        }
         let byID = bundleIDs.lazy.compactMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
         let folders = ["/Applications", NSHomeDirectory() + "/Applications"]
         let byName = names.lazy.flatMap { name in folders.lazy.map { URL(fileURLWithPath: "\($0)/\(name).app") } }

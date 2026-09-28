@@ -41,6 +41,9 @@ struct MenuContent: View {
         Button("Codex 실패 테스트") { model.simulateAgent(tool: .codex, outcome: .failed) }
         Button("알림 미리보기") { model.simulateNotice() }
         Button("초점 효과 미리보기") { model.previewDuo() }
+        ForEach(NotchGlowStyle.allCases) { style in
+            Button("글로우 시안 · \(style.title)") { model.previewGlow(style) }
+        }
         if let duoMessage = model.duoMessage {
             Text(duoMessage)
                 .font(.caption)

@@ -115,6 +115,8 @@ final class DuoPulse: NSObject {
     static let shared = DuoPulse()
 
     var onStatus: ((String?) -> Void)?
+    /// 화면 효과와 같이 움직인다. envelope, 0~1 진행, 틴트.
+    var onGlow: ((Double, Double, NSColor) -> Void)?
 
     private var window: NSWindow?
     private var view: NSView?
@@ -237,10 +239,13 @@ final class DuoPulse: NSObject {
         let envelope = Self.level(t)
         window?.alphaValue = envelope
         renderer.update(envelope: envelope, time: t * duration, tint: tint, study: study, active: true)
+        let color = NSColor(srgbRed: tint.0, green: tint.1, blue: tint.2, alpha: 1)
+        onGlow?(envelope, t, color)
     }
 
     private func finish() {
         renderer.update(envelope: 0, time: 0, tint: tint, study: study, active: false)
+        onGlow?(0, 1, NSColor(srgbRed: tint.0, green: tint.1, blue: tint.2, alpha: 1))
         stopTimer()
         window?.orderOut(nil)
         Task { await self.stopStream() }
@@ -297,13 +302,19 @@ final class DuoPulse: NSObject {
             .cropped(to: extent)
         let wash = CIImage(color: CIColor(red: tint.0, green: tint.1, blue: tint.2, alpha: 1))
             .cropped(to: extent)
-        let tintMask = CIImage(color: CIColor(red: 0.30 * envelope, green: 0.30 * envelope, blue: 0.30 * envelope, alpha: 1))
-            .cropped(to: extent)
+        let border = featheredBorder(extent: extent, cornerRadius: cornerRadius)
+        // 가장자리는 0.44. 화면 안쪽 끝은 같은 자리에서 더 부드럽게 0이 된다.
+        let tintMask = border.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: 0.44 * envelope, y: 0, z: 0, w: 0),
+            "inputGVector": CIVector(x: 0, y: 0.44 * envelope, z: 0, w: 0),
+            "inputBVector": CIVector(x: 0, y: 0, z: 0.44 * envelope, w: 0),
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1)
+        ])
         let tinted = wash.applyingFilter("CIBlendWithMask", parameters: [
             kCIInputBackgroundImageKey: blurred,
             kCIInputMaskImageKey: tintMask
         ])
-        let falloff = roundedBorderMask(extent: extent, cornerRadius: cornerRadius).applyingFilter("CIColorMatrix", parameters: [
+        let falloff = border.applyingFilter("CIColorMatrix", parameters: [
             "inputRVector": CIVector(x: envelope, y: 0, z: 0, w: 0),
             "inputGVector": CIVector(x: 0, y: envelope, z: 0, w: 0),
             "inputBVector": CIVector(x: 0, y: 0, z: envelope, w: 0),
@@ -313,6 +324,15 @@ final class DuoPulse: NSObject {
             kCIInputBackgroundImageKey: source,
             kCIInputMaskImageKey: falloff
         ])
+    }
+
+    /// 도달 거리는 그대로 두고, 화면 안쪽 끝만 흐린다.
+    nonisolated private static func featheredBorder(extent: CGRect, cornerRadius: CGFloat) -> CIImage {
+        let sigma = min(extent.width, extent.height) * 0.02
+        return roundedBorderMask(extent: extent, cornerRadius: cornerRadius)
+            .clampedToExtent()
+            .applyingGaussianBlur(sigma: sigma)
+            .cropped(to: extent)
     }
 
     /// 화면 가장자리에서 안쪽으로 옅어지는 마스크. 모서리 반경은 맥북 패널에 맞춘다.
@@ -332,7 +352,7 @@ final class DuoPulse: NSObject {
                 let py = (CGFloat(y) + 0.5) / CGFloat(height) * extent.height - extent.midY
                 let distance = roundedRectSDF(x: px, y: py, halfWidth: extent.width / 2, halfHeight: extent.height / 2, radius: radius)
                 let inside = max(0, -distance)
-                let clear = smoothstep(0, band, inside)
+                let clear = smootherstep(0, band, inside)
                 let strength = UInt8(min(255, max(0, (1 - clear) * 255)))
                 let index = (y * width + x) * 4
                 bytes[index] = strength
@@ -373,6 +393,13 @@ final class DuoPulse: NSObject {
         guard edge1 > edge0 else { return value < edge0 ? 0 : 1 }
         let t = min(1, max(0, (value - edge0) / (edge1 - edge0)))
         return t * t * (3 - 2 * t)
+    }
+
+    /// 양 끝이 더 평평해서, 선명한 화면과 만나는 안쪽 경계가 덜 보인다.
+    nonisolated private static func smootherstep(_ edge0: CGFloat, _ edge1: CGFloat, _ value: CGFloat) -> CGFloat {
+        guard edge1 > edge0 else { return value < edge0 ? 0 : 1 }
+        let t = min(1, max(0, (value - edge0) / (edge1 - edge0)))
+        return t * t * t * (t * (t * 6 - 15) + 10)
     }
 
     nonisolated private static func refract(

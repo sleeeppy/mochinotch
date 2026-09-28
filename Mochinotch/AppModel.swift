@@ -16,6 +16,11 @@ final class AppModel {
     private(set) var chargePulse = 0
     private(set) var notificationAccess: NotificationAccess = .starting
     private(set) var duoMessage: String?
+    /// 화면 효과와 함께 노치 테두리를 지나가는 글로우.
+    private(set) var edgeGlow: Double = 0
+    private(set) var edgeGlowTravel: Double = 0
+    private(set) var edgeGlowColor = Color.white
+    var glowStyle: NotchGlowStyle = .snap
     var launchAtLoginError: String?
 
     private var featuredID: UUID?
@@ -138,6 +143,18 @@ final class AppModel {
 
         DuoPulse.shared.onStatus = { [weak self] message in
             self?.duoMessage = message
+        }
+        DuoPulse.shared.onGlow = { [weak self] envelope, travel, color in
+            guard let self else { return }
+            let rgb = color.usingColorSpace(.sRGB) ?? color
+            let lift = 0.42
+            self.edgeGlow = envelope
+            self.edgeGlowTravel = travel
+            self.edgeGlowColor = Color(
+                red: rgb.redComponent + (1 - rgb.redComponent) * lift,
+                green: rgb.greenComponent + (1 - rgb.greenComponent) * lift,
+                blue: rgb.blueComponent + (1 - rgb.blueComponent) * lift
+            )
         }
 
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -357,14 +374,25 @@ final class AppModel {
     }
 
     private static func duoTint(for tool: AgentTool, outcome: AgentOutcome) -> NSColor {
-        if tool == .cursor, outcome == .completed {
-            return NSColor(srgbRed: 0.73, green: 0.74, blue: 0.76, alpha: 1)
+        if outcome == .failed {
+            return NSColor(srgbRed: 1, green: 0.271, blue: 0.227, alpha: 1)
         }
-        return IconTint.color(for: tool)
+        switch tool {
+        case .cursor, .claude, .codex:
+            let rgb = tool.screenTintRGB
+            return NSColor(srgbRed: rgb.0, green: rgb.1, blue: rgb.2, alpha: 1)
+        case .custom:
+            return IconTint.color(for: tool)
+        }
     }
 
     func previewDuo(_ study: DuoStudy = .focus) {
         DuoPulse.shared.play(tint: Self.duoTint(for: .cursor, outcome: .completed), study: study)
+    }
+
+    func previewGlow(_ style: NotchGlowStyle) {
+        glowStyle = style
+        simulateAgent(tool: .cursor, outcome: .completed)
     }
 
     func openScreenRecordingSettings() {

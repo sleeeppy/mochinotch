@@ -81,6 +81,8 @@ struct IslandMetrics: Equatable {
 
     static let peekIcon: CGFloat = 26
     static let peekSpacing: CGFloat = 9
+    /// 왼쪽은 배지가 없어서 아이콘 사이를 더 붙인다.
+    static let peekAgentSpacing: CGFloat = 5
     /// 노치 끝과 첫 아이콘, 마지막 아이콘과 몸통 끝 사이.
     static let peekInset: CGFloat = 6
     static let maxPeekSlots = 5
@@ -102,8 +104,8 @@ struct IslandMetrics: Equatable {
         case .idle where peekSlots > 0 || agentSlots > 0:
             // 일반 알림은 오른쪽으로, 에이전트 작업은 왼쪽으로. 노치 몸통은 그 자리에 둔다.
             var metrics = resolve(notch: notch, presentation: .idle, rowCount: rowCount)
-            let right = peekEar(slots: peekSlots)
-            let left = peekEar(slots: agentSlots)
+            let right = peekEar(slots: peekSlots, spacing: peekSpacing)
+            let left = peekEar(slots: agentSlots, spacing: peekAgentSpacing)
             metrics.width += left + right
             metrics.ear = right
             metrics.shift = (right - left) / 2
@@ -148,10 +150,10 @@ struct IslandMetrics: Equatable {
     }
 
     /// 노치 밖으로 아이콘 칸만큼 뻗는 폭. 0칸이면 그 방향은 접힌 노치 그대로다.
-    private static func peekEar(slots: Int) -> CGFloat {
+    private static func peekEar(slots: Int, spacing: CGFloat) -> CGFloat {
         guard slots > 0 else { return 0 }
         let count = CGFloat(min(slots, maxPeekSlots))
-        return peekInset * 2 + notchShoulder + count * peekIcon + (count - 1) * peekSpacing
+        return peekInset * 2 + notchShoulder + count * peekIcon + (count - 1) * spacing
     }
 
     /// 실제 노치 아래 모서리에 가까운 반경.

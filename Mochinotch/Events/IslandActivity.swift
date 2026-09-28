@@ -67,6 +67,16 @@ enum AgentTool: String, Equatable {
         }
     }
 
+    /// 화면 가장자리와 왼쪽 오라에 쓰는 색.
+    var screenTintRGB: (CGFloat, CGFloat, CGFloat) {
+        switch self {
+        case .cursor: return (0.34, 0.35, 0.37)
+        case .claude: return (0.95, 0.45, 0.27)
+        case .codex: return (1, 1, 1)
+        case .custom: return (1, 1, 1)
+        }
+    }
+
     /// 이 앱에서 온 시스템 알림은 일반 알림이 아니라 작업 완료로 본다.
     static let noticeBundleIDs: Set<String> = Set(
         [AgentTool.cursor, .claude, .codex].flatMap(\.iconBundleIDs)
@@ -289,12 +299,42 @@ struct IslandActivity: Identifiable, Equatable {
 
     var iconBundleIDs: [String] {
         switch payload {
+        case .hint:
+            return [Bundle.main.bundleIdentifier].compactMap { $0 }
         case .agent(let tool, _, _, _, _):
             return tool.iconBundleIDs
         case .notice(_, _, _, let bundleID):
             return bundleID.map { [$0] } ?? []
         default:
             return []
+        }
+    }
+
+    /// 왼쪽 오라. 그 앱의 화면 틴트와 같은 색이다.
+    var peekAura: Color {
+        let tool: AgentTool? = {
+            if case .agent(let tool, _, _, _, _) = payload { return tool }
+            if case .notice(let appName, _, _, let bundleID) = payload {
+                if let bundleID, let match = Self.agentTool(bundleID: bundleID) { return match }
+                return Self.agentTool(name: appName)
+            }
+            return nil
+        }()
+        guard let tool else { return Color.white.opacity(0.7) }
+        let rgb = tool.screenTintRGB
+        return Color(red: rgb.0, green: rgb.1, blue: rgb.2)
+    }
+
+    private static func agentTool(bundleID: String) -> AgentTool? {
+        [AgentTool.cursor, .claude, .codex].first { $0.iconBundleIDs.contains(bundleID) }
+    }
+
+    private static func agentTool(name: String) -> AgentTool? {
+        switch name.lowercased() {
+        case "cursor": return .cursor
+        case "claude", "claude code": return .claude
+        case "codex": return .codex
+        default: return nil
         }
     }
 
@@ -318,7 +358,7 @@ struct IslandActivity: Identifiable, Equatable {
 
     var showsAppIcon: Bool {
         switch payload {
-        case .agent, .notice:
+        case .hint, .agent, .notice:
             return true
         default:
             return false
