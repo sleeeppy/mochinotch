@@ -173,6 +173,7 @@ final class DuoPulse: NSObject {
             throw CaptureError.noDisplay
         }
         renderer.resize(pixels: CGSize(width: display.width, height: display.height), points: screen.frame.size)
+        renderer.placeNotch(notch)
         renderer.update(envelope: 0, time: 0, tint: tint, study: study, active: true)
 
         if window == nil {
@@ -278,9 +279,17 @@ final class DuoPulse: NSObject {
         source: CIImage,
         envelope: Double,
         tint: (CGFloat, CGFloat, CGFloat),
-        cornerRadius: CGFloat
+        cornerRadius: CGFloat,
+        notch: CGRect
     ) -> CIImage {
-        focusFrame(source, extent: source.extent, envelope: envelope, tint: tint, cornerRadius: cornerRadius)
+        focusFrame(
+            source,
+            extent: source.extent,
+            envelope: envelope,
+            tint: tint,
+            cornerRadius: cornerRadius,
+            notch: notch
+        )
     }
 
     /// 가장자리만 흐리고, 그 흐린 자리에 앱 색을 아주 약하게 섞는다. 가운데는 원본이다.
@@ -290,10 +299,13 @@ final class DuoPulse: NSObject {
         extent: CGRect,
         envelope: Double,
         tint: (CGFloat, CGFloat, CGFloat),
-        cornerRadius: CGFloat
+        cornerRadius: CGFloat,
+        notch: CGRect
     ) -> CIImage {
         guard envelope > 0.001 else { return source }
-        let small = source.transformed(by: CGAffineTransform(scaleX: 0.22, y: 0.22))
+        // 검은 노치를 흐리면 그 어둠이 바닥 아래로 번져, 그 아래를 지나는 글로우만 약해진다.
+        let clean = coveringNotch(source, notch: notch)
+        let small = clean.transformed(by: CGAffineTransform(scaleX: 0.22, y: 0.22))
         let blurredSmall = small.clampedToExtent()
             .applyingGaussianBlur(sigma: 5.5 * envelope)
             .cropped(to: small.extent)
@@ -324,6 +336,20 @@ final class DuoPulse: NSObject {
             kCIInputBackgroundImageKey: source,
             kCIInputMaskImageKey: falloff
         ])
+    }
+
+    /// 하드웨어 노치 픽셀을 바로 아래 메뉴 막대 색으로 덮는다. 블러 입력에서만 쓴다.
+    nonisolated private static func coveringNotch(_ source: CIImage, notch: CGRect) -> CIImage {
+        let extent = source.extent
+        let hole = notch.intersection(extent)
+        guard hole.width > 2, hole.height > 2 else { return source }
+        let sample = CGRect(x: hole.minX, y: hole.minY - 2, width: hole.width, height: 2)
+        guard extent.contains(sample) else { return source }
+        let cover = source
+            .cropped(to: sample)
+            .clampedToExtent()
+            .cropped(to: hole)
+        return cover.composited(over: source)
     }
 
     /// 도달 거리는 그대로 두고, 화면 안쪽 끝만 흐린다.
@@ -601,6 +627,24 @@ private final class LiveRenderer: NSObject, SCStreamOutput {
         state.withLock { $0.cornerRadius = DuoPulse.screenCornerRadius * scale }
     }
 
+    func placeNotch(_ info: NotchInfo) {
+        let relative: CGRect
+        if let notch = info.notchFrame {
+            relative = CGRect(
+                x: notch.minX - info.screenFrame.minX,
+                y: notch.minY - info.screenFrame.minY,
+                width: notch.width,
+                height: notch.height
+            )
+        } else {
+            relative = .zero
+        }
+        state.withLock {
+            $0.notch = relative
+            $0.points = info.screenFrame.size
+        }
+    }
+
     func update(envelope: Double, time: TimeInterval, tint: (CGFloat, CGFloat, CGFloat), study: DuoStudy, active: Bool) {
         state.withLock {
             $0.envelope = envelope
@@ -618,11 +662,13 @@ private final class LiveRenderer: NSObject, SCStreamOutput {
               let drawable = metalLayer.nextDrawable(),
               let buffer = commandQueue.makeCommandBuffer()
         else { return }
+        let source = CIImage(cvPixelBuffer: pixelBuffer)
         let output = DuoPulse.frame(
-            source: CIImage(cvPixelBuffer: pixelBuffer),
+            source: source,
             envelope: visuals.envelope,
             tint: visuals.tint,
-            cornerRadius: visuals.cornerRadius
+            cornerRadius: visuals.cornerRadius,
+            notch: Visuals.notchPixels(visuals.notch, points: visuals.points, extent: source.extent)
         )
         context.render(
             output,
@@ -643,4 +689,19 @@ private struct Visuals: Sendable {
     var tint = (CGFloat(0.5), CGFloat(0.5), CGFloat(0.5))
     var study = DuoStudy.focus
     var cornerRadius: CGFloat = 32
+    /// 화면 원점 기준 포인트. 노치가 없으면 zero.
+    var notch = CGRect.zero
+    var points = CGSize.zero
+
+    nonisolated static func notchPixels(_ notch: CGRect, points: CGSize, extent: CGRect) -> CGRect {
+        guard notch.width > 2, notch.height > 2, points.width > 1, points.height > 1 else { return .zero }
+        let scaleX = extent.width / points.width
+        let scaleY = extent.height / points.height
+        return CGRect(
+            x: extent.minX + notch.minX * scaleX,
+            y: extent.minY + notch.minY * scaleY,
+            width: notch.width * scaleX,
+            height: notch.height * scaleY
+        )
+    }
 }

@@ -217,27 +217,67 @@ struct IslandMetrics: Equatable {
         let recenters = expanding && anchor.needed
         // 치우친 채로 아래로 커지면 늘어난 쪽에서 열리는 느낌이 난다. 가운데로 모인 뒤에 키운다.
         let bloom = recenters ? Self.smooth(progress, from: 0.14) : progress
+        let notchWidth = max(camera, target.camera)
+        let notchHeight = min(height, target.height)
+        let keepWallsOut = abs(shift) > 1 || abs(target.shift) > 1
         var shown = target
-        shown.height = lerp(height, target.height, bloom)
-        shown.radius = lerp(radius, target.radius, bloom)
-        shown.shoulder = lerp(shoulder, target.shoulder, bloom)
         shown.ear = lerp(ear, target.ear, progress)
         shown.camera = lerp(camera, target.camera, progress)
 
-        guard recenters, let anchorLeft = anchor.left, let anchorRight = anchor.right else {
-            shown.width = max(1, lerp(width, target.width, progress))
-            shown.shift = lerp(shift, target.shift, progress)
-            return shown
+        if recenters, let anchorLeft = anchor.left, let anchorRight = anchor.right {
+            // 귀를 다 접은 뒤에 키우면 왼쪽이 줄었다가 뽀용 하고 벌어진다. 자라는 동안 조금만 모은다.
+            let gather = Self.smooth(progress, until: 0.42) * 0.32
+            let bloom = progress
+            shown.height = lerp(height, target.height, bloom)
+            shown.radius = lerp(radius, target.radius, bloom)
+            shown.shoulder = lerp(shoulder, target.shoulder, bloom)
+            let gatheredLeft = lerp(left, anchorLeft, gather)
+            let gatheredRight = lerp(right, anchorRight, gather)
+            let shownLeft = lerp(gatheredLeft, target.shift - target.width / 2, bloom)
+            let shownRight = lerp(gatheredRight, target.shift + target.width / 2, bloom)
+            shown.width = max(1, shownRight - shownLeft)
+            shown.shift = (shownLeft + shownRight) / 2
+        } else {
+            shown.height = lerp(height, target.height, bloom)
+            shown.radius = lerp(radius, target.radius, bloom)
+            shown.shoulder = lerp(shoulder, target.shoulder, bloom)
+            shown.width = max(1, lerp(width, target.width, bloom))
+            shown.shift = lerp(shift, target.shift, bloom)
         }
+        return shown.covering(notchWidth: notchWidth, notchHeight: notchHeight, keepWallsOut: keepWallsOut)
+    }
 
-        let gather = Self.smooth(progress, until: 0.14)
-        let gatheredLeft = lerp(left, anchorLeft, gather)
-        let gatheredRight = lerp(right, anchorRight, gather)
-        let shownLeft = lerp(gatheredLeft, target.shift - target.width / 2, bloom)
-        let shownRight = lerp(gatheredRight, target.shift + target.width / 2, bloom)
-        shown.width = max(1, shownRight - shownLeft)
-        shown.shift = (shownLeft + shownRight) / 2
+    /// 몸통이 하드웨어 노치보다 작아지거나 한쪽으로 빠져 노치 가장자리가 보이지 않게 한다.
+    /// 세로 변은 바깥 폭보다 어깨만큼 안쪽에 있고, 아래 모서리는 거기서 더 들어간다.
+    private func covering(notchWidth: CGFloat, notchHeight: CGFloat, keepWallsOut: Bool) -> IslandMetrics {
+        var shown = self
+        if notchHeight > 1 {
+            shown.height = max(shown.height, notchHeight)
+        }
+        if notchWidth > 1 {
+            let lip = keepWallsOut ? shown.wallClearance(notchHeight: notchHeight) : 0
+            let leftEdge = min(shown.shift - shown.width / 2, -notchWidth / 2 - lip)
+            let rightEdge = max(shown.shift + shown.width / 2, notchWidth / 2 + lip)
+            shown.width = max(1, rightEdge - leftEdge)
+            shown.shift = (leftEdge + rightEdge) / 2
+        }
         return shown
+    }
+
+    /// 노치 높이 안에서 실루엣이 카메라 가장자리보다 안으로 들어가는 거리.
+    private func wallClearance(notchHeight: CGFloat) -> CGFloat {
+        let inset = min(max(shoulder, 0), height / 2)
+        let corner = min(max(radius, 0), max(0, height - inset))
+        let hardwareRadius: CGFloat = 10
+        let straightBottom = max(0, notchHeight - hardwareRadius)
+        let curveStart = height - corner
+        var bite: CGFloat = 0
+        if corner > 0, curveStart < straightBottom {
+            let remaining = height - straightBottom
+            let t = 1 - sqrt(max(0, remaining / corner))
+            bite = t * t * corner
+        }
+        return inset + bite + 1
     }
 
     /// 펼치기 전에 돌아올 노치 가장자리. 오른쪽만 늘어났으면 오른쪽 끝을, 왼쪽만 늘어났으면 왼쪽 끝을 당긴다.

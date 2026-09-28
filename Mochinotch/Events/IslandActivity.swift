@@ -187,6 +187,12 @@ struct IslandActivity: Identifiable, Equatable {
         }
     }
 
+    /// 완료 연출의 왼쪽 아이콘. 접힌 왼쪽 대기 아이콘과는 따로다.
+    var compactIconSize: CGFloat {
+        if case .agent = payload { return 22 }
+        return 18
+    }
+
     var leadingText: String {
         switch payload {
         case .hint(let title, _):

@@ -24,13 +24,10 @@ struct IslandRootView: View {
                     .shadow(color: .black.opacity(0.45 * depth), radius: 18, y: 8)
 
                 NotchGlow(
-                    style: model.glowStyle,
                     shoulder: shown.shoulder,
                     radius: shown.radius,
                     width: shown.width,
                     height: shown.height,
-                    cover: model.notch.hasNotch ? model.notch.anchorHeight : 0,
-                    camera: model.notch.cameraWidth,
                     envelope: model.edgeGlow,
                     travel: model.edgeGlowTravel,
                     color: model.edgeGlowColor
@@ -64,75 +61,27 @@ struct IslandRootView: View {
     }
 }
 
-enum NotchGlowStyle: String, CaseIterable, Identifiable {
-    case snap
-    case bead
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .snap: return "튕김"
-        case .bead: return "방울"
-        }
-    }
-}
-
 /// 화면 효과와 함께 노치 윤곽을 그대로 따라가는 빛.
 private struct NotchGlow: View {
-    var style: NotchGlowStyle
     var shoulder: CGFloat
     var radius: CGFloat
     var width: CGFloat
     var height: CGFloat
-    /// 하드웨어 노치 높이. 그 경계가 보이지 않게 빛은 닿기 전에 사라진다.
-    var cover: CGFloat
-    var camera: CGFloat
     var envelope: Double
     var travel: Double
     var color: Color
 
+    /// 선 위쪽 글로우가 노치 바닥에 가려지지 않는 거리.
+    private let bottomBleed: CGFloat = 2.7
+
     var body: some View {
-        let shape = NotchShape(shoulder: shoulder, radius: radius, closesTop: false)
-        Group {
-            switch style {
-            case .snap:
-                snap(shape)
-            case .bead:
-                bead(shape)
-            }
-        }
-        .scaleEffect(x: 1, y: 1.03, anchor: .top)
-        .opacity(lineOpacity)
-        .frame(width: width, height: height)
-        .mask {
-            ZStack {
-                Rectangle()
-                if cover > 0, camera > 0 {
-                    // 좌우 테두리는 노치에 붙이고, 위쪽만 닿기 전에 사그라진다.
-                    RoundedRectangle(cornerRadius: cover * 0.45, style: .continuous)
-                        .fill(Color.black)
-                        .frame(width: camera + 8, height: cover + 6)
-                        .blur(radius: 10)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        .blendMode(.destinationOut)
-                }
-            }
-            .compositingGroup()
-        }
-        .allowsHitTesting(false)
-    }
-
-    /// 잠깐 당겼다가 튕기며 나간다. 가는 동안 길이가 줄어 오른쪽 끝에서 0이 된다.
-    private func snap(_ shape: NotchShape) -> some View {
+        let shape = NotchShape(shoulder: shoulder, radius: radius, closesTop: false, bottomBleed: bottomBleed)
         let run = roll(length: 0.16, finish: 0.5)
-        return streak(shape, from: run.tail, to: run.head, width: 1.35, blur: 2.6)
-    }
-
-    /// 짧은 방울이 가속했다가 테두리에 붙는다. 가는 동안 길이가 줄어 오른쪽 끝에서 0이 된다.
-    private func bead(_ shape: NotchShape) -> some View {
-        let run = roll(length: 0.07, finish: 0.5)
-        return streak(shape, from: run.tail, to: run.head, width: 1.5, blur: 2.8)
+        streak(shape, from: run.tail, to: run.head, width: 1.35, blur: 2.6)
+            .opacity(lineOpacity)
+            .frame(width: width, height: height, alignment: .top)
+            .padding(.bottom, bottomBleed + 8)
+            .allowsHitTesting(false)
     }
 
     /// 화면이 천천히 밝아지는 동안에도 선은 바로 보인다. 사라질 때만 같이 꺼진다.
@@ -142,19 +91,33 @@ private struct NotchGlow: View {
         return envelope
     }
 
-    /// 왼쪽 위 모서리에서 길이가 0부터 같은 속도로 늘어나고, 오른쪽 끝에서는 0으로 말린다.
+    /// 왼쪽 위에서 길이가 0부터 늘어나고, 오른쪽 끝에 붙는 동안 0으로 말린다.
     private func roll(length: CGFloat, finish: Double) -> (tail: CGFloat, head: CGFloat) {
         let lead = 0.055
         let phase = min(1, max(0, (travel - lead) / finish))
-        let moveEnd = 0.74
-        if phase <= moveEnd {
-            let head = CGFloat(phase / moveEnd)
-            return (max(0, head - length), head)
-        }
-        let tuck = (phase - moveEnd) / (1 - moveEnd)
-        let curled = 1 - pow(1 - tuck, 2)
-        let tail = min(1, (1 - length) + length * curled)
-        return (CGFloat(tail), 1)
+        let head = chew(easedEnd(phase, moveEnd: 0.74))
+        let settle = 0.9
+        let t = min(1, max(0, (head - settle) / (1 - settle)))
+        let close = t * t * (3 - 2 * t)
+        let tail = max(0, head - Double(length) * (1 - close))
+        return (CGFloat(min(tail, head)), CGFloat(head))
+    }
+
+    /// 끝만 아주 조금 늘린다. 그 앞의 속도는 그대로다.
+    private func easedEnd(_ phase: Double, moveEnd: Double) -> Double {
+        let endStart = 0.82
+        let stretch = 1.15
+        let phaseAtEnd = endStart * moveEnd
+        if phase <= phaseAtEnd { return phase / moveEnd }
+        let endDuration = (1 - endStart) * moveEnd * stretch
+        let t = min(1, (phase - phaseAtEnd) / endDuration)
+        return endStart + (1 - endStart) * t
+    }
+
+    /// 양끝에 붙었다가 가운데를 빨리 지난다.
+    private func chew(_ linear: Double) -> Double {
+        let smooth = linear * linear * (3 - 2 * linear)
+        return smooth * smooth * (3 - 2 * smooth)
     }
 
     @ViewBuilder
@@ -185,28 +148,60 @@ private struct MorphingNotch<Content: View>: View {
     @State private var base: IslandMetrics?
     @State private var goal: IslandMetrics?
     @State private var progress: CGFloat = 1
+    /// 스프링이 그리고 있는 실제 진행. 상태값은 곧바로 1이 되므로 끊김은 여기서 읽는다.
+    @State private var clock = MorphClock()
 
     var body: some View {
-        content(shown)
-            .onChange(of: target, initial: true) { _, new in
-                guard let base, let goal else {
-                    base = new
-                    goal = new
-                    progress = 1
-                    return
-                }
-                self.base = base.morphed(to: goal, progress: progress)
-                self.goal = new
-                guard self.base != new else { return }
-                progress = 0
-                withAnimation(animation) { progress = 1 }
+        MorphingFrame(
+            base: base ?? target,
+            goal: goal ?? target,
+            progress: progress,
+            clock: clock,
+            content: content
+        )
+        .onChange(of: target, initial: true) { _, new in
+            guard let base, let goal else {
+                base = new
+                goal = new
+                progress = 1
+                clock.value = 1
+                return
             }
+            self.base = base.morphed(to: goal, progress: clock.value)
+            self.goal = new
+            guard let base = self.base, base != new else { return }
+            progress = 0
+            clock.value = 0
+            let shrinking = new.height + 4 < base.height || new.width + 8 < base.width
+            withAnimation(shrinking ? IslandMotion.settle : animation) { progress = 1 }
+        }
+    }
+}
+
+/// 스프링은 진행 값만 움직인다. 폭·높이·어깨를 따로 튀기면 보정된 세로보다 더 작아진다.
+private struct MorphingFrame<Content: View>: View, Animatable {
+    var base: IslandMetrics
+    var goal: IslandMetrics
+    var progress: CGFloat
+    var clock: MorphClock
+    var content: (IslandMetrics) -> Content
+
+    var animatableData: CGFloat {
+        get { progress }
+        set {
+            progress = newValue
+            clock.value = newValue
+        }
     }
 
-    private var shown: IslandMetrics {
-        guard let base, let goal else { return target }
-        return base.morphed(to: goal, progress: progress)
+    var body: some View {
+        content(base.morphed(to: goal, progress: progress))
+            .transaction { $0.animation = nil }
     }
+}
+
+private final class MorphClock {
+    var value: CGFloat = 1
 }
 
 /// 접힌 노치의 양쪽 끝. 에이전트 작업은 왼쪽 아이콘만, 그 외 알림은 오른쪽 아이콘과 개수 배지.
@@ -244,7 +239,8 @@ private struct PeekContent: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .animation(IslandMotion.morph, value: notices.map(\.id) + agents.map(\.id))
+        .animation(.easeOut(duration: 0.12), value: agents.map(\.id))
+        .animation(IslandMotion.morph, value: notices.map(\.id))
         .contentShape(Rectangle())
         .onTapGesture {
             model.expandNow()
@@ -258,9 +254,9 @@ private struct AgentAura: View {
     var color: Color
 
     var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
+        RoundedRectangle(cornerRadius: size * 0.94 * 0.24, style: .continuous)
             .fill(color.opacity(0.7))
-            .frame(width: size, height: size)
+            .frame(width: size * 0.94, height: size * 0.94)
             .blur(radius: 1.4)
             .phaseAnimator([false, true]) { content, inhaling in
                 content
@@ -308,7 +304,7 @@ private struct IslandFace: View {
     var body: some View {
         let metrics = model.metrics
         let notices = model.noticeGroups
-        let agents = model.agentGroups
+        let agents = model.leftIconsHidden ? [] : model.agentGroups
 
         ZStack(alignment: .top) {
             switch model.presentation {
@@ -363,7 +359,7 @@ private struct CompactIslandContent: View {
         if let activity {
             if alignment == .leading {
                 HStack(spacing: 6) {
-                    ActivityIcon(activity: activity, size: 18)
+                    ActivityIcon(activity: activity, size: activity.compactIconSize)
                     Text(activity.leadingText)
                         .lineLimit(1)
                 }

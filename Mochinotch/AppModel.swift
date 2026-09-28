@@ -11,6 +11,11 @@ final class AppModel {
     private(set) var notch: NotchInfo = .placeholder
     private(set) var activities: [IslandActivity] = []
     private(set) var presentation: IslandPresentation = .idle
+    /// 펼치기 전과 접힌 직후에는 왼쪽 귀를 숨긴다. 다 접힌 뒤에 다시 내민다.
+    private var agentEarSuppressed = false
+    /// 펼치기 직전, 모양은 둔 채 왼쪽 아이콘만 먼저 거둔다.
+    private(set) var leftIconsHidden = false
+    private var agentEarTask: Task<Void, Never>?
     private(set) var serverError: String?
     private(set) var shakeToken = 0
     private(set) var chargePulse = 0
@@ -20,7 +25,6 @@ final class AppModel {
     private(set) var edgeGlow: Double = 0
     private(set) var edgeGlowTravel: Double = 0
     private(set) var edgeGlowColor = Color.white
-    var glowStyle: NotchGlowStyle = .snap
     var launchAtLoginError: String?
 
     private var featuredID: UUID?
@@ -52,7 +56,7 @@ final class AppModel {
             presentation: presentation,
             rowCount: frozenRows ?? activities.count,
             peekSlots: noticeGroups.count,
-            agentSlots: agentGroups.count
+            agentSlots: agentEarSuppressed ? 0 : agentGroups.count
         )
     }
 
@@ -390,11 +394,6 @@ final class AppModel {
         DuoPulse.shared.play(tint: Self.duoTint(for: .cursor, outcome: .completed), study: study)
     }
 
-    func previewGlow(_ style: NotchGlowStyle) {
-        glowStyle = style
-        simulateAgent(tool: .cursor, outcome: .completed)
-    }
-
     func openScreenRecordingSettings() {
         DuoPulse.shared.openSettings()
     }
@@ -549,6 +548,43 @@ final class AppModel {
     }
 
     private func setPresentation(_ next: IslandPresentation) {
+        agentEarTask?.cancel()
+        let hasLeft = !agentGroups.isEmpty
+        if presentation == .idle, hasLeft, next != .idle {
+            leftIconsHidden = true
+            agentEarTask = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(140))
+                guard !Task.isCancelled, let self else { return }
+                self.commitPresentation(next)
+            }
+            return
+        }
+        if next == .idle, presentation == .idle, leftIconsHidden, hasLeft {
+            leftIconsHidden = false
+            agentEarSuppressed = false
+            commitPresentation(.idle)
+            return
+        }
+        if next == .idle, hasLeft, presentation != .idle {
+            agentEarSuppressed = true
+            leftIconsHidden = true
+            commitPresentation(.idle)
+            agentEarTask = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(520))
+                guard !Task.isCancelled, let self, self.presentation == .idle, !self.agentGroups.isEmpty else { return }
+                self.agentEarSuppressed = false
+                self.leftIconsHidden = false
+            }
+            return
+        }
+        if !hasLeft {
+            agentEarSuppressed = false
+            leftIconsHidden = false
+        }
+        commitPresentation(next)
+    }
+
+    private func commitPresentation(_ next: IslandPresentation) {
         if presentation == .expanded, next != .expanded {
             noticesSeenAt = Date()
             clearTask?.cancel()

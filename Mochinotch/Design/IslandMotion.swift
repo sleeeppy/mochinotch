@@ -3,6 +3,8 @@ import SwiftUI
 enum IslandMotion {
     /// 살짝 튀는 스프링. 애플 다이나믹 아일랜드에 가까운 감쇠.
     static let morph: Animation = .spring(response: 0.46, dampingFraction: 0.74, blendDuration: 0.12)
+    /// 접힐 때. 같은 속도지만 다 접힌 뒤에 다시 부풀지 않는다.
+    static let settle: Animation = .spring(response: 0.46, dampingFraction: 1, blendDuration: 0.12)
     /// 들어올 때는 모양이 먼저 벌어진 뒤 흐림에서 또렷해지고, 나갈 때는 모양이 접히기 전에 빨리 빠진다.
     static let contentTransition: AnyTransition = .asymmetric(
         insertion: AnyTransition(.blurReplace).animation(.easeOut(duration: 0.26).delay(0.1)),

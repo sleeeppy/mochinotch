@@ -7,6 +7,8 @@ struct NotchShape: Shape {
     var radius: CGFloat
     /// `false`면 윗변을 긋지 않는다. 테두리를 그릴 때 화면 끝에 선이 생기지 않게.
     var closesTop = true
+    /// 아래 선만 이만큼 내린다. 좌우 변의 가로 위치는 그대로다.
+    var bottomBleed: CGFloat = 0
 
     var animatableData: AnimatablePair<CGFloat, CGFloat> {
         get { AnimatablePair(shoulder, radius) }
@@ -22,6 +24,7 @@ struct NotchShape: Shape {
         let bottom = min(max(radius, 0), bodyWidth / 2, rect.height - top)
         let left = rect.minX + top
         let right = rect.maxX - top
+        let floor = rect.maxY + bottomBleed
 
         var path = Path()
         path.move(to: CGPoint(x: rect.minX, y: rect.minY))
@@ -29,15 +32,15 @@ struct NotchShape: Shape {
             to: CGPoint(x: left, y: rect.minY + top),
             control: CGPoint(x: left, y: rect.minY)
         )
-        path.addLine(to: CGPoint(x: left, y: rect.maxY - bottom))
+        path.addLine(to: CGPoint(x: left, y: floor - bottom))
         path.addQuadCurve(
-            to: CGPoint(x: left + bottom, y: rect.maxY),
-            control: CGPoint(x: left, y: rect.maxY)
+            to: CGPoint(x: left + bottom, y: floor),
+            control: CGPoint(x: left, y: floor)
         )
-        path.addLine(to: CGPoint(x: right - bottom, y: rect.maxY))
+        path.addLine(to: CGPoint(x: right - bottom, y: floor))
         path.addQuadCurve(
-            to: CGPoint(x: right, y: rect.maxY - bottom),
-            control: CGPoint(x: right, y: rect.maxY)
+            to: CGPoint(x: right, y: floor - bottom),
+            control: CGPoint(x: right, y: floor)
         )
         path.addLine(to: CGPoint(x: right, y: rect.minY + top))
         path.addQuadCurve(
