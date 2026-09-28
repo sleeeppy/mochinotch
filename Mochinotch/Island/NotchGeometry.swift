@@ -80,7 +80,7 @@ struct IslandMetrics: Equatable {
     var shift: CGFloat = 0
 
     static let peekIcon: CGFloat = 26
-    static let peekSpacing: CGFloat = 9
+    static let peekSpacing: CGFloat = 8.1
     /// 왼쪽은 배지가 없어서 아이콘 사이를 더 붙인다.
     static let peekAgentSpacing: CGFloat = 5
     /// 노치 끝과 첫 아이콘, 마지막 아이콘과 몸통 끝 사이.
@@ -238,9 +238,11 @@ struct IslandMetrics: Equatable {
             shown.width = max(1, shownRight - shownLeft)
             shown.shift = (shownLeft + shownRight) / 2
         } else {
-            shown.height = lerp(height, target.height, bloom)
-            shown.radius = lerp(radius, target.radius, bloom)
-            shown.shoulder = lerp(shoulder, target.shoulder, bloom)
+            // 세로는 이동 거리가 길다. 같은 비율로 줄이면 양옆이 노치 폭에 먼저 도착하고, 긴 세로가 남아 노치가 비친다.
+            let drop = target.height + 4 < height ? Self.easeDown(progress) : bloom
+            shown.height = lerp(height, target.height, drop)
+            shown.radius = lerp(radius, target.radius, drop)
+            shown.shoulder = lerp(shoulder, target.shoulder, drop)
             shown.width = max(1, lerp(width, target.width, bloom))
             shown.shift = lerp(shift, target.shift, bloom)
         }
@@ -303,6 +305,13 @@ struct IslandMetrics: Equatable {
         guard progress > 0 else { return 0 }
         let u = min(1, progress / end)
         return u * u * (3 - 2 * u)
+    }
+
+    /// 접힐 때 세로만 앞당긴다. 처음이 더 빠르고, 끝에서는 양옆과 같이 도착한다.
+    private static func easeDown(_ progress: CGFloat) -> CGFloat {
+        guard progress > 0 else { return 0 }
+        guard progress < 1 else { return progress }
+        return 1 - (1 - progress) * (1 - progress)
     }
 
     /// `from`까지는 0이다가 1에서 1이 된다. 1을 넘으면 스프링이 튀는 만큼 따라간다.

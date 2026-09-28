@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Observation
 import ServiceManagement
 import SwiftUI
@@ -11,6 +12,10 @@ final class AppModel {
     private(set) var notch: NotchInfo = .placeholder
     private(set) var activities: [IslandActivity] = []
     private(set) var presentation: IslandPresentation = .idle
+    /// 배너만 있고 알림 기록이 없는 앱. 그 대화창이 앞에 있을 때만 거둔다.
+    private var unstoredBundles: Set<String> = []
+    /// Dock에 숫자 뱃지가 있던 앱. 뱃지가 없어지면 그 앱의 오른쪽 알림은 읽힌 것이다.
+    private var dockBadgeCounts: [String: Int] = [:]
     /// 펼치기 전과 접힌 직후에는 왼쪽 귀를 숨긴다. 다 접힌 뒤에 다시 내민다.
     private var agentEarSuppressed = false
     /// 펼치기 직전, 모양은 둔 채 왼쪽 아이콘만 먼저 거둔다.
@@ -137,13 +142,29 @@ final class AppModel {
         notifications.onNotice = { [weak self] notice in
             self?.ingest(notice)
         }
-        notifications.onDismiss = { [weak self] title, body in
-            self?.acknowledgeStoredNotice(title: title, body: body)
+        notifications.onDismiss = { [weak self] bundleID, title, body in
+            self?.acknowledgeStoredNotice(bundleID: bundleID, title: title, body: body)
+        }
+        notifications.onUnstored = { [weak self] bundleID in
+            Task { @MainActor in
+                self?.unstoredBundles.insert(bundleID.lowercased())
+            }
+        }
+        notifications.onStored = { [weak self] bundleID in
+            Task { @MainActor in
+                self?.unstoredBundles.remove(bundleID.lowercased())
+            }
         }
         notifications.onAccessChange = { [weak self] access in
             self?.notificationAccess = access
         }
         notifications.start()
+        Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.syncOpenConversation()
+                self?.syncDockBadges()
+            }
+        }
 
         DuoPulse.shared.onStatus = { [weak self] message in
             self?.duoMessage = message
@@ -170,6 +191,7 @@ final class AppModel {
                   let bundleID = app.bundleIdentifier else { return }
             Task { @MainActor in
                 self?.acknowledgeAgent(bundleID: bundleID)
+                self?.syncOpenConversation()
             }
         }
 
@@ -290,11 +312,184 @@ final class AppModel {
         }
     }
 
-    /// 알림센터에서 지워진 오른쪽 알림. 왼쪽 작업 완료는 포커스로만 접힌다.
-    private func acknowledgeStoredNotice(title: String, body: String) {
+    /// Dock 뱃지가 있다가 사라지면, 그 앱의 오른쪽 알림은 전부 읽힌 것이다.
+    /// 뱃지를 한 번도 안 다는 앱은 건드리지 않는다. 디스코드는 지금 뱃지가 없다.
+    private func syncDockBadges() {
+        guard let current = Self.currentDockBadges() else { return }
+        let bundles = Set(dockBadgeCounts.keys).union(current.keys)
+        for bundle in bundles {
+            let now = current[bundle] ?? 0
+            if now > 0 {
+                dockBadgeCounts[bundle] = now
+                continue
+            }
+            guard let before = dockBadgeCounts[bundle], before > 0 else { continue }
+            dockBadgeCounts[bundle] = nil
+            clearRightNotices(bundleID: bundle)
+        }
+    }
+
+    private func clearRightNotices(bundleID: String) {
         let indexes = activities.indices.filter { index in
-            guard !activities[index].hidesPeek, !activities[index].isAgentNotice,
-                  case .notice(_, let storedTitle, let storedBody, _) = activities[index].payload else {
+            let activity = activities[index]
+            guard !activity.hidesPeek, !activity.staysOnLeft,
+                  case .notice(_, _, _, let stored) = activity.payload else { return false }
+            return stored?.caseInsensitiveCompare(bundleID) == .orderedSame
+        }
+        guard !indexes.isEmpty else { return }
+        withAnimation(IslandMotion.morph) {
+            for index in indexes {
+                activities[index].hidesPeek = true
+            }
+        }
+    }
+
+    /// Dock 항목의 `AXStatusLabel`. 읽기에 실패하면 nil이라, 빈 목록과 구분한다.
+    private static func currentDockBadges() -> [String: Int]? {
+        guard AXIsProcessTrusted(),
+              let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first
+        else { return nil }
+        let element = AXUIElementCreateApplication(dock.processIdentifier)
+        var children: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children) == .success,
+              let list = children as? [AXUIElement] else { return nil }
+        var counts: [String: Int] = [:]
+        var sawList = false
+        for child in list {
+            collectDockBadges(in: child, into: &counts, sawList: &sawList, depth: 0)
+        }
+        return sawList ? counts : nil
+    }
+
+    private static func collectDockBadges(
+        in element: AXUIElement,
+        into counts: inout [String: Int],
+        sawList: inout Bool,
+        depth: Int
+    ) {
+        if depth > 3 { return }
+        var role: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+        let roleName = (role as? String) ?? ""
+        if roleName == "AXList" { sawList = true }
+        if roleName == "AXDockItem" {
+            sawList = true
+            guard let title = axString(element, kAXTitleAttribute as CFString),
+                  let bundleID = bundleID(matchingDockTitle: title),
+                  let count = dockBadgeCount(element), count > 0 else { return }
+            counts[bundleID.lowercased()] = count
+            return
+        }
+        var children: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children) == .success,
+              let list = children as? [AXUIElement] else { return }
+        for child in list {
+            collectDockBadges(in: child, into: &counts, sawList: &sawList, depth: depth + 1)
+        }
+    }
+
+    private static func dockBadgeCount(_ element: AXUIElement) -> Int? {
+        guard let label = axString(element, "AXStatusLabel" as CFString) else { return nil }
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return nil }
+        return Int(trimmed) ?? 1
+    }
+
+    private static func axString(_ element: AXUIElement, _ attribute: CFString) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else { return nil }
+        return value as? String
+    }
+
+    private static func bundleID(matchingDockTitle title: String) -> String? {
+        let wanted = title.precomposedStringWithCanonicalMapping
+        for app in NSWorkspace.shared.runningApplications {
+            guard let name = app.localizedName?.precomposedStringWithCanonicalMapping,
+                  let bundleID = app.bundleIdentifier else { continue }
+            if name.caseInsensitiveCompare(wanted) == .orderedSame { return bundleID }
+        }
+        return nil
+    }
+
+    /// 기록이 없는 알림은, 그 대화창을 실제로 열고 있을 때만 거둔다.
+    /// 한 번 지웠다고 앱을 잊으면, 같은 대화의 다음 알림은 영영 남는다.
+    private func syncOpenConversation() {
+        guard !unstoredBundles.isEmpty,
+              let app = NSWorkspace.shared.frontmostApplication,
+              let bundleID = app.bundleIdentifier,
+              unstoredBundles.contains(bundleID.lowercased()),
+              let windowTitle = Self.frontWindowTitle(pid: app.processIdentifier),
+              let conversation = Self.openConversation(bundleID: bundleID, windowTitle: windowTitle)
+        else { return }
+        let indexes = activities.indices.filter { index in
+            let activity = activities[index]
+            guard !activity.hidesPeek, !activity.staysOnLeft,
+                  case .notice(_, let title, let body, let stored) = activity.payload,
+                  stored?.caseInsensitiveCompare(bundleID) == .orderedSame
+            else { return false }
+            return Self.noticeMentions(title: title, body: body, conversation: conversation)
+        }
+        guard !indexes.isEmpty else { return }
+        withAnimation(IslandMotion.morph) {
+            for index in indexes {
+                activities[index].hidesPeek = true
+            }
+        }
+    }
+
+    /// 디스코드는 `@이름 - Discord`, `#채널 - 서버`. 카톡은 채팅창 제목이 대화 이름이고, 목록 창은 `카카오톡`이다.
+    private static func openConversation(bundleID: String, windowTitle: String) -> String? {
+        if bundleID.caseInsensitiveCompare("com.hnc.Discord") == .orderedSame {
+            guard let separator = windowTitle.range(of: " - ") else { return nil }
+            var head = windowTitle[..<separator.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+            if head.hasPrefix("@") { head.removeFirst() }
+            if head.isEmpty || head.caseInsensitiveCompare("Discord") == .orderedSame { return nil }
+            return head
+        }
+        if bundleID.caseInsensitiveCompare("com.kakao.KakaoTalkMac") == .orderedSame {
+            let title = windowTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if title.isEmpty || title == "카카오톡" || title.caseInsensitiveCompare("KakaoTalk") == .orderedSame {
+                return nil
+            }
+            return title
+        }
+        return nil
+    }
+
+    private static func noticeMentions(title: String, body: String, conversation: String) -> Bool {
+        let needle = normalizeNoticeText(conversation)
+        guard needle.count >= 2 else { return false }
+        let hay = normalizeNoticeText(title + " " + body)
+        if hay.localizedStandardContains(needle) { return true }
+        let sender = normalizeNoticeText(title)
+        return sender.count >= 2 && needle.localizedStandardContains(sender)
+    }
+
+    private static func normalizeNoticeText(_ text: String) -> String {
+        text.replacingOccurrences(of: "\u{2066}", with: "")
+            .replacingOccurrences(of: "\u{2067}", with: "")
+            .replacingOccurrences(of: "\u{2068}", with: "")
+            .replacingOccurrences(of: "\u{2069}", with: "")
+    }
+
+    private static func frontWindowTitle(pid: pid_t) -> String? {
+        let app = AXUIElementCreateApplication(pid)
+        var window: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &window) == .success,
+              let element = window else { return nil }
+        let ax = element as! AXUIElement
+        var title: CFTypeRef?
+        AXUIElementCopyAttributeValue(ax, kAXTitleAttribute as CFString, &title)
+        return title as? String
+    }
+
+    /// 알림센터에서 지워진 오른쪽 알림. 같은 앱의 배너만 있던 것도 함께 거둔다.
+    /// 왼쪽 작업 완료는 포커스로만 접힌다.
+    private func acknowledgeStoredNotice(bundleID: String, title: String, body: String) {
+        let indexes = activities.indices.filter { index in
+            let activity = activities[index]
+            guard !activity.hidesPeek, !activity.staysOnLeft,
+                  case .notice(_, let storedTitle, let storedBody, _) = activity.payload else {
                 return false
             }
             return storedTitle == title && storedBody == body
@@ -388,10 +583,6 @@ final class AppModel {
         case .custom:
             return IconTint.color(for: tool)
         }
-    }
-
-    func previewDuo(_ study: DuoStudy = .focus) {
-        DuoPulse.shared.play(tint: Self.duoTint(for: .cursor, outcome: .completed), study: study)
     }
 
     func openScreenRecordingSettings() {

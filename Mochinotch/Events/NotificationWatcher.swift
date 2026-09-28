@@ -24,8 +24,12 @@ enum NotificationAccess: Equatable {
 final class NotificationWatcher {
     var onNotice: ((SystemNotice) -> Void)?
     var onAccessChange: ((NotificationAccess) -> Void)?
-    /// 알림센터에서 지워져 기록이 사라진 항목. 제목과 본문은 노치에 저장한 글과 같다.
-    var onDismiss: ((String, String) -> Void)?
+    /// 알림센터에서 기록이 사라진 항목. 번들, 제목, 본문.
+    var onDismiss: ((String, String, String) -> Void)?
+    /// 배너 뒤에도 이 앱의 알림 기록이 없다.
+    var onUnstored: ((String) -> Void)?
+    /// 뒤늦게 알림 기록과 연결되었다.
+    var onStored: ((String) -> Void)?
 
     private let queue = DispatchQueue(label: "dev.sleeeppy.mochinotch.notifications")
     private var timer: DispatchSourceTimer?
@@ -79,7 +83,13 @@ final class NotificationWatcher {
             let known = recentKeys[key] != nil || recentKeys[loose] != nil
             // 알림센터를 열면 지난 기록 번호가 다시 보인다. 방금 온 것이거나, 이미 배너로 본 것만 따라간다.
             guard known || Self.isFresh(record.delivered) else { continue }
-            tracked[record.id] = TrackedNotice(title: stored.title, body: stored.body, uuid: record.uuid, confirmedInDelivered: false)
+            tracked[record.id] = TrackedNotice(
+                bundleID: record.notice.bundleID,
+                title: stored.title,
+                body: stored.body,
+                uuid: record.uuid,
+                confirmedInDelivered: false
+            )
             guard !known, accept(record.notice) else { continue }
             Self.log("notice \(record.notice.bundleID) \(stored.title)")
             deliver(record.notice)
@@ -88,7 +98,9 @@ final class NotificationWatcher {
         dismissCleared(db)
     }
 
+
     private struct TrackedNotice {
+        var bundleID: String
         var title: String
         var body: String
         var uuid: Data
@@ -102,8 +114,12 @@ final class NotificationWatcher {
         var stillPending: [(bundleID: String, title: String, body: String, at: Date)] = []
         for item in pending {
             guard let row = newestRecord(db, bundleID: item.bundleID) else {
-                if Date().timeIntervalSince(item.at) > 2, loggedMissingLinks.insert(item.title).inserted {
+                if Date().timeIntervalSince(item.at) > 2, loggedMissingLinks.insert(item.bundleID.lowercased()).inserted {
                     Self.log("no row \(item.bundleID)")
+                    let bundleID = item.bundleID
+                    DispatchQueue.main.async { [onUnstored] in
+                        onUnstored?(bundleID)
+                    }
                 }
                 stillPending.append(item)
                 continue
@@ -113,8 +129,18 @@ final class NotificationWatcher {
                 stillPending.append(item)
                 continue
             }
-            tracked[row.id] = TrackedNotice(title: item.title, body: item.body, uuid: row.uuid, confirmedInDelivered: false)
+            tracked[row.id] = TrackedNotice(
+                bundleID: item.bundleID,
+                title: item.title,
+                body: item.body,
+                uuid: row.uuid,
+                confirmedInDelivered: false
+            )
             Self.log("linked \(row.id) \(item.bundleID)")
+            let bundleID = item.bundleID
+            DispatchQueue.main.async { [onStored] in
+                onStored?(bundleID)
+            }
         }
         pending = stillPending
     }
@@ -138,11 +164,12 @@ final class NotificationWatcher {
             guard let stored = tracked.removeValue(forKey: id) else { continue }
             let replaced = tracked.values.contains { $0.title == stored.title && $0.body == stored.body }
             guard !replaced else { continue }
-            Self.log("dismissed \(stored.title)")
+            Self.log("dismissed \(stored.bundleID)")
+            let bundleID = stored.bundleID
             let title = stored.title
             let body = stored.body
             DispatchQueue.main.async { [onDismiss] in
-                onDismiss?(title, body)
+                onDismiss?(bundleID, title, body)
             }
         }
     }
@@ -151,7 +178,11 @@ final class NotificationWatcher {
 
     /// 앱 테이블이 아니라 기록 안의 번들로 찾는다. 기준 이후에 생긴 행만 배너에 붙인다.
     private func newestRecord(_ db: OpaquePointer, bundleID: String) -> (id: Int64, uuid: Data)? {
-        let sql = "SELECT rec_id, uuid, data, request_date FROM record ORDER BY rec_id DESC LIMIT 40"
+        let sql = """
+            SELECT r.rec_id, r.uuid, r.data, r.request_date, a.identifier
+            FROM record r LEFT JOIN app a ON a.app_id = r.app_id
+            ORDER BY r.rec_id DESC LIMIT 40
+            """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(statement) }
@@ -161,7 +192,11 @@ final class NotificationWatcher {
             let dataLength = Int(sqlite3_column_bytes(statement, 2))
             guard dataLength > 0, let bytes = sqlite3_column_blob(statement, 2) else { continue }
             let data = Data(bytes: bytes, count: dataLength)
-            guard let notice = Self.decode(data, fallbackBundleID: nil), notice.bundleID == bundleID else { continue }
+            let appIdentifier = sqlite3_column_text(statement, 4).map { String(cString: $0) }
+            guard let notice = Self.decode(data, fallbackBundleID: appIdentifier) else { continue }
+            let matchesBanner = notice.bundleID.caseInsensitiveCompare(bundleID) == .orderedSame
+                || appIdentifier?.caseInsensitiveCompare(bundleID) == .orderedSame
+            guard matchesBanner else { continue }
             let requested = sqlite3_column_type(statement, 3) == SQLITE_NULL ? nil : sqlite3_column_double(statement, 3)
             guard id > floor || Self.isFresh(requested) else { continue }
             let uuidLength = Int(sqlite3_column_bytes(statement, 1))
@@ -251,14 +286,16 @@ final class NotificationWatcher {
         let described = (description as? String) ?? ""
         let texts = staticTexts(in: element)
         if let title = texts.first, !title.isEmpty, described.contains(title) {
-            // 알림센터를 연 목록 행은 배너가 아니다. 오른쪽 위에 뜬 배너만 이 역할을 가진다.
+            // 알림센터를 연 목록 행도 배너와 같은 역할이다. 목록에는 제목(AXHeading)이 같이 있다.
             guard elementSubrole(element) == "AXNotificationCenterBanner" else { return [] }
-            let subtitle = texts.count > 2 ? texts[1] : ""
-            let body = texts.count > 2 ? texts[2] : (texts.count > 1 ? texts[1] : "")
+            guard !isInsideOpenPanel(element) else { return [] }
+            let content = texts.filter { !Self.isRelativeStamp($0) }
+            let headline = content.first ?? title
+            let message = content.dropFirst().joined(separator: "\n")
             let name = appName(from: described, title: title)
             let bundleID = bundleID(forAppName: name) ?? ""
             guard !bundleID.isEmpty, bundleID != ownBundleID else { return [] }
-            return [SystemNotice(bundleID: bundleID, title: title, subtitle: subtitle, body: body)]
+            return [SystemNotice(bundleID: bundleID, title: headline, subtitle: "", body: message)]
         }
         var children: CFTypeRef?
         AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
@@ -269,6 +306,33 @@ final class NotificationWatcher {
         var value: CFTypeRef?
         AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &value)
         return (value as? String) ?? ""
+    }
+
+    /// 열린 알림센터 목록의 행은 제목과 같은 묶음에 있다. 오른쪽 위 배너에는 그 제목이 없다.
+    private func isInsideOpenPanel(_ element: AXUIElement) -> Bool {
+        var current: AXUIElement? = element
+        for _ in 0..<6 {
+            guard let node = current else { return false }
+            var parentRef: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(node, kAXParentAttribute as CFString, &parentRef) == .success,
+                  let parentRef else { return false }
+            let parent = parentRef as! AXUIElement
+            if childrenContainRole(parent, role: "AXHeading") { return true }
+            current = parent
+        }
+        return false
+    }
+
+    private func childrenContainRole(_ element: AXUIElement, role wanted: String) -> Bool {
+        var children: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children) == .success,
+              let list = children as? [AXUIElement] else { return false }
+        for child in list {
+            var role: CFTypeRef?
+            AXUIElementCopyAttributeValue(child, kAXRoleAttribute as CFString, &role)
+            if (role as? String) == wanted { return true }
+        }
+        return false
     }
 
     private func appName(from description: String, title: String) -> String {
@@ -329,7 +393,7 @@ final class NotificationWatcher {
         return names
     }
 
-    /// 연결을 유지하거나 파일을 복사하면 확정 전 기록이 안 보인다. 확인마다 원본을 새로 연다.
+    /// 읽기 전용으로 원본을 열면 WAL에만 있는 최신 알림이 안 보인다. 세 파일을 같이 떠서 연다.
     private func openLive() -> OpaquePointer? {
         let source = NotificationProbe.databaseURL
         guard FileManager.default.isReadableFile(atPath: source.path) else {
@@ -338,9 +402,11 @@ final class NotificationWatcher {
             Self.log("open denied listable=\(listable)")
             return nil
         }
+        let path = snapshotDatabase(source)?.path ?? source.path
         var handle: OpaquePointer?
-        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX
-        guard sqlite3_open_v2(source.path, &handle, flags, nil) == SQLITE_OK, let handle else {
+        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX
+        let uri = "file:\(path)?immutable=1"
+        guard sqlite3_open_v2(uri, &handle, flags, nil) == SQLITE_OK, let handle else {
             let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
             sqlite3_close(handle)
             report(message.contains("authorization") ? .denied : .failed(message))
@@ -351,6 +417,29 @@ final class NotificationWatcher {
         report(.watching)
         return handle
     }
+
+    private func snapshotDatabase(_ source: URL) -> URL? {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("mochinotch-noted", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            let dest = root.appendingPathComponent("db")
+            for suffix in ["", "-wal", "-shm"] {
+                let from = URL(fileURLWithPath: source.path + suffix)
+                let to = URL(fileURLWithPath: dest.path + suffix)
+                if FileManager.default.fileExists(atPath: to.path) {
+                    try FileManager.default.removeItem(at: to)
+                }
+                // 잠금 파일까지 복사하면 읽기 연결이 그 잠금에서 멈춘다.
+                guard suffix != "-shm", FileManager.default.fileExists(atPath: from.path) else { continue }
+                try FileManager.default.copyItem(at: from, to: to)
+            }
+            return dest
+        } catch {
+            Self.log("snapshot failed")
+            return nil
+        }
+    }
+
 
     private func report(_ next: NotificationAccess) {
         guard access != next else { return }
@@ -390,6 +479,18 @@ final class NotificationWatcher {
             if candidates.contains(where: { abs($0.timeIntervalSinceNow) < 90 }) { return true }
         }
         return false
+    }
+
+    /// 배너 안에 같이 있는 ‘6분 전’은 본문이 아니다.
+    private static func isRelativeStamp(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if ["방금", "지금", "어제", "그저께"].contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+            return true
+        }
+        if trimmed.range(of: #"^\d+\s*(초|분|시간|일|주|달|개월)\s*전$"#, options: .regularExpression) != nil {
+            return true
+        }
+        return trimmed.range(of: #"^\d+\s*[smhdw]\s*ago$"#, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
     private static func storedText(_ notice: SystemNotice) -> (title: String, body: String) {

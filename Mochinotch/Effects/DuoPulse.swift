@@ -92,22 +92,6 @@ enum IconTint {
     }
 }
 
-enum DuoStudy: Int, CaseIterable, Sendable {
-    case lens
-    case pinch
-    case prism
-    case focus
-
-    var title: String {
-        switch self {
-        case .focus: return "시안 1 · 초점"
-        case .lens: return "시안 2 · 렌즈"
-        case .pinch: return "시안 3 · 모으기"
-        case .prism: return "시안 4 · 프리즘"
-        }
-    }
-}
-
 /// Cursor, Claude, Codex가 끝날 때, 찍힌 화면 자체를 가장자리에서 유리처럼 굴절시킨다.
 /// 선으로 테두리를 그리지 않는다. 앱 색은 휜 가장자리에만 얇게 섞인다.
 @MainActor
@@ -121,7 +105,6 @@ final class DuoPulse: NSObject {
     private var window: NSWindow?
     private var view: NSView?
     private var tint = (CGFloat(0.49), CGFloat(0.36), CGFloat(0.99))
-    private var study: DuoStudy = .focus
     private var displayLink: CADisplayLink?
     private var stream: SCStream?
     private var startedAt: TimeInterval = 0
@@ -129,8 +112,7 @@ final class DuoPulse: NSObject {
     private let duration: TimeInterval = 6.2
     private let renderer = LiveRenderer()
 
-    func play(tint color: NSColor, study: DuoStudy = .focus) {
-        self.study = study
+    func play(tint color: NSColor) {
         let rgb = color.usingColorSpace(.sRGB) ?? color
         tint = (rgb.redComponent, rgb.greenComponent, rgb.blueComponent)
         guard CGPreflightScreenCaptureAccess() else {
@@ -174,7 +156,7 @@ final class DuoPulse: NSObject {
         }
         renderer.resize(pixels: CGSize(width: display.width, height: display.height), points: screen.frame.size)
         renderer.placeNotch(notch)
-        renderer.update(envelope: 0, time: 0, tint: tint, study: study, active: true)
+        renderer.update(envelope: 0, time: 0, tint: tint, active: true)
 
         if window == nil {
             let panel = NSWindow(
@@ -239,13 +221,13 @@ final class DuoPulse: NSObject {
         }
         let envelope = Self.level(t)
         window?.alphaValue = envelope
-        renderer.update(envelope: envelope, time: t * duration, tint: tint, study: study, active: true)
+        renderer.update(envelope: envelope, time: t * duration, tint: tint, active: true)
         let color = NSColor(srgbRed: tint.0, green: tint.1, blue: tint.2, alpha: 1)
         onGlow?(envelope, t, color)
     }
 
     private func finish() {
-        renderer.update(envelope: 0, time: 0, tint: tint, study: study, active: false)
+        renderer.update(envelope: 0, time: 0, tint: tint, active: false)
         onGlow?(0, 1, NSColor(srgbRed: tint.0, green: tint.1, blue: tint.2, alpha: 1))
         stopTimer()
         window?.orderOut(nil)
@@ -428,157 +410,6 @@ final class DuoPulse: NSObject {
         return t * t * t * (t * (t * 6 - 15) + 10)
     }
 
-    nonisolated private static func refract(
-        _ source: CIImage,
-        extent: CGRect,
-        time: TimeInterval,
-        envelope: Double,
-        tint: (CGFloat, CGFloat, CGFloat),
-        kind: DuoStudy
-    ) -> CIImage {
-        let field = fieldImages(extent: extent, time: time, envelope: envelope, study: kind)
-        let warped = displace(source, map: field.displacement, scale: field.scale)
-        let colored = warped.applyingFilter("CIColorMonochrome", parameters: [
-            "inputColor": CIColor(red: tint.0, green: tint.1, blue: tint.2),
-            "inputIntensity": 0.7
-        ])
-        return colored.applyingFilter("CIBlendWithMask", parameters: [
-            kCIInputBackgroundImageKey: warped,
-            kCIInputMaskImageKey: field.mask
-        ])
-    }
-
-    nonisolated private static func mixChannels(green: CIImage, red: CIImage, blue: CIImage) -> CIImage {
-        func isolate(_ image: CIImage, r: CGFloat, g: CGFloat, b: CGFloat) -> CIImage {
-            image.applyingFilter("CIColorMatrix", parameters: [
-                "inputRVector": CIVector(x: r, y: 0, z: 0, w: 0),
-                "inputGVector": CIVector(x: 0, y: g, z: 0, w: 0),
-                "inputBVector": CIVector(x: 0, y: 0, z: b, w: 0),
-                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1)
-            ])
-        }
-        let merged = isolate(red, r: 1, g: 0, b: 0)
-            .applyingFilter("CIAdditionCompositing", parameters: [
-                kCIInputBackgroundImageKey: isolate(green, r: 0, g: 1, b: 0)
-            ])
-        return isolate(blue, r: 0, g: 0, b: 1)
-            .applyingFilter("CIAdditionCompositing", parameters: [
-                kCIInputBackgroundImageKey: merged
-            ])
-    }
-
-    nonisolated private static func displace(_ image: CIImage, map: CIImage, scale: Double) -> CIImage {
-        guard scale > 0.4 else { return image }
-        return image.applyingFilter("CIDisplacementDistortion", parameters: [
-            "inputDisplacementImage": map,
-            kCIInputScaleKey: scale
-        ])
-    }
-
-    /// 빨강·초록은 픽셀을 미는 방향(0.5가 제자리). 마스크는 가장자리와 고리에서만 앱 색을 섞는다.
-    nonisolated private static func fieldImages(
-        extent: CGRect,
-        time: TimeInterval,
-        envelope: Double,
-        study: DuoStudy
-    ) -> (displacement: CIImage, mask: CIImage, fringe: CIImage, scale: Double, chroma: Double) {
-        let width = 420
-        let height = max(80, Int((extent.height / extent.width) * CGFloat(width)))
-        var displacement = [UInt8](repeating: 128, count: width * height * 4)
-        var mask = [UInt8](repeating: 0, count: width * height * 4)
-        var fringe = [UInt8](repeating: 0, count: width * height * 4)
-        let aspect = extent.width / extent.height
-        let motion = Self.motion(for: study)
-        for y in 0..<height {
-            for x in 0..<width {
-                let u = (Double(x) + 0.5) / Double(width)
-                let v = (Double(y) + 0.5) / Double(height)
-                let sample = motion.sample(u, v, aspect, time, envelope)
-                let index = (y * width + x) * 4
-                displacement[index] = byte(0.5 + sample.dx)
-                displacement[index + 1] = byte(0.5 + sample.dy)
-                displacement[index + 2] = 128
-                displacement[index + 3] = 255
-                let wash = UInt8(min(1, sample.tint) * 255)
-                mask[index] = wash
-                mask[index + 1] = wash
-                mask[index + 2] = wash
-                mask[index + 3] = 255
-                let split = UInt8(min(1, sample.fringe) * 255)
-                fringe[index] = split
-                fringe[index + 1] = split
-                fringe[index + 2] = split
-                fringe[index + 3] = 255
-            }
-        }
-        let row = width * 4
-        let map = CIImage(
-            bitmapData: Data(displacement),
-            bytesPerRow: row,
-            size: CGSize(width: width, height: height),
-            format: .RGBA8,
-            colorSpace: CGColorSpaceCreateDeviceRGB()
-        )
-        let wash = CIImage(
-            bitmapData: Data(mask),
-            bytesPerRow: row,
-            size: CGSize(width: width, height: height),
-            format: .RGBA8,
-            colorSpace: CGColorSpaceCreateDeviceRGB()
-        )
-        let split = CIImage(
-            bitmapData: Data(fringe),
-            bytesPerRow: row,
-            size: CGSize(width: width, height: height),
-            format: .RGBA8,
-            colorSpace: CGColorSpaceCreateDeviceRGB()
-        )
-        let fitted = CGAffineTransform(scaleX: extent.width / CGFloat(width), y: extent.height / CGFloat(height))
-        return (map.transformed(by: fitted), wash.transformed(by: fitted), split.transformed(by: fitted), motion.scale, motion.chroma)
-    }
-
-    private struct FieldMotion {
-        var scale: Double
-        var chroma: Double
-        var sample: (Double, Double, Double, TimeInterval, Double) -> (dx: Double, dy: Double, tint: Double, fringe: Double)
-    }
-
-    nonisolated private static func motion(for study: DuoStudy) -> FieldMotion {
-        switch study {
-        case .lens, .pinch, .focus:
-            return FieldMotion(scale: 1, chroma: 1) { _, _, _, _, _ in (0, 0, 0, 0) }
-        case .prism:
-            return FieldMotion(scale: 1, chroma: 1) { u, v, _, _, envelope in
-                let corner = smoothstep(0.55, 0.0, hypot(min(u, 1 - u), min(v, 1 - v)))
-                return (0, 0, 0, corner * envelope)
-            }
-        }
-    }
-
-    nonisolated private static func inward(_ u: Double, _ v: Double) -> (Double, Double) {
-        let k = 22.0
-        var gx = exp(-u * k) - exp(-(1 - u) * k)
-        var gy = exp(-v * k) - exp(-(1 - v) * k)
-        let length = max(hypot(gx, gy), 0.0001)
-        gx /= length
-        gy /= length
-        return (gx, gy)
-    }
-
-    nonisolated private static func smoothstep(_ edge0: Double, _ edge1: Double, _ value: Double) -> Double {
-        let t = min(1, max(0, (value - edge0) / (edge1 - edge0)))
-        return t * t * (3 - 2 * t)
-    }
-
-    /// 시작과 끝의 가속도까지 0이라 더 둥글게 붙고 떨어진다.
-    nonisolated private static func smootherstep(_ edge0: Double, _ edge1: Double, _ value: Double) -> Double {
-        let t = min(1, max(0, (value - edge0) / (edge1 - edge0)))
-        return t * t * t * (t * (t * 6 - 15) + 10)
-    }
-
-    nonisolated private static func byte(_ value: Double) -> UInt8 {
-        UInt8(min(255, max(0, Int((value * 255).rounded()))))
-    }
 
     private enum CaptureError: Error {
         case noDisplay
@@ -645,12 +476,11 @@ private final class LiveRenderer: NSObject, SCStreamOutput {
         }
     }
 
-    func update(envelope: Double, time: TimeInterval, tint: (CGFloat, CGFloat, CGFloat), study: DuoStudy, active: Bool) {
+    func update(envelope: Double, time: TimeInterval, tint: (CGFloat, CGFloat, CGFloat), active: Bool) {
         state.withLock {
             $0.envelope = envelope
             $0.time = time
             $0.tint = tint
-            $0.study = study
             $0.active = active
         }
     }
@@ -687,7 +517,6 @@ private struct Visuals: Sendable {
     var envelope = 0.0
     var time = 0.0
     var tint = (CGFloat(0.5), CGFloat(0.5), CGFloat(0.5))
-    var study = DuoStudy.focus
     var cornerRadius: CGFloat = 32
     /// 화면 원점 기준 포인트. 노치가 없으면 zero.
     var notch = CGRect.zero

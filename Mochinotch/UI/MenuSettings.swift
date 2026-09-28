@@ -35,12 +35,9 @@ struct MenuContent: View {
         Button("충전 연결 테스트") { model.simulateCharge() }
         Button("충전 해제 테스트") { model.simulateUnplug() }
         Button("Claude Code 완료 테스트") { model.simulateAgent(tool: .claude, outcome: .completed) }
-        Button("Claude Code 확인 요청 테스트") { model.simulateAgent(tool: .claude, outcome: .needsInput) }
         Button("Cursor 완료 테스트") { model.simulateAgent(tool: .cursor, outcome: .completed) }
         Button("Codex 완료 테스트") { model.simulateAgent(tool: .codex, outcome: .completed) }
-        Button("Codex 실패 테스트") { model.simulateAgent(tool: .codex, outcome: .failed) }
         Button("알림 미리보기") { model.simulateNotice() }
-        Button("초점 효과 미리보기") { model.previewDuo() }
         if let duoMessage = model.duoMessage {
             Text(duoMessage)
                 .font(.caption)
