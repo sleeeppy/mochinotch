@@ -2,42 +2,17 @@
   <img src="docs/images/icon.png" width="128" alt="Mochinotch 아이콘">
 </p>
 
-<h1 align="center">もちノッチ · Mochinotch</h1>
+<h3 align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/title-dark.png"><img src="docs/images/headings/title-light.png" alt="もちノッチ(Mochinotch)" width="287" height="46"></picture></h3>
 
 <p align="center">
   맥북 노치를 말랑한 다이나믹 아일랜드로.<br>
   충전, 알림, AI 에이전트 작업 완료를 노치에서 바로 봅니다.
 </p>
 
-<p align="center">
-  <img src="docs/images/expand.gif" width="560" alt="노치에 마우스를 올리면 목록이 펼쳐지는 모습">
-</p>
 
 ---
 
-## 목차
-
-- [이런 걸 해요](#이런-걸-해요)
-- [설치](#설치)
-- [권한 설정](#권한-설정)
-- [사용법](#사용법)
-- [설정](#설정)
-- [AI 에이전트 연결](#ai-에이전트-연결-claude-code--cursor--codex)
-- [자주 묻는 질문](#자주-묻는-질문)
-- [직접 빌드하기](#직접-빌드하기)
-
----
-
-## 이런 걸 해요
-
-### 켤 때 인사
-
-앱을 켜면 노치가 말랑하게 늘어나며 인사합니다. 두 가지 중에 고를 수 있어요.
-
-| 모찌 | 늘리기 |
-|:---:|:---:|
-| <img src="docs/images/intro-mochi.gif" width="420" alt="모찌 인트로"> | <img src="docs/images/intro-taffy.gif" width="420" alt="늘리기 인트로"> |
-| 왼쪽, 오른쪽을 톡톡 내밀었다가 한 번 눌린 뒤 벌어져요 | 떡처럼 양옆으로 쭉 늘어났다가 튕겨 들어와요 |
+<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/features-dark.png"><img src="docs/images/headings/features-light.png" alt="이런 걸 해요" width="116" height="30"></picture></h3>
 
 ### 알림이 노치 옆에 쌓여요
 
@@ -47,11 +22,6 @@
   <img src="docs/images/notice.gif" width="500" alt="알림이 오면 노치 오른쪽에 아이콘과 배지가 붙는 모습">
 </p>
 
-AI 에이전트가 끝낸 작업은 왼쪽에 아이콘으로 남아 있다가, 그 앱을 열면 사라집니다.
-
-<p align="center">
-  <img src="docs/images/peek.png" width="500" alt="왼쪽에 Claude, 오른쪽에 Slack과 메시지 알림이 붙은 노치">
-</p>
 
 ### 충전기를 꽂으면
 
@@ -61,13 +31,10 @@ AI 에이전트가 끝낸 작업은 왼쪽에 아이콘으로 남아 있다가, 
   <img src="docs/images/charge.gif" width="500" alt="충전기를 꽂았을 때 노치에 충전 82%가 뜨는 모습">
 </p>
 
+
 ### AI 작업이 끝나면
 
 Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지며 알려 줍니다. 테두리를 따라 빛이 한 바퀴 돌고, 화면 가장자리까지 그 앱 색으로 은은하게 빛나요.
-
-<p align="center">
-  <img src="docs/images/complete.png" width="500" alt="Claude 작업 완료가 노치에 뜬 모습">
-</p>
 
 <p align="center">
   <img src="docs/images/complete.gif" width="720" alt="작업이 끝나면 화면 가장자리가 빛나는 모습">
@@ -75,21 +42,109 @@ Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지�
 
 작업이 실패하면 노치가 짧게 흔들리고 붉은 테두리가 생깁니다.
 
-<p align="center">
-  <img src="docs/images/failed.png" width="500" alt="Codex 작업 실패가 붉은 테두리와 함께 뜬 모습">
-</p>
 
 ### 마우스를 올리면 목록이 펼쳐져요
 
 지금까지 온 알림, 작업 완료, 충전 기록이 최신순으로 쌓여 있습니다. 항목을 누르면 그 앱으로 바로 이동해요.
 
 <p align="center">
-  <img src="docs/images/expanded.png" width="500" alt="펼친 노치의 기록 목록">
+  <img src="docs/images/expand.gif" width="560" alt="노치에 마우스를 올리면 목록이 펼쳐지는 모습">
 </p>
+
+
+### 인트로
+
+앱을 켜면 노치가 말랑하게 늘어나며 인사합니다. 두 가지 중에 고를 수 있어요.
+
+| 모찌 | 늘리기 |
+|:---:|:---:|
+| <img src="docs/images/intro-mochi.gif" width="420" alt="모찌 인트로"> | <img src="docs/images/intro-taffy.gif" width="420" alt="늘리기 인트로"> |
+| 왼쪽, 오른쪽을 톡톡 내밀었다가 한 번 눌린 뒤 벌어져요 | 떡처럼 양옆으로 쭉 늘어났다가 튕겨 들어와요 |
 
 ---
 
-## 설치
+<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/settings-dark.png"><img src="docs/images/headings/settings-light.png" alt="설정" width="43" height="30"></picture></h3>
+
+톱니바퀴를 누르면 창이 따로 뜨지 않고 노치가 조금 더 커지며 설정이 나옵니다.
+
+<p align="center">
+  <img src="docs/images/settings.png" width="500" alt="노치 안에 열린 설정 화면">
+</p>
+
+- **로그인할 때 열기**: 맥을 켜면 자동으로 시작합니다.
+- **인트로**: 켤 때 인사를 `모찌`, `늘리기` 중에서 고릅니다. 고른 뒤 노치에서 마우스를 치우면 바로 한 번 보여 줘요.
+- **화면 가장자리 연출**: 끄면 AI 작업이 끝날 때 노치 테두리만 빛나고 화면은 그대로 둡니다.
+
+---
+
+<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/faq-dark.png"><img src="docs/images/headings/faq-light.png" alt="자주 묻는 질문" width="136" height="30"></picture></h3>
+
+<details>
+<summary><b>다른 앱 알림이 노치에 안 떠요</b></summary>
+<br>
+
+**전체 디스크 접근 권한**에 Mochinotch가 켜져 있는지 확인하고, 앱을 종료했다가 다시 여세요. 앱이 켜진 뒤에 온 알림만 보입니다. 그 앱의 알림 자체가 **시스템 설정 → 알림**에서 꺼져 있으면 노치에도 오지 않아요.
+
+</details>
+
+<details>
+<summary><b>AI 작업이 끝나도 아무 반응이 없어요</b></summary>
+<br>
+
+- Mochinotch가 켜져 있는지 확인하세요. 꺼져 있으면 신호는 조용히 버려집니다.
+- hook을 넣은 뒤 그 도구를 다시 시작했는지 확인하세요.
+- 위 [직접 보내 보기](#직접-보내-보기)의 `curl`로 노치가 반응하는지 보면 앱과 hook 중 어디가 문제인지 알 수 있어요.
+- hook 실행 기록은 `~/Library/Logs/Mochinotch/hooks.log`에 남습니다.
+
+</details>
+
+<details>
+<summary><b>화면 가장자리 연출이 안 나와요</b></summary>
+<br>
+
+**화면 기록** 권한이 필요합니다. 권한이 없으면 설정 화면에 안내와 **열기** 버튼이 뜹니다. 연출이 부담스럽다면 설정에서 **화면 가장자리 연출**을 끄세요.
+
+</details>
+
+<details>
+<summary><b>노치가 없는 맥이나 외부 모니터에서도 되나요?</b></summary>
+<br>
+
+네. 노치 자리 대신 화면 위 가운데에 검은 알약 모양으로 뜹니다. 노치가 있는 화면이 연결되어 있으면 그 화면을 먼저 씁니다.
+
+</details>
+
+<details>
+<summary><b>macOS를 업데이트했더니 알림이 안 와요</b></summary>
+<br>
+
+알림은 macOS 알림 센터의 비공개 데이터베이스를 읽어서 가져옵니다. 애플이 형식을 바꾸면 업데이트 후에 동작하지 않을 수 있어요. 새 버전이 나오면 [Releases](https://github.com/sleeeppy/mochinotch/releases)를 확인해 주세요.
+
+</details>
+
+<details>
+<summary><b>개인정보는 어디로 가나요?</b></summary>
+<br>
+
+밖으로 나가지 않습니다. 인터넷에 연결하지 않고, 이벤트는 내 맥 안의 `127.0.0.1`로만 받습니다.
+
+노치 목록은 메모리에만 있어서 앱을 끄면 사라집니다. 문제를 찾기 위한 기록이 `~/Library/Logs/Mochinotch/`에 남는데, 알림은 앱과 제목까지만 적고 본문은 적지 않습니다. 이 폴더는 언제 지워도 괜찮아요.
+
+</details>
+
+<details>
+<summary><b>완전히 지우고 싶어요</b></summary>
+<br>
+
+1. 설정에서 **종료**를 누르고 `/Applications/Mochinotch.app`을 휴지통에 버립니다.
+2. hook을 넣었다면 위 표의 설정 파일에서 `mochinotch-notify`가 들어간 줄을 지우거나, `.mochinotch.bak`으로 되돌립니다.
+3. `~/.local/bin/mochinotch-notify`와 `~/Library/Logs/Mochinotch/` 폴더를 지웁니다.
+
+</details>
+
+---
+
+<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/install-dark.png"><img src="docs/images/headings/install-light.png" alt="설치" width="43" height="30"></picture></h3>
 
 **필요한 것:** macOS 14 Sonoma 이상. 노치가 있는 맥북에서 가장 잘 어울리고, 노치가 없는 맥이나 외부 모니터에서는 화면 위 가운데에 작은 알약 모양으로 뜹니다.
 
@@ -111,7 +166,7 @@ Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지�
 
 ---
 
-## 권한 설정
+<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/permissions-dark.png"><img src="docs/images/headings/permissions-light.png" alt="권한 설정" width="90" height="30"></picture></h3>
 
 기능에 따라 macOS 권한이 필요합니다. 모두 **시스템 설정 → 개인정보 보호 및 보안**에서 켭니다. 권한을 켠 뒤에는 앱을 한 번 종료했다가 다시 여세요.
 
@@ -126,7 +181,7 @@ Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지�
 
 ---
 
-## 사용법
+<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/usage-dark.png"><img src="docs/images/headings/usage-light.png" alt="사용법" width="64" height="30"></picture></h3>
 
 | 하고 싶은 것 | 방법 |
 |---|---|
@@ -142,21 +197,7 @@ Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지�
 
 ---
 
-## 설정
-
-톱니바퀴를 누르면 창이 따로 뜨지 않고 노치가 조금 더 커지며 설정이 나옵니다.
-
-<p align="center">
-  <img src="docs/images/settings.png" width="500" alt="노치 안에 열린 설정 화면">
-</p>
-
-- **로그인할 때 열기**: 맥을 켜면 자동으로 시작합니다.
-- **인트로**: 켤 때 인사를 `모찌`, `늘리기` 중에서 고릅니다. 고른 뒤 노치에서 마우스를 치우면 바로 한 번 보여 줘요.
-- **화면 가장자리 연출**: 끄면 AI 작업이 끝날 때 노치 테두리만 빛나고 화면은 그대로 둡니다.
-
----
-
-## AI 에이전트 연결 (Claude Code · Cursor · Codex)
+<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/agents-dark.png"><img src="docs/images/headings/agents-light.png" alt="AI 에이전트 연결 (Claude Code · Cursor · Codex)" width="499" height="30"></picture></h3>
 
 AI 도구가 작업을 끝냈다는 신호를 노치로 보내려면 각 도구에 hook을 한 번 넣어야 합니다. AI API를 호출하거나 대화 내용을 보내지 않습니다. 내 맥 안(`127.0.0.1:47321`)으로 "끝났다"는 신호만 갑니다.
 
@@ -205,67 +246,7 @@ mochinotch://event?tool=cursor&kind=completed&detail=빌드%20끝
 
 ---
 
-## 자주 묻는 질문
-
-<details>
-<summary><b>다른 앱 알림이 노치에 안 떠요</b></summary>
-
-**전체 디스크 접근 권한**에 Mochinotch가 켜져 있는지 확인하고, 앱을 종료했다가 다시 여세요. 앱이 켜진 뒤에 온 알림만 보입니다. 그 앱의 알림 자체가 **시스템 설정 → 알림**에서 꺼져 있으면 노치에도 오지 않아요.
-
-</details>
-
-<details>
-<summary><b>AI 작업이 끝나도 아무 반응이 없어요</b></summary>
-
-- Mochinotch가 켜져 있는지 확인하세요. 꺼져 있으면 신호는 조용히 버려집니다.
-- hook을 넣은 뒤 그 도구를 다시 시작했는지 확인하세요.
-- 위 [직접 보내 보기](#직접-보내-보기)의 `curl`로 노치가 반응하는지 보면 앱과 hook 중 어디가 문제인지 알 수 있어요.
-- hook 실행 기록은 `~/Library/Logs/Mochinotch/hooks.log`에 남습니다.
-
-</details>
-
-<details>
-<summary><b>화면 가장자리 연출이 안 나와요</b></summary>
-
-**화면 기록** 권한이 필요합니다. 권한이 없으면 설정 화면에 안내와 **열기** 버튼이 뜹니다. 연출이 부담스럽다면 설정에서 **화면 가장자리 연출**을 끄세요.
-
-</details>
-
-<details>
-<summary><b>노치가 없는 맥이나 외부 모니터에서도 되나요?</b></summary>
-
-네. 노치 자리 대신 화면 위 가운데에 검은 알약 모양으로 뜹니다. 노치가 있는 화면이 연결되어 있으면 그 화면을 먼저 씁니다.
-
-</details>
-
-<details>
-<summary><b>macOS를 업데이트했더니 알림이 안 와요</b></summary>
-
-알림은 macOS 알림 센터의 비공개 데이터베이스를 읽어서 가져옵니다. 애플이 형식을 바꾸면 업데이트 후에 동작하지 않을 수 있어요. 새 버전이 나오면 [Releases](https://github.com/sleeeppy/mochinotch/releases)를 확인해 주세요.
-
-</details>
-
-<details>
-<summary><b>개인정보는 어디로 가나요?</b></summary>
-
-밖으로 나가지 않습니다. 인터넷에 연결하지 않고, 이벤트는 내 맥 안의 `127.0.0.1`로만 받습니다.
-
-노치 목록은 메모리에만 있어서 앱을 끄면 사라집니다. 문제를 찾기 위한 기록이 `~/Library/Logs/Mochinotch/`에 남는데, 알림은 앱과 제목까지만 적고 본문은 적지 않습니다. 이 폴더는 언제 지워도 괜찮아요.
-
-</details>
-
-<details>
-<summary><b>완전히 지우고 싶어요</b></summary>
-
-1. 설정에서 **종료**를 누르고 `/Applications/Mochinotch.app`을 휴지통에 버립니다.
-2. hook을 넣었다면 위 표의 설정 파일에서 `mochinotch-notify`가 들어간 줄을 지우거나, `.mochinotch.bak`으로 되돌립니다.
-3. `~/.local/bin/mochinotch-notify`와 `~/Library/Logs/Mochinotch/` 폴더를 지웁니다.
-
-</details>
-
----
-
-## 직접 빌드하기
+<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/build-dark.png"><img src="docs/images/headings/build-light.png" alt="직접 빌드하기" width="131" height="30"></picture></h3>
 
 Xcode 15 이상이 필요합니다.
 
