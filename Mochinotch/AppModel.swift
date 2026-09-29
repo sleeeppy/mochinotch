@@ -76,6 +76,8 @@ final class AppModel {
     private var dismissTask: Task<Void, Never>?
     private var introTask: Task<Void, Never>?
     private let introClock = IntroClock()
+    /// 화면 연출을 끈 때도 노치 테두리 빛은 이 시계로 돈다.
+    private let glowClock = IntroClock()
     /// 켤 때 인사. 노치보다 통통한 모양을 직접 잡는다.
     private var introShape: IslandMetrics?
     /// 인사 도중에는 노치 스프링을 쓰지 않고, 안무가 그린 모양을 그대로 보여 준다.
@@ -732,6 +734,41 @@ final class AppModel {
     private func cancelIntro() {
         introTask?.cancel()
         finishIntro(fold: false)
+        stopIslandGlow()
+    }
+
+    /// 화면 가장자리 효과 없이, 노치 윤곽만 한 바퀴 돈다. 화면 연출이 켜져 있을 때와 같은 속도로.
+    private func startIslandGlow(color: Color) {
+        stopIslandGlow()
+        edgeGlowColor = color
+        var began: CFTimeInterval?
+        glowClock.start { [weak self] now in
+            guard let self else { return }
+            let start = began ?? now
+            began = start
+            let seconds = now - start
+            if seconds >= 5.25 {
+                self.stopIslandGlow()
+                return
+            }
+            self.edgeGlowTravel = min(1, seconds / 6.2)
+            self.edgeGlow = Self.glowEnvelope(seconds)
+        }
+    }
+
+    private func stopIslandGlow() {
+        glowClock.stop()
+        edgeGlow = 0
+        edgeGlowTravel = 0
+    }
+
+    private static func glowEnvelope(_ seconds: Double) -> Double {
+        func smootherstep(_ edge0: Double, _ edge1: Double, _ value: Double) -> Double {
+            guard edge1 > edge0 else { return value < edge0 ? 0 : 1 }
+            let t = min(1, max(0, (value - edge0) / (edge1 - edge0)))
+            return t * t * t * (t * (t * 6 - 15) + 10)
+        }
+        return smootherstep(0, 1.74, seconds) * (1 - smootherstep(2.25, 5.25, seconds))
     }
 
     /// `left`·`right`는 노치 밖으로 한쪽만 더 내미는 길이.
@@ -813,8 +850,19 @@ final class AppModel {
             return
         }
         featuredID = activity.id
-        if playsScreenEffect, case .agent(let tool, let outcome, _, _, _) = activity.payload, tool.playsDuo, outcome != .cancelled {
-            DuoPulse.shared.play(tint: Self.duoTint(for: tool, outcome: outcome), rim: outcome == .failed ? 1 : tool.edgeRim)
+        if case .agent(let tool, let outcome, _, _, _) = activity.payload, tool.playsDuo, outcome != .cancelled {
+            let tint = Self.duoTint(for: tool, outcome: outcome)
+            if playsScreenEffect {
+                DuoPulse.shared.play(tint: tint, rim: outcome == .failed ? 1 : tool.edgeRim)
+            } else {
+                let rgb = tint.usingColorSpace(.sRGB) ?? tint
+                let lift = 0.42
+                startIslandGlow(color: Color(
+                    red: rgb.redComponent + (1 - rgb.redComponent) * lift,
+                    green: rgb.greenComponent + (1 - rgb.greenComponent) * lift,
+                    blue: rgb.blueComponent + (1 - rgb.blueComponent) * lift
+                ))
+            }
         }
         if activity.isFailure {
             shakeToken += 1

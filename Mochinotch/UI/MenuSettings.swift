@@ -76,7 +76,7 @@ struct SettingsView: View {
             } header: {
                 Text("완료 연출")
             } footer: {
-                Text("켜면 작업이 끝날 때 화면 가장자리에 빛이 흐르고, 끄면 노치 연출만 나와요.")
+                Text("켜면 작업이 끝날 때 화면 가장자리에 빛이 흐릅니다. 꺼도 노치 테두리를 도는 빛은 그대로예요.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
