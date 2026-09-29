@@ -938,6 +938,11 @@ final class AppModel {
                 if self.presentation == .expanded {
                     self.setPresentation(.idle)
                 }
+                // 접히는 스프링이 끝나기 전에 인트로가 모양을 가로채면 접힘이 끊긴다.
+                if self.pendingIntroPreview != nil {
+                    try? await Task.sleep(for: .milliseconds(540))
+                    guard !Task.isCancelled, !self.isHovering else { return }
+                }
                 self.flushIntroPreview()
             }
         }
