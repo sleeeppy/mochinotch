@@ -92,7 +92,12 @@ final class AppModel {
     private let server = EventServer()
     private let notifications = NotificationWatcher()
     private var panel: IslandPanelController?
-    private var settingsWindow: NSWindow?
+    /// 펼친 노치 안에 설정 화면을 연다. 별 창은 쓰지 않는다.
+    private(set) var showsSettings = false
+    /// 설정 화면 내용의 실제 높이. 판이 딱 맞게 열린다.
+    private(set) var settingsHeight: CGFloat = 206
+    /// 펼친 채로 인트로를 고르면, 마우스를 치운 뒤에 한 번 보여 준다.
+    private(set) var pendingIntroPreview: IntroStudy?
     private var screenObserver: NSObjectProtocol?
     private var activationObserver: NSObjectProtocol?
 
@@ -110,7 +115,8 @@ final class AppModel {
             presentation: presentation,
             rowCount: frozenRows ?? activities.count,
             peekSlots: noticeGroups.count,
-            agentSlots: agentEarSuppressed ? 0 : agentGroups.count
+            agentSlots: agentEarSuppressed ? 0 : agentGroups.count,
+            settingsHeight: showsSettings ? settingsHeight : nil
         )
     }
 
@@ -154,9 +160,7 @@ final class AppModel {
         return Array(groups.suffix(IslandMetrics.maxPeekSlots))
     }
 
-    var launchAtLogin: Bool {
-        SMAppService.mainApp.status == .enabled
-    }
+    private(set) var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     func start() {
         notch = NotchGeometry.current()
@@ -265,6 +269,10 @@ final class AppModel {
     func setIntro(_ study: IntroStudy) {
         introStudy = study
         UserDefaults.standard.set(study.rawValue, forKey: Self.introStudyKey)
+        if isHovering {
+            pendingIntroPreview = study
+            return
+        }
         playIntro(study, quietOnly: false)
     }
 
@@ -284,6 +292,7 @@ final class AppModel {
         } catch {
             launchAtLoginError = error.localizedDescription
         }
+        launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 
     func handleIncomingURL(_ url: URL) {
@@ -344,20 +353,32 @@ final class AppModel {
         present(activity, seconds: 0)
     }
 
-    /// 메뉴바 전용 앱은 SwiftUI 설정 창이 안 뜬다. 직접 띄운다.
     func openSettings() {
-        if settingsWindow == nil {
-            let host = NSHostingController(rootView: SettingsView().environment(self))
-            host.view.frame = NSRect(x: 0, y: 0, width: 440, height: 420)
-            let window = NSWindow(contentViewController: host)
-            window.title = "설정"
-            window.styleMask = [.titled, .closable]
-            window.isReleasedWhenClosed = false
-            window.center()
-            settingsWindow = window
+        withAnimation(IslandMotion.morph) {
+            showsSettings = true
         }
-        NSApp.activate()
-        settingsWindow?.makeKeyAndOrderFront(nil)
+        expandNow()
+    }
+
+    func closeSettings() {
+        withAnimation(IslandMotion.morph) {
+            showsSettings = false
+        }
+    }
+
+    func setSettingsHeight(_ height: CGFloat) {
+        guard abs(height - settingsHeight) > 0.5 else { return }
+        withAnimation(IslandMotion.morph) {
+            settingsHeight = height
+        }
+    }
+
+    func toggleSettings() {
+        if showsSettings {
+            closeSettings()
+        } else {
+            openSettings()
+        }
     }
 
     func openFullDiskAccessSettings() {
@@ -645,6 +666,12 @@ final class AppModel {
         playIntro(introStudy, quietOnly: true)
     }
 
+    private func flushIntroPreview() {
+        guard let study = pendingIntroPreview else { return }
+        pendingIntroPreview = nil
+        playIntro(study, quietOnly: false)
+    }
+
     private func playIntro(_ study: IntroStudy, quietOnly: Bool) {
         cancelIntro()
         introTask = Task { @MainActor [weak self] in
@@ -911,6 +938,7 @@ final class AppModel {
                 if self.presentation == .expanded {
                     self.setPresentation(.idle)
                 }
+                self.flushIntroPreview()
             }
         }
     }
@@ -957,6 +985,7 @@ final class AppModel {
 
     private func commitPresentation(_ next: IslandPresentation) {
         if presentation == .expanded, next != .expanded {
+            showsSettings = false
             noticesSeenAt = Date()
             clearTask?.cancel()
             frozenRows = nil

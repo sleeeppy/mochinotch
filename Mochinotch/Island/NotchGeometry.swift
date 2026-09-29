@@ -90,12 +90,13 @@ struct IslandMetrics: Equatable {
     static let peekBadge: CGFloat = 11
 
     /// `peekSlots`와 `agentSlots`는 접혀 있을 때만 쓴다. 늘어나거나 펼쳐지면 그 모양이 우선이다.
-    static func resolve(
+        static func resolve(
         notch: NotchInfo,
         presentation: IslandPresentation,
         rowCount: Int,
         peekSlots: Int = 0,
-        agentSlots: Int = 0
+        agentSlots: Int = 0,
+        settingsHeight: CGFloat? = nil
     ) -> IslandMetrics {
         let cameraW = notch.cameraWidth
         let cameraH = max(notch.anchorHeight, 28)
@@ -135,8 +136,18 @@ struct IslandMetrics: Equatable {
             return fill(width: 300 + notchShoulder * 2, height: 34, radius: notchRadius, shoulder: notchShoulder, ear: 150, camera: 0)
 
         case .expanded:
+            let header: CGFloat = notch.hasNotch ? cameraH + 44 : 58
+            if let settingsHeight {
+                return fill(
+                    width: 386 + expandedShoulder * 2,
+                    height: min(maxExpandedHeight, header + settingsHeight),
+                    radius: 30,
+                    shoulder: expandedShoulder,
+                    ear: 0,
+                    camera: 0
+                )
+            }
             let rows = max(rowCount, 1)
-            let header: CGFloat = notch.hasNotch ? cameraH + 36 : 52
             let height = min(maxExpandedHeight, header + CGFloat(rows) * 68 + 18)
             return fill(
                 width: 386 + expandedShoulder * 2,
@@ -181,8 +192,7 @@ struct IslandMetrics: Equatable {
         )
     }
 
-    static let maxExpandedHeight: CGFloat = 520
-    /// 펼친 판의 그림자가 잘리지 않을 여백.
+    static let maxExpandedHeight: CGFloat = 520    /// 펼친 판의 그림자가 잘리지 않을 여백.
     private static let shadowMargin: CGFloat = 28
 
     /// 모든 상태를 담는 고정 창. 노치 가운데를 기준으로 좌우 대칭이다.
