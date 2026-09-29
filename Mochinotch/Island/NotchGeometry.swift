@@ -96,7 +96,8 @@ struct IslandMetrics: Equatable {
         rowCount: Int,
         peekSlots: Int = 0,
         agentSlots: Int = 0,
-        settingsHeight: CGFloat? = nil
+        settingsHeight: CGFloat? = nil,
+        listHeight: CGFloat? = nil
     ) -> IslandMetrics {
         let cameraW = notch.cameraWidth
         let cameraH = max(notch.anchorHeight, 28)
@@ -148,7 +149,8 @@ struct IslandMetrics: Equatable {
                 )
             }
             let rows = max(rowCount, 1)
-            let height = min(maxExpandedHeight, header + CGFloat(rows) * 68 + 18)
+            let body = listHeight ?? CGFloat(rows) * 58 + 10
+            let height = min(maxExpandedHeight, header + body)
             return fill(
                 width: 386 + expandedShoulder * 2,
                 height: height,
