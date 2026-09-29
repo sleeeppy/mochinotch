@@ -10,6 +10,31 @@ enum IslandMotion {
         insertion: AnyTransition(.blurReplace).animation(.easeOut(duration: 0.26).delay(0.1)),
         removal: .opacity.animation(.easeIn(duration: 0.1))
     )
+    /// 펼친 내용. 노치 쪽에서 조금 작고 흐린 채 나와 모양과 같이 커지고, 접힐 때는 노치 쪽으로 빨려 들어간다.
+    /// 제자리에 놓인 채 모양이 드러내기만 하면 커튼이 걷히는 것처럼 보인다.
+    static let expandedTransition: AnyTransition = .asymmetric(
+        insertion: .modifier(active: Emerge(amount: 0), identity: Emerge(amount: 1))
+            .animation(.spring(response: 0.44, dampingFraction: 0.8).delay(0.04)),
+        removal: .modifier(active: Emerge(amount: 0), identity: Emerge(amount: 1))
+            .animation(.easeIn(duration: 0.13))
+    )
+    /// 아이콘이 스스로 튀어나오는 내용. 접힌 노치 양끝의 알림 아이콘과 작업 완료.
+    /// 흐림을 겹치면 눌렸다 튀는 모양이 번져 안 보인다.
+    static let popTransition: AnyTransition = .asymmetric(
+        insertion: .opacity.animation(.easeOut(duration: 0.16).delay(0.04)),
+        removal: .opacity.animation(.easeIn(duration: 0.1))
+    )
+}
+
+struct Emerge: ViewModifier {
+    var amount: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(0.9 + 0.1 * amount, anchor: .top)
+            .blur(radius: 7 * max(0, 1 - amount))
+            .opacity(amount)
+    }
 }
 
 /// 한 축의 스프링 응답. SwiftUI 스프링과 같은 `response`, `damping`이다.

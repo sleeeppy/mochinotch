@@ -587,6 +587,19 @@ final class AppModel {
         setPresentation(.expanded)
     }
 
+    /// 마우스를 올리지 않고 펼쳤다가 접는다. 그 사이에 마우스가 올라오면 그대로 둔다.
+    func previewExpand() {
+        hoverTask?.cancel()
+        leaveTask?.cancel()
+        dismissTask?.cancel()
+        setPresentation(.expanded)
+        dismissTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled, let self, !self.isHovering, self.presentation == .expanded else { return }
+            self.setPresentation(.idle)
+        }
+    }
+
     func simulateCharge() {
         presentPower(phase: .plugged, percent: 76, seconds: 3.6)
     }
@@ -845,7 +858,7 @@ final class AppModel {
         }
         if activity.isFailure {
             shakeToken += 1
-        } else if case .agent(_, let outcome, _, _, _) = activity.payload, outcome != .cancelled, !isHovering {
+        } else if activity.bouncesIsland, !isHovering {
             boingToken += 1
         }
         if let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,

@@ -254,12 +254,11 @@ private struct PeekContent: View {
             if !notices.isEmpty {
                 HStack(spacing: IslandMetrics.peekSpacing) {
                     ForEach(notices) { group in
-                        ActivityIcon(activity: group.latest, size: IslandMetrics.peekIcon)
-                            .overlay(alignment: .topTrailing) {
-                                DockBadge(count: group.count)
-                                    .offset(x: 3, y: -3)
-                            }
-                            .transition(.scale(scale: 0.4).combined(with: .opacity))
+                        PeekNoticeIcon(group: group)
+                            .transition(.asymmetric(
+                                insertion: .opacity,
+                                removal: .scale(scale: 0.4).combined(with: .opacity)
+                            ))
                     }
                 }
                 .padding(.trailing, metrics.shoulder + IslandMetrics.peekInset)
@@ -272,6 +271,88 @@ private struct PeekContent: View {
         .onTapGesture {
             model.expandNow()
         }
+    }
+}
+
+/// 오른쪽 알림 아이콘. 방금 온 알림이면 노치 밑에서 옆으로 쏙 나와 눌렸다 튀어 서고, 배지가 뒤따라 붙는다.
+/// 같은 앱 알림이 더 오면 아이콘이 톡 튀고 숫자가 바뀐다. 펼쳤다 접은 뒤 다시 보일 때는 튀지 않는다.
+private struct PeekNoticeIcon: View {
+    let group: NoticeGroup
+    @State private var waiting: Bool
+    @State private var arrivals = 0
+    @State private var bumps = 0
+
+    init(group: NoticeGroup) {
+        self.group = group
+        _waiting = State(initialValue: Date().timeIntervalSince(group.latest.createdAt) < 1.2)
+    }
+
+    var body: some View {
+        ActivityIcon(activity: group.latest, size: IslandMetrics.peekIcon)
+            .keyframeAnimator(initialValue: Squish.rest, trigger: arrivals) { icon, pose in
+                icon
+                    .scaleEffect(x: pose.x, y: pose.y, anchor: .bottom)
+                    .offset(x: pose.lift)
+                    .opacity(pose.opacity)
+            } keyframes: { _ in
+                KeyframeTrack(\.x) {
+                    MoveKeyframe(0.5)
+                    LinearKeyframe(0.5, duration: 0.06)
+                    CubicKeyframe(1.08, duration: 0.18)
+                    CubicKeyframe(0.91, duration: 0.1)
+                    CubicKeyframe(1.03, duration: 0.13)
+                    CubicKeyframe(1, duration: 0.15)
+                }
+                KeyframeTrack(\.y) {
+                    MoveKeyframe(0.5)
+                    LinearKeyframe(0.5, duration: 0.06)
+                    CubicKeyframe(0.94, duration: 0.18)
+                    CubicKeyframe(1.08, duration: 0.1)
+                    CubicKeyframe(0.98, duration: 0.13)
+                    CubicKeyframe(1, duration: 0.15)
+                }
+                KeyframeTrack(\.lift) {
+                    MoveKeyframe(-16)
+                    LinearKeyframe(-16, duration: 0.06)
+                    CubicKeyframe(0, duration: 0.2)
+                }
+                KeyframeTrack(\.opacity) {
+                    MoveKeyframe(0)
+                    LinearKeyframe(0, duration: 0.06)
+                    LinearKeyframe(1, duration: 0.1)
+                }
+            }
+            .keyframeAnimator(initialValue: CGFloat(1), trigger: bumps) { icon, scale in
+                icon.scaleEffect(scale, anchor: .bottom)
+            } keyframes: { _ in
+                CubicKeyframe(1.16, duration: 0.1)
+                CubicKeyframe(0.95, duration: 0.12)
+                CubicKeyframe(1, duration: 0.16)
+            }
+            .overlay(alignment: .topTrailing) {
+                DockBadge(count: group.count)
+                    .keyframeAnimator(initialValue: CGFloat(1), trigger: arrivals) { badge, scale in
+                        badge
+                            .scaleEffect(scale)
+                            .opacity(min(1, Double(scale) * 3))
+                    } keyframes: { _ in
+                        MoveKeyframe(0)
+                        LinearKeyframe(0, duration: 0.3)
+                        CubicKeyframe(1.28, duration: 0.12)
+                        CubicKeyframe(0.94, duration: 0.1)
+                        CubicKeyframe(1, duration: 0.12)
+                    }
+                    .offset(x: 3, y: -3)
+            }
+            .opacity(waiting ? 0 : 1)
+            .onAppear {
+                guard waiting else { return }
+                waiting = false
+                arrivals += 1
+            }
+            .onChange(of: group.latest.id) {
+                bumps += 1
+            }
     }
 }
 
@@ -339,16 +420,16 @@ private struct IslandFace: View {
                 if metrics.chrome == .peek, !notices.isEmpty || !agents.isEmpty {
                     PeekContent(metrics: shape, notices: notices, agents: agents)
                         .frame(width: shape.width, height: shape.height)
-                        .transition(IslandMotion.contentTransition)
+                        .transition(IslandMotion.popTransition)
                 }
             case .compact:
                 CompactIslandContent(metrics: metrics, activity: model.featured)
                     .frame(width: metrics.width, height: metrics.height)
-                    .transition(IslandMotion.contentTransition)
+                    .transition(model.featured?.popsIn == true ? IslandMotion.popTransition : IslandMotion.contentTransition)
             case .expanded:
                 ExpandedIslandContent(metrics: metrics)
                     .frame(width: metrics.width, height: metrics.height, alignment: .top)
-                    .transition(IslandMotion.contentTransition)
+                    .transition(IslandMotion.expandedTransition)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -549,7 +630,7 @@ private struct CompactIslandContent: View {
 
     @ViewBuilder
     private func ear(_ activity: IslandActivity?, alignment: Alignment) -> some View {
-        if let activity, case .agent = activity.payload {
+        if let activity, activity.popsIn {
             if alignment == .leading {
                 AgentLead(activity: activity)
                     .id(activity.id)
@@ -656,8 +737,8 @@ private struct ExpandedIslandContent: View {
     private var history: some View {
         ScrollView {
             VStack(spacing: 2) {
-                ForEach(model.activities) { activity in
-                    ActivityRow(activity: activity)
+                ForEach(Array(model.activities.enumerated()), id: \.element.id) { index, activity in
+                    ActivityRow(activity: activity, order: index)
                 }
             }
             .padding(.horizontal, 8)
@@ -683,7 +764,10 @@ private struct ExpandedIslandContent: View {
 private struct ActivityRow: View {
     @Environment(AppModel.self) private var model
     var activity: IslandActivity
+    /// 위에서 몇 번째 줄인지. 펼칠 때 위에서부터 한 줄씩 내려앉는다.
+    var order = 0
     @State private var hovered = false
+    @State private var landed = false
 
     var body: some View {
         Group {
@@ -699,6 +783,13 @@ private struct ActivityRow: View {
             }
         }
         .onHover { hovered = $0 }
+        .opacity(landed ? 1 : 0)
+        .offset(y: landed ? 0 : -10)
+        .animation(
+            .spring(response: 0.42, dampingFraction: 0.74).delay(0.08 + Double(min(order, 6)) * 0.035),
+            value: landed
+        )
+        .onAppear { landed = true }
     }
 
     private var row: some View {

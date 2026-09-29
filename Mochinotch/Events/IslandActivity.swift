@@ -398,6 +398,18 @@ struct IslandActivity: Identifiable, Equatable {
         if case .power(_, let percent) = payload { return percent }
         return nil
     }
+
+    /// 옆으로 펼쳐질 때 아이콘이 노치 안에서 튀어나오고 글자가 한 자씩 따라 나온다. 작업 완료에만 쓴다.
+    var popsIn: Bool {
+        if case .agent = payload { return true }
+        return false
+    }
+
+    /// 펼쳐질 때 노치가 아래로 한 번 말랑하게 늘어난다. 화면 연출이 같이 나오는 작업 완료에만 쓴다.
+    var bouncesIsland: Bool {
+        if case .agent(_, let outcome, _, _, _) = payload { return outcome != .cancelled && outcome != .failed }
+        return false
+    }
 }
 
 private func unique(_ values: [String]) -> [String] {

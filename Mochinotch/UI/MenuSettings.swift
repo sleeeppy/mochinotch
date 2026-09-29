@@ -41,6 +41,7 @@ struct MenuContent: View {
         Button("Cursor 완료 테스트") { model.simulateAgent(tool: .cursor, outcome: .completed) }
         Button("Codex 완료 테스트") { model.simulateAgent(tool: .codex, outcome: .completed) }
         Button("알림 미리보기") { model.simulateNotice() }
+        Button("펼치기 · 접기 미리보기") { model.previewExpand() }
         if let duoMessage = model.duoMessage {
             Text(duoMessage)
                 .font(.caption)
