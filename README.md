@@ -63,59 +63,6 @@ Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지�
 
 ---
 
-<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/install-dark.png"><img src="docs/images/headings/install-light.png" alt="설치" width="43" height="30"></picture></h3>
-
-**필요한 것:** macOS 14 Sonoma 이상. 노치가 있는 맥북에서 가장 잘 어울리고, 노치가 없는 맥이나 외부 모니터에서는 화면 위 가운데에 작은 알약 모양으로 뜹니다.
-
-1. [Releases](https://github.com/sleeeppy/mochinotch/releases/latest) 페이지에서 최신 `Mochinotch.zip`을 받습니다.
-2. 압축을 풀고 `Mochinotch.app`을 **응용 프로그램** 폴더로 옮깁니다.
-3. 앱을 엽니다.
-
-> [!NOTE]
-> 애플 공증을 받지 않은 앱이라 처음 열 때 "확인되지 않은 개발자" 경고가 뜰 수 있어요.
->
-> - **시스템 설정 → 개인정보 보호 및 보안**으로 가서 맨 아래 `Mochinotch`의 **그래도 열기**를 누르세요.
-> - 또는 터미널에서 한 번만 실행하면 됩니다.
->
->   ```bash
->   xattr -dr com.apple.quarantine /Applications/Mochinotch.app
->   ```
-
-앱이 켜지면 노치가 한 번 인사합니다. Dock이나 메뉴 막대에는 아이콘이 생기지 않아요. 모든 조작은 노치에서 합니다.
-
----
-
-<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/permissions-dark.png"><img src="docs/images/headings/permissions-light.png" alt="권한 설정" width="90" height="30"></picture></h3>
-
-기능에 따라 macOS 권한이 필요합니다. 모두 **시스템 설정 → 개인정보 보호 및 보안**에서 켭니다. 권한을 켠 뒤에는 앱을 한 번 종료했다가 다시 여세요.
-
-| 권한 | 어디에 쓰나요 | 없으면 |
-|---|---|---|
-| **전체 디스크 접근 권한** | 알림 센터 기록을 읽어 노치에 알림을 띄워요 | 다른 앱 알림이 노치에 안 떠요. 충전과 AI 작업 완료는 그대로 돼요 |
-| **손쉬운 사용** | 알림 배너를 뜨자마자 읽고, 채팅방을 열거나 Dock 배지가 사라지면 읽음으로 처리해요 | 알림이 조금 늦게 뜨고, 읽은 알림이 노치에 더 오래 남아요 |
-| **화면 기록** | 작업이 끝날 때 화면 가장자리 연출을 그려요 | 화면 가장자리 연출만 빠지고, 노치 테두리 빛은 그대로예요 |
-
-> [!TIP]
-> 화면을 녹화하거나 전송하지 않습니다. 화면 기록 권한은 연출하는 몇 초 동안 화면을 비춰 휘게 그리는 데에만 씁니다.
-
----
-
-<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/usage-dark.png"><img src="docs/images/headings/usage-light.png" alt="사용법" width="64" height="30"></picture></h3>
-
-| 하고 싶은 것 | 방법 |
-|---|---|
-| 기록 보기 | 노치에 마우스를 올려요 |
-| 그 앱으로 가기 | 펼친 목록에서 항목을 눌러요 |
-| 기록 비우기 | 펼친 목록 오른쪽 위 **지우기** |
-| 설정 열기 | 펼친 목록 왼쪽 위 톱니바퀴 ⚙︎ |
-| 앱 끄기 | 설정 맨 아래 **종료** |
-
-- 오른쪽 알림 아이콘은 목록을 한 번 펼쳐 보면 노치 안으로 들어갑니다.
-- 왼쪽 AI 작업 아이콘은 그 앱(Claude, Cursor, Codex)을 앞으로 가져오면 사라집니다.
-- 목록은 앱을 켜 둔 동안만 쌓이고, 최근 30개까지 남습니다.
-
----
-
 <h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/settings-dark.png"><img src="docs/images/headings/settings-light.png" alt="설정" width="43" height="30"></picture></h3>
 
 톱니바퀴를 누르면 창이 따로 뜨지 않고 노치가 조금 더 커지며 설정이 나옵니다.
@@ -127,55 +74,6 @@ Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지�
 - **로그인할 때 열기**: 맥을 켜면 자동으로 시작합니다.
 - **인트로**: 켤 때 인사를 `모찌`, `늘리기` 중에서 고릅니다. 고른 뒤 노치에서 마우스를 치우면 바로 한 번 보여 줘요.
 - **화면 가장자리 연출**: 끄면 AI 작업이 끝날 때 노치 테두리만 빛나고 화면은 그대로 둡니다.
-
----
-
-<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/agents-dark.png"><img src="docs/images/headings/agents-light.png" alt="AI 에이전트 연결 (Claude Code · Cursor · Codex)" width="499" height="30"></picture></h3>
-
-AI 도구가 작업을 끝냈다는 신호를 노치로 보내려면 각 도구에 hook을 한 번 넣어야 합니다. AI API를 호출하거나 대화 내용을 보내지 않습니다. 내 맥 안(`127.0.0.1:47321`)으로 "끝났다"는 신호만 갑니다.
-
-### 자동으로 넣기
-
-이 저장소를 받은 뒤 터미널에서 실행합니다.
-
-```bash
-git clone https://github.com/sleeeppy/mochinotch.git
-cd mochinotch
-./scripts/install-hooks.sh --apply
-```
-
-아래 설정 파일에 hook이 추가됩니다. 고치기 전에 원래 파일을 `.mochinotch.bak`으로 복사해 둡니다.
-
-| 도구 | 파일 | 알려 주는 것 |
-|---|---|---|
-| Claude Code | `~/.claude/settings.json` | 작업 완료, 실패, 확인 필요 |
-| Cursor | `~/.cursor/hooks.json` | 작업 완료, 실패, 중단 |
-| Codex | `~/.codex/config.toml` | 작업 완료 (원래 있던 `notify`도 그대로 실행돼요) |
-
-넣은 뒤 각 도구를 다시 시작하세요.
-
-### 직접 보내 보기
-
-앱이 켜져 있을 때 터미널에서 보내면 노치에 바로 뜹니다. 내 스크립트나 다른 도구에서도 이렇게 쓸 수 있어요.
-
-```bash
-curl -s -X POST http://127.0.0.1:47321/event \
-  -H 'Content-Type: application/json' \
-  -d '{"tool":"claude","detail":"README 정리 끝","kind":"completed"}'
-```
-
-| 필드 | 값 |
-|---|---|
-| `tool` | `claude`, `cursor`, `codex`, 그 밖의 값은 일반 작업 |
-| `kind` | `completed`, `failed`, `needsInput`, `cancelled` |
-| `title`, `detail` | 목록에 보일 제목과 설명 (생략 가능) |
-| `bundleID` | 항목을 눌렀을 때 열 앱 (예: `com.apple.Terminal`) |
-
-URL로도 보낼 수 있습니다.
-
-```text
-mochinotch://event?tool=cursor&kind=completed&detail=빌드%20끝
-```
 
 ---
 
@@ -243,6 +141,108 @@ mochinotch://event?tool=cursor&kind=completed&detail=빌드%20끝
 3. `~/.local/bin/mochinotch-notify`와 `~/Library/Logs/Mochinotch/` 폴더를 지웁니다.
 
 </details>
+
+---
+
+<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/install-dark.png"><img src="docs/images/headings/install-light.png" alt="설치" width="43" height="30"></picture></h3>
+
+**필요한 것:** macOS 14 Sonoma 이상. 노치가 있는 맥북에서 가장 잘 어울리고, 노치가 없는 맥이나 외부 모니터에서는 화면 위 가운데에 작은 알약 모양으로 뜹니다.
+
+1. [Releases](https://github.com/sleeeppy/mochinotch/releases/latest) 페이지에서 최신 `Mochinotch.zip`을 받습니다.
+2. 압축을 풀고 `Mochinotch.app`을 **응용 프로그램** 폴더로 옮깁니다.
+3. 앱을 엽니다.
+
+> [!NOTE]
+> 애플 공증을 받지 않은 앱이라 처음 열 때 "확인되지 않은 개발자" 경고가 뜰 수 있어요.
+>
+> - **시스템 설정 → 개인정보 보호 및 보안**으로 가서 맨 아래 `Mochinotch`의 **그래도 열기**를 누르세요.
+> - 또는 터미널에서 한 번만 실행하면 됩니다.
+>
+>   ```bash
+>   xattr -dr com.apple.quarantine /Applications/Mochinotch.app
+>   ```
+
+앱이 켜지면 노치가 한 번 인사합니다. Dock이나 메뉴 막대에는 아이콘이 생기지 않아요. 모든 조작은 노치에서 합니다.
+
+---
+
+<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/permissions-dark.png"><img src="docs/images/headings/permissions-light.png" alt="권한 설정" width="90" height="30"></picture></h3>
+
+기능에 따라 macOS 권한이 필요합니다. 모두 **시스템 설정 → 개인정보 보호 및 보안**에서 켭니다. 권한을 켠 뒤에는 앱을 한 번 종료했다가 다시 여세요.
+
+| 권한 | 어디에 쓰나요 | 없으면 |
+|---|---|---|
+| **전체 디스크 접근 권한** | 알림 센터 기록을 읽어 노치에 알림을 띄워요 | 다른 앱 알림이 노치에 안 떠요. 충전과 AI 작업 완료는 그대로 돼요 |
+| **손쉬운 사용** | 알림 배너를 뜨자마자 읽고, 채팅방을 열거나 Dock 배지가 사라지면 읽음으로 처리해요 | 알림이 조금 늦게 뜨고, 읽은 알림이 노치에 더 오래 남아요 |
+| **화면 기록** | 작업이 끝날 때 화면 가장자리 연출을 그려요 | 화면 가장자리 연출만 빠지고, 노치 테두리 빛은 그대로예요 |
+
+> [!TIP]
+> 화면을 녹화하거나 전송하지 않습니다. 화면 기록 권한은 연출하는 몇 초 동안 화면을 비춰 휘게 그리는 데에만 씁니다.
+
+---
+
+<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/usage-dark.png"><img src="docs/images/headings/usage-light.png" alt="사용법" width="64" height="30"></picture></h3>
+
+| 하고 싶은 것 | 방법 |
+|---|---|
+| 기록 보기 | 노치에 마우스를 올려요 |
+| 그 앱으로 가기 | 펼친 목록에서 항목을 눌러요 |
+| 기록 비우기 | 펼친 목록 오른쪽 위 **지우기** |
+| 설정 열기 | 펼친 목록 왼쪽 위 톱니바퀴 ⚙︎ |
+| 앱 끄기 | 설정 맨 아래 **종료** |
+
+- 오른쪽 알림 아이콘은 목록을 한 번 펼쳐 보면 노치 안으로 들어갑니다.
+- 왼쪽 AI 작업 아이콘은 그 앱(Claude, Cursor, Codex)을 앞으로 가져오면 사라집니다.
+- 목록은 앱을 켜 둔 동안만 쌓이고, 최근 30개까지 남습니다.
+
+---
+
+<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/agents-dark.png"><img src="docs/images/headings/agents-light.png" alt="AI 에이전트 연결 (Claude Code · Cursor · Codex)" width="499" height="30"></picture></h3>
+
+AI 도구가 작업을 끝냈다는 신호를 노치로 보내려면 각 도구에 hook을 한 번 넣어야 합니다. AI API를 호출하거나 대화 내용을 보내지 않습니다. 내 맥 안(`127.0.0.1:47321`)으로 "끝났다"는 신호만 갑니다.
+
+### 자동으로 넣기
+
+이 저장소를 받은 뒤 터미널에서 실행합니다.
+
+```bash
+git clone https://github.com/sleeeppy/mochinotch.git
+cd mochinotch
+./scripts/install-hooks.sh --apply
+```
+
+아래 설정 파일에 hook이 추가됩니다. 고치기 전에 원래 파일을 `.mochinotch.bak`으로 복사해 둡니다.
+
+| 도구 | 파일 | 알려 주는 것 |
+|---|---|---|
+| Claude Code | `~/.claude/settings.json` | 작업 완료, 실패, 확인 필요 |
+| Cursor | `~/.cursor/hooks.json` | 작업 완료, 실패, 중단 |
+| Codex | `~/.codex/config.toml` | 작업 완료 (원래 있던 `notify`도 그대로 실행돼요) |
+
+넣은 뒤 각 도구를 다시 시작하세요.
+
+### 직접 보내 보기
+
+앱이 켜져 있을 때 터미널에서 보내면 노치에 바로 뜹니다. 내 스크립트나 다른 도구에서도 이렇게 쓸 수 있어요.
+
+```bash
+curl -s -X POST http://127.0.0.1:47321/event \
+  -H 'Content-Type: application/json' \
+  -d '{"tool":"claude","detail":"README 정리 끝","kind":"completed"}'
+```
+
+| 필드 | 값 |
+|---|---|
+| `tool` | `claude`, `cursor`, `codex`, 그 밖의 값은 일반 작업 |
+| `kind` | `completed`, `failed`, `needsInput`, `cancelled` |
+| `title`, `detail` | 목록에 보일 제목과 설명 (생략 가능) |
+| `bundleID` | 항목을 눌렀을 때 열 앱 (예: `com.apple.Terminal`) |
+
+URL로도 보낼 수 있습니다.
+
+```text
+mochinotch://event?tool=cursor&kind=completed&detail=빌드%20끝
+```
 
 ---
 
