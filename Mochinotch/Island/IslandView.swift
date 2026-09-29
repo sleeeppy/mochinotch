@@ -794,8 +794,16 @@ private struct ExpandedIslandContent: View {
             }
             .padding(.horizontal, 8)
             .padding(.bottom, 10)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(key: ListHeightKey.self, value: proxy.size.height)
+                }
+            }
         }
         .scrollIndicators(.hidden)
+        .onPreferenceChange(ListHeightKey.self) { height in
+            model.setListHeight(height)
+        }
     }
 
     private var empty: some View {
@@ -811,6 +819,13 @@ private struct ExpandedIslandContent: View {
         .padding(.horizontal, 18)
         .padding(.bottom, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct ListHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

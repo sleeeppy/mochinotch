@@ -96,6 +96,10 @@ final class AppModel {
     private(set) var showsSettings = false
     /// 설정 화면 내용의 실제 높이. 판이 딱 맞게 열린다.
     private(set) var settingsHeight: CGFloat = 206
+    /// 펼친 목록 내용의 실제 높이. 줄마다 어림하면 한 줄짜리 알림이 많을 때 아래가 빈다.
+    private(set) var listHeight: CGFloat?
+    /// 지우는 동안 붙잡아 두는 목록 높이.
+    private var frozenListHeight: CGFloat?
     /// 펼친 채로 인트로를 고르면, 마우스를 치운 뒤에 한 번 보여 준다.
     private(set) var pendingIntroPreview: IntroStudy?
     private var screenObserver: NSObjectProtocol?
@@ -116,7 +120,8 @@ final class AppModel {
             rowCount: frozenRows ?? activities.count,
             peekSlots: noticeGroups.count,
             agentSlots: agentEarSuppressed ? 0 : agentGroups.count,
-            settingsHeight: showsSettings ? settingsHeight : nil
+            settingsHeight: showsSettings ? settingsHeight : nil,
+            listHeight: frozenRows != nil ? frozenListHeight : (activities.isEmpty ? nil : listHeight)
         )
     }
 
@@ -366,6 +371,14 @@ final class AppModel {
         }
     }
 
+    func setListHeight(_ height: CGFloat) {
+        guard frozenRows == nil, height > 1 else { return }
+        if let listHeight, abs(height - listHeight) <= 0.5 { return }
+        withAnimation(IslandMotion.morph) {
+            listHeight = height
+        }
+    }
+
     func setSettingsHeight(_ height: CGFloat) {
         guard abs(height - settingsHeight) > 0.5 else { return }
         withAnimation(IslandMotion.morph) {
@@ -607,6 +620,7 @@ final class AppModel {
         let rows = activities.count
         if isHovering, rows > 0 {
             frozenRows = rows
+            frozenListHeight = listHeight
         }
         withAnimation(.easeInOut(duration: 0.32)) {
             activities.removeAll()
