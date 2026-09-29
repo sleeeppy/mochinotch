@@ -2,7 +2,7 @@
   <img src="docs/images/icon.png" width="128" alt="Mochinotch 아이콘">
 </p>
 
-<h3 align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/title-dark.png"><img src="docs/images/headings/title-light.png" alt="もちノッチ(Mochinotch)" width="285" height="46"></picture></h3>
+<h3 align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/title-dark.png"><img src="docs/images/headings/title-light.png" alt="もちノッチ(Mochinotch)" width="287" height="46"></picture></h3>
 
 <p align="center">
   맥북 노치를 말랑한 다이나믹 아일랜드로.<br>
@@ -12,7 +12,7 @@
 
 ---
 
-<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/features-dark.png"><img src="docs/images/headings/features-light.png" alt="이런 걸 해요" width="115" height="30"></picture></h3>
+<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/features-dark.png"><img src="docs/images/headings/features-light.png" alt="이런 걸 해요" width="116" height="30"></picture></h3>
 
 ### 알림이 노치 옆에 쌓여요
 
@@ -85,7 +85,7 @@ Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지�
 
 ---
 
-<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/permissions-dark.png"><img src="docs/images/headings/permissions-light.png" alt="권한 설정" width="89" height="30"></picture></h3>
+<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/permissions-dark.png"><img src="docs/images/headings/permissions-light.png" alt="권한 설정" width="90" height="30"></picture></h3>
 
 기능에 따라 macOS 권한이 필요합니다. 모두 **시스템 설정 → 개인정보 보호 및 보안**에서 켭니다. 권한을 켠 뒤에는 앱을 한 번 종료했다가 다시 여세요.
 
@@ -100,7 +100,7 @@ Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지�
 
 ---
 
-<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/usage-dark.png"><img src="docs/images/headings/usage-light.png" alt="사용법" width="63" height="30"></picture></h3>
+<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/usage-dark.png"><img src="docs/images/headings/usage-light.png" alt="사용법" width="64" height="30"></picture></h3>
 
 | 하고 싶은 것 | 방법 |
 |---|---|
@@ -130,7 +130,7 @@ Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지�
 
 ---
 
-<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/agents-dark.png"><img src="docs/images/headings/agents-light.png" alt="AI 에이전트 연결 (Claude Code · Cursor · Codex)" width="494" height="30"></picture></h3>
+<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/agents-dark.png"><img src="docs/images/headings/agents-light.png" alt="AI 에이전트 연결 (Claude Code · Cursor · Codex)" width="499" height="30"></picture></h3>
 
 AI 도구가 작업을 끝냈다는 신호를 노치로 보내려면 각 도구에 hook을 한 번 넣어야 합니다. AI API를 호출하거나 대화 내용을 보내지 않습니다. 내 맥 안(`127.0.0.1:47321`)으로 "끝났다"는 신호만 갑니다.
 
