@@ -21,6 +21,8 @@ final class AppModel {
     /// 펼치기 직전, 모양은 둔 채 왼쪽 아이콘만 먼저 거둔다.
     private(set) var leftIconsHidden = false
     private var agentEarTask: Task<Void, Never>?
+    /// 왼쪽 아이콘을 거두고 곧 보여 줄 모양.
+    private var pendingPresentation: IslandPresentation?
     private(set) var serverError: String?
     private(set) var shakeToken = 0
     private(set) var chargePulse = 0
@@ -676,7 +678,10 @@ final class AppModel {
         leaveTask?.cancel()
         clearTask?.cancel()
         frozenRows = nil
-        let keepCurrentCompact = activity.isNotice && presentation == .compact && featured?.isNotice != true
+        // Cursor는 끝날 때 완료 이벤트와 알림 배너를 거의 같이 보낸다. 왼쪽 아이콘을 거두는 짧은 사이에
+        // 배너가 오면 펼치려던 완료가 취소되고 화면 효과만 남는다. 그 사이의 알림도 완료를 덮지 않는다.
+        let showingCompact = presentation == .compact || pendingPresentation == .compact
+        let keepCurrentCompact = activity.isNotice && showingCompact && featured?.isNotice != true
         if !keepCurrentCompact {
             dismissTask?.cancel()
         }
@@ -740,12 +745,15 @@ final class AppModel {
 
     private func setPresentation(_ next: IslandPresentation) {
         agentEarTask?.cancel()
+        pendingPresentation = nil
         let hasLeft = !agentGroups.isEmpty
         if presentation == .idle, hasLeft, next != .idle {
             leftIconsHidden = true
+            pendingPresentation = next
             agentEarTask = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(140))
                 guard !Task.isCancelled, let self else { return }
+                self.pendingPresentation = nil
                 self.commitPresentation(next)
             }
             return
