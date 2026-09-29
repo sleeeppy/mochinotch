@@ -9,9 +9,6 @@
   충전, 알림, AI 에이전트 작업 완료를 노치에서 바로 봅니다.
 </p>
 
-<p align="center">
-  <img src="docs/images/expand.gif" width="560" alt="노치에 마우스를 올리면 목록이 펼쳐지는 모습">
-</p>
 
 ---
 
@@ -25,9 +22,6 @@
   <img src="docs/images/notice.gif" width="500" alt="알림이 오면 노치 오른쪽에 아이콘과 배지가 붙는 모습">
 </p>
 
-<p align="center">
-  <img src="docs/images/peek.png" width="500" alt="왼쪽에 Claude, 오른쪽에 Slack과 메시지 알림이 붙은 노치">
-</p>
 
 ### 충전기를 꽂으면
 
@@ -36,6 +30,7 @@
 <p align="center">
   <img src="docs/images/charge.gif" width="500" alt="충전기를 꽂았을 때 노치에 충전 82%가 뜨는 모습">
 </p>
+
 
 ### AI 작업이 끝나면
 
@@ -47,15 +42,17 @@ Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지�
 
 작업이 실패하면 노치가 짧게 흔들리고 붉은 테두리가 생깁니다.
 
+
 ### 마우스를 올리면 목록이 펼쳐져요
 
 지금까지 온 알림, 작업 완료, 충전 기록이 최신순으로 쌓여 있습니다. 항목을 누르면 그 앱으로 바로 이동해요.
 
 <p align="center">
-  <img src="docs/images/expanded.png" width="500" alt="펼친 노치의 기록 목록">
+  <img src="docs/images/expand.gif" width="560" alt="노치에 마우스를 올리면 목록이 펼쳐지는 모습">
 </p>
 
-### 켤 때 인사
+
+### 인트로
 
 앱을 켜면 노치가 말랑하게 늘어나며 인사합니다. 두 가지 중에 고를 수 있어요.
 
