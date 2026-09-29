@@ -135,16 +135,21 @@ struct IntroPose {
     var beads: [IntroBead]
 }
 
-enum IntroStudy: CaseIterable {
+enum IntroStudy: String, CaseIterable {
     case mochi
     case taffy
-    case taffyTwice
+
+    static var stored: IntroStudy {
+        if let raw = UserDefaults.standard.string(forKey: "introStudy"), let study = IntroStudy(rawValue: raw) {
+            return study
+        }
+        return .mochi
+    }
 
     var title: String {
         switch self {
-        case .mochi: return "인트로 · 모찌 (기본)"
-        case .taffy: return "인트로 · 늘이기 · 길게 당겼다 놓음"
-        case .taffyTwice: return "인트로 · 늘이기 두 번 · 한 번 늘이고 잠깐 뒤 더 길게"
+        case .mochi: return "모찌"
+        case .taffy: return "늘리기"
         }
     }
 }
@@ -282,19 +287,6 @@ struct IntroScript {
             var script = IntroScript(reveal: 0, glow: nil, length: 0)
             script.sides(205, at: 0, .pull)
             let fire = script.recoil(at: 1.4)
-            script.reveal = fire + 0.06
-            script.glow = fire + 0.45
-            script.breathe(from: fire + 0.95)
-            script.length = fire + 2.75
-            return script
-
-        case .taffyTwice:
-            // 한 번만 늘이고 그 자리에서 잠깐 버틴 뒤, 더 길게 늘인다.
-            // 두 번째 놓은 반동으로만 로고가 된다.
-            var script = IntroScript(reveal: 0, glow: nil, length: 0)
-            script.sides(118, at: 0, .pull)
-            script.sides(205, at: 1.55, .pull)
-            let fire = script.recoil(at: 2.95)
             script.reveal = fire + 0.06
             script.glow = fire + 0.45
             script.breathe(from: fire + 0.95)

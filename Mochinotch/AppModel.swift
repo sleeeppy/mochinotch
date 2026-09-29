@@ -63,6 +63,10 @@ final class AppModel {
     private(set) var edgeGlowTravel: Double = 0
     private(set) var edgeGlowColor = Color.white
     var launchAtLoginError: String?
+    /// 켤 때 인사와 메뉴에서 고른 인트로.
+    private(set) var introStudy = IntroStudy.stored
+    /// 작업이 끝날 때 화면 가장자리 연출. 꺼도 노치 연출은 그대로다.
+    private(set) var playsScreenEffect = UserDefaults.standard.object(forKey: AppModel.screenEffectKey) as? Bool ?? true
 
     private var featuredID: UUID?
     private var noticesSeenAt = Date.distantPast
@@ -86,6 +90,7 @@ final class AppModel {
     private let server = EventServer()
     private let notifications = NotificationWatcher()
     private var panel: IslandPanelController?
+    private var settingsWindow: NSWindow?
     private var screenObserver: NSObjectProtocol?
     private var activationObserver: NSObjectProtocol?
 
@@ -252,6 +257,20 @@ final class AppModel {
         showWelcome()
     }
 
+    private static let introStudyKey = "introStudy"
+    private static let screenEffectKey = "playsScreenEffect"
+
+    func setIntro(_ study: IntroStudy) {
+        introStudy = study
+        UserDefaults.standard.set(study.rawValue, forKey: Self.introStudyKey)
+        playIntro(study, quietOnly: false)
+    }
+
+    func setPlaysScreenEffect(_ enabled: Bool) {
+        playsScreenEffect = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.screenEffectKey)
+    }
+
     func setLaunchAtLogin(_ enabled: Bool) {
         launchAtLoginError = nil
         do {
@@ -321,6 +340,22 @@ final class AppModel {
             keepsHistory: true
         )
         present(activity, seconds: 0)
+    }
+
+    /// 메뉴바 전용 앱은 SwiftUI 설정 창이 안 뜬다. 직접 띄운다.
+    func openSettings() {
+        if settingsWindow == nil {
+            let host = NSHostingController(rootView: SettingsView().environment(self))
+            host.view.frame = NSRect(x: 0, y: 0, width: 440, height: 420)
+            let window = NSWindow(contentViewController: host)
+            window.title = "설정"
+            window.styleMask = [.titled, .closable]
+            window.isReleasedWhenClosed = false
+            window.center()
+            settingsWindow = window
+        }
+        NSApp.activate()
+        settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
     func openFullDiskAccessSettings() {
@@ -587,46 +622,6 @@ final class AppModel {
         setPresentation(.expanded)
     }
 
-    /// 마우스를 올리지 않고 펼쳤다가 접는다. 그 사이에 마우스가 올라오면 그대로 둔다.
-    func previewExpand() {
-        hoverTask?.cancel()
-        leaveTask?.cancel()
-        dismissTask?.cancel()
-        setPresentation(.expanded)
-        dismissTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(2))
-            guard !Task.isCancelled, let self, !self.isHovering, self.presentation == .expanded else { return }
-            self.setPresentation(.idle)
-        }
-    }
-
-    func simulateCharge() {
-        presentPower(phase: .plugged, percent: 76, seconds: 3.6)
-    }
-
-    func simulateUnplug() {
-        presentPower(phase: .unplugged, percent: 76, seconds: 2.6)
-    }
-
-    func simulateAgent(tool: AgentTool, outcome: AgentOutcome) {
-        let detail: String
-        switch (tool, outcome) {
-        case (.claude, .completed): detail = "mochinotch · 테스트 42개 통과"
-        case (.claude, .needsInput): detail = "명령 실행을 허용할까요?"
-        case (.cursor, .completed): detail = "아일랜드 뷰 수정"
-        case (.codex, .failed): detail = "빌드가 실패했어요"
-        default: detail = tool.displayName
-        }
-        ingest(IncomingEvent(
-            tool: tool.rawValue,
-            title: "\(tool.displayName) \(outcome.shortLabel)",
-            detail: detail,
-            success: outcome != .failed,
-            kind: kindString(outcome),
-            bundleID: tool.iconBundleIDs.first
-        ))
-    }
-
     private static func duoTint(for tool: AgentTool, outcome: AgentOutcome) -> NSColor {
         if outcome == .failed {
             return NSColor(srgbRed: 1, green: 0.271, blue: 0.227, alpha: 1)
@@ -644,43 +639,8 @@ final class AppModel {
         DuoPulse.shared.openSettings()
     }
 
-    func simulateNotice() {
-        let samples: [(String, String, String, String)] = [
-            ("메시지", "민수", "지금 어디야?", "com.apple.MobileSMS"),
-            ("캘린더", "스탠드업", "10분 뒤에 시작해요", "com.apple.iCal"),
-            ("메일", "배포 리뷰", "Mochinotch 0.1 확인해 주세요", "com.apple.mail")
-        ]
-        let sample = samples[activities.filter {
-            if case .notice = $0.payload { return true }
-            return false
-        }.count % samples.count]
-        let activity = IslandActivity(
-            id: UUID(),
-            payload: .notice(appName: sample.0, title: sample.1, body: sample.2, bundleID: sample.3),
-            createdAt: Date(),
-            keepsHistory: true
-        )
-        present(activity, seconds: 0)
-    }
-
-    func runNotificationProbe() {
-        let message = NotificationProbe.run()
-        let alert = NSAlert()
-        alert.messageText = "알림 데이터베이스 실험"
-        alert.informativeText = message
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "확인")
-        NSApp.activate()
-        alert.runModal()
-    }
-
-    func previewIntro(_ study: IntroStudy) {
-        playIntro(study, quietOnly: false)
-    }
-
-    /// 앱을 켤 때는 모찌 시안.
     private func showWelcome() {
-        playIntro(.mochi, quietOnly: true)
+        playIntro(introStudy, quietOnly: true)
     }
 
     private func playIntro(_ study: IntroStudy, quietOnly: Bool) {
@@ -853,7 +813,7 @@ final class AppModel {
             return
         }
         featuredID = activity.id
-        if case .agent(let tool, let outcome, _, _, _) = activity.payload, tool.playsDuo, outcome != .cancelled {
+        if playsScreenEffect, case .agent(let tool, let outcome, _, _, _) = activity.payload, tool.playsDuo, outcome != .cancelled {
             DuoPulse.shared.play(tint: Self.duoTint(for: tool, outcome: outcome), rim: outcome == .failed ? 1 : tool.edgeRim)
         }
         if activity.isFailure {
@@ -977,15 +937,6 @@ final class AppModel {
             return .cancelled
         default:
             return event.success == false ? .failed : .completed
-        }
-    }
-
-    private func kindString(_ outcome: AgentOutcome) -> String {
-        switch outcome {
-        case .completed: return "completed"
-        case .failed: return "failed"
-        case .needsInput: return "needsInput"
-        case .cancelled: return "cancelled"
         }
     }
 }

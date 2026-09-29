@@ -12,12 +12,6 @@ struct MochinotchApp: App {
         } label: {
             Image(systemName: "capsule.portrait.fill")
         }
-
-        Settings {
-            SettingsView()
-                .environment(AppModel.shared)
-                .frame(width: 440, height: 320)
-        }
     }
 }
 
