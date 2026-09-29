@@ -288,6 +288,12 @@ struct IslandActivity: Identifiable, Equatable {
         }
     }
 
+    /// 완료가 아닌 작업만. 성공은 기본값이라 매번 뱃지를 달지 않는다.
+    var expandedBadge: (label: String, color: Color)? {
+        guard case .agent(_, let outcome, _, _, _) = payload, outcome != .completed else { return nil }
+        return (outcome.shortLabel, outcome.tint)
+    }
+
     var symbol: String {
         switch payload {
         case .hint:

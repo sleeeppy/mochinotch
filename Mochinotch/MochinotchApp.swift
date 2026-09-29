@@ -4,13 +4,14 @@ import SwiftUI
 @main
 struct MochinotchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    /// 메뉴바 아이콘은 쓰지 않는다. Scene은 있어야 앱이 살아 있다.
+    @State private var showMenuBarExtra = false
 
     var body: some Scene {
-        MenuBarExtra {
-            MenuContent()
-                .environment(AppModel.shared)
+        MenuBarExtra(isInserted: $showMenuBarExtra) {
+            EmptyView()
         } label: {
-            Image(systemName: "capsule.portrait.fill")
+            EmptyView()
         }
     }
 }

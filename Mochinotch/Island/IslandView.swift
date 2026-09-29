@@ -679,6 +679,8 @@ private struct ExpandedIslandContent: View {
     @Environment(AppModel.self) private var model
     let metrics: IslandMetrics
     @State private var clearHovered = false
+    @State private var closeHovered = false
+    @State private var settingsHovered = false
 
     var body: some View {
         let topInset = model.notch.hasNotch ? model.notch.anchorHeight : 14
@@ -686,9 +688,17 @@ private struct ExpandedIslandContent: View {
             Color.clear.frame(height: topInset)
             header
                 .padding(.horizontal, 18)
-                .padding(.bottom, 8)
+                .padding(.bottom, 7)
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 1)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
             ZStack(alignment: .topLeading) {
-                if model.activities.isEmpty {
+                if model.showsSettings {
+                    SettingsView()
+                        .transition(.opacity.combined(with: .offset(y: 6)))
+                } else if model.activities.isEmpty {
                     empty
                         .transition(.opacity.animation(.easeOut(duration: 0.26).delay(0.14)))
                 } else {
@@ -702,29 +712,51 @@ private struct ExpandedIslandContent: View {
                 }
             }
             .animation(.easeInOut(duration: 0.32), value: model.activities.isEmpty)
+            .animation(IslandMotion.morph, value: model.showsSettings)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .padding(.horizontal, metrics.shoulder)
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 4) {
             Text("もちノッチ")
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(IslandColor.secondary)
+                .foregroundStyle(Color.white.opacity(0.82))
+            Button {
+                model.toggleSettings()
+            } label: {
+                Image(systemName: model.showsSettings ? "gearshape.fill" : "gearshape")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(
+                        model.showsSettings || settingsHovered ? IslandColor.primary : IslandColor.secondary
+                    )
+                    .frame(width: 22, height: 22)
+                    .background(
+                        Circle().fill(
+                            model.showsSettings || settingsHovered ? IslandColor.rowHighlight : Color.clear
+                        )
+                    )
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help(model.showsSettings ? "목록" : "설정")
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.15)) { settingsHovered = hovering }
+            }
             Spacer()
-            if !model.activities.isEmpty {
-                Button {
-                    model.clearHistory()
-                } label: {
-                    Text("지우기")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(clearHovered ? IslandColor.primary : IslandColor.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(clearHovered ? IslandColor.rowHighlight : Color.clear))
+            if model.showsSettings {
+                headerChip("닫기", hovered: closeHovered) {
+                    model.closeSettings()
                 }
-                .buttonStyle(.plain)
+                .onHover { hovering in
+                    withAnimation(.easeOut(duration: 0.15)) { closeHovered = hovering }
+                }
+                .transition(.opacity)
+            } else if !model.activities.isEmpty {
+                headerChip("지우기", hovered: clearHovered, danger: true) {
+                    model.clearHistory()
+                }
                 .onHover { hovering in
                     withAnimation(.easeOut(duration: 0.15)) { clearHovered = hovering }
                 }
@@ -732,11 +764,30 @@ private struct ExpandedIslandContent: View {
             }
         }
         .animation(.easeInOut(duration: 0.22), value: model.activities.isEmpty)
+        .animation(.easeInOut(duration: 0.22), value: model.showsSettings)
+    }
+
+    private func headerChip(_ title: String, hovered: Bool, danger: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(hovered ? (danger ? IslandColor.danger : IslandColor.primary) : IslandColor.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(
+                    Capsule().fill(
+                        hovered
+                            ? (danger ? IslandColor.danger.opacity(0.14) : IslandColor.rowHighlight)
+                            : Color.clear
+                    )
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private var history: some View {
         ScrollView {
-            VStack(spacing: 2) {
+            VStack(spacing: 3) {
                 ForEach(Array(model.activities.enumerated()), id: \.element.id) { index, activity in
                     ActivityRow(activity: activity, order: index)
                 }
@@ -744,20 +795,22 @@ private struct ExpandedIslandContent: View {
             .padding(.horizontal, 8)
             .padding(.bottom, 10)
         }
+        .scrollIndicators(.hidden)
     }
 
     private var empty: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(spacing: 5) {
             Text("지금은 조용해요")
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
             Text("충전기, 작업 완료, 알림이 여기 쌓여요.")
                 .font(.system(size: 12))
                 .foregroundStyle(IslandColor.secondary)
         }
         .foregroundStyle(IslandColor.primary)
+        .multilineTextAlignment(.center)
         .padding(.horizontal, 18)
-        .padding(.bottom, 16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -782,7 +835,9 @@ private struct ActivityRow: View {
                 .buttonStyle(.plain)
             }
         }
-        .onHover { hovered = $0 }
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.15)) { hovered = hovering }
+        }
         .opacity(landed ? 1 : 0)
         .offset(y: landed ? 0 : -10)
         .animation(
@@ -793,34 +848,52 @@ private struct ActivityRow: View {
     }
 
     private var row: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 11) {
             ActivityIcon(activity: activity, size: 32)
             VStack(alignment: .leading, spacing: 2) {
-                HStack {
+                HStack(spacing: 6) {
                     Text(activity.expandedTitle)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(IslandColor.primary)
                         .lineLimit(1)
+                    if let badge = activity.expandedBadge {
+                        Text(badge.label)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(badge.color)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(badge.color.opacity(0.18)))
+                    }
                     Spacer(minLength: 8)
-                    Text(Self.relative.localizedString(for: activity.createdAt, relativeTo: Date()))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(IslandColor.secondary)
+                    TimelineView(.periodic(from: .now, by: 30)) { context in
+                        Text(Self.relative.localizedString(for: activity.createdAt, relativeTo: context.date))
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(IslandColor.secondary)
+                            .monospacedDigit()
+                    }
                 }
-                Text(activity.expandedDetail)
-                    .font(.system(size: 12))
-                    .foregroundStyle(IslandColor.secondary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
+                if !activity.expandedDetail.isEmpty {
+                    Text(activity.expandedDetail)
+                        .font(.system(size: 12))
+                        .foregroundStyle(IslandColor.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+            }
+            if !activity.openBundleIDs.isEmpty {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(Color.white.opacity(hovered ? 0.42 : 0.22))
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .fill(hovered ? IslandColor.rowHighlight : Color.clear)
         )
-        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 
     private static let relative: RelativeDateTimeFormatter = {
