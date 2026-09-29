@@ -67,13 +67,30 @@ enum AgentTool: String, Equatable {
         }
     }
 
-    /// 화면 가장자리와 왼쪽 오라에 쓰는 색.
+    /// 왼쪽 오라에 쓰는 색. 화면 가장자리 색도 Cursor 말고는 같다.
     var screenTintRGB: (CGFloat, CGFloat, CGFloat) {
         switch self {
         case .cursor: return (0.34, 0.35, 0.37)
         case .claude: return (0.95, 0.45, 0.27)
         case .codex: return (1, 1, 1)
         case .custom: return (1, 1, 1)
+        }
+    }
+
+    /// 화면 가장자리에 섞는 색. Cursor 회색은 밝은 화면에서도 어두운 화면에서도 묻혀서, 차가운 은빛으로 쓴다.
+    var edgeTintRGB: (CGFloat, CGFloat, CGFloat) {
+        switch self {
+        case .cursor: return (0.74, 0.78, 0.86)
+        default: return screenTintRGB
+        }
+    }
+
+    /// 가장자리 색이 안쪽으로 줄어드는 가파르기. 1이면 넓게 번지고, 클수록 화면 끝에 붙는다.
+    /// 밝은 은빛을 넓게 섞으면 어두운 화면이 안개처럼 뜬다.
+    var edgeRim: Double {
+        switch self {
+        case .cursor: return 2.2
+        default: return 1
         }
     }
 

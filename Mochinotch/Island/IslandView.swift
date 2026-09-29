@@ -18,31 +18,43 @@ struct IslandRootView: View {
             let depth = min(1, max(0, (shown.height - 70) / 140))
 
             ZStack(alignment: .top) {
-                shape
-                    .fill(IslandColor.plate)
-                    .frame(width: shown.width, height: shown.height)
-                    .background(alignment: .top) {
-                        if !model.introBeads.isEmpty {
-                            IntroBeads(shown: shown, beads: model.introBeads)
-                        }
-                    }
-                    .shadow(color: .black.opacity(0.45 * depth), radius: 18, y: 8)
-
-                NotchGlow(
-                    shoulder: shown.shoulder,
-                    radius: shown.radius,
-                    width: shown.width,
-                    height: shown.height,
-                    envelope: model.edgeGlow,
-                    travel: model.edgeGlowTravel,
-                    color: model.edgeGlowColor
-                )
-
-                if model.featured?.isFailure == true && model.presentation != .idle {
-                    NotchShape(shoulder: shown.shoulder, radius: shown.radius, closesTop: false)
-                        .stroke(IslandColor.danger.opacity(0.85), lineWidth: 1.5)
-                        .blur(radius: 0.4)
+                ZStack(alignment: .top) {
+                    shape
+                        .fill(IslandColor.plate)
                         .frame(width: shown.width, height: shown.height)
+                        .background(alignment: .top) {
+                            if !model.introBeads.isEmpty {
+                                IntroBeads(shown: shown, beads: model.introBeads)
+                            }
+                        }
+                        .shadow(color: .black.opacity(0.45 * depth), radius: 18, y: 8)
+
+                    NotchGlow(
+                        shoulder: shown.shoulder,
+                        radius: shown.radius,
+                        width: shown.width,
+                        height: shown.height,
+                        envelope: model.edgeGlow,
+                        travel: model.edgeGlowTravel,
+                        color: model.edgeGlowColor
+                    )
+
+                    if model.featured?.isFailure == true && model.presentation != .idle {
+                        NotchShape(shoulder: shown.shoulder, radius: shown.radius, closesTop: false)
+                            .stroke(IslandColor.danger.opacity(0.85), lineWidth: 1.5)
+                            .blur(radius: 0.4)
+                            .frame(width: shown.width, height: shown.height)
+                    }
+                }
+                // 판만 늘어나고 글자는 그대로 둔다. 1보다 작아지면 하드웨어 노치 바닥이 드러난다.
+                .keyframeAnimator(initialValue: 1.0, trigger: model.boingToken) { plate, stretch in
+                    plate.scaleEffect(x: 1, y: max(1, stretch), anchor: .top)
+                } keyframes: { _ in
+                    LinearKeyframe(1.0, duration: 0.08)
+                    CubicKeyframe(1.2, duration: 0.17)
+                    CubicKeyframe(1.0, duration: 0.2)
+                    CubicKeyframe(1.065, duration: 0.15)
+                    CubicKeyframe(1.0, duration: 0.22)
                 }
 
                 IslandFace(shape: shown)
@@ -90,9 +102,10 @@ private struct NotchGlow: View {
     }
 
     /// 화면이 천천히 밝아지는 동안에도 선은 바로 보인다. 사라질 때만 같이 꺼진다.
+    /// 효과가 다 찬(1) 뒤, 사라지기 전에 따라가기 시작해야 이어받는 순간 튀지 않는다.
     private var lineOpacity: Double {
         guard envelope > 0.001 else { return 0 }
-        if travel < 0.47 { return 1 }
+        if travel < 0.3 { return 1 }
         return envelope
     }
 
@@ -406,6 +419,100 @@ private struct IntroMark: View {
     }
 }
 
+/// 작업 완료 때 왼쪽. 아이콘이 노치 안에서 쏙 내려와 바닥에 눌렸다 튀어 서고, 이름이 한 자씩 따라 나온다.
+private struct AgentLead: View {
+    let activity: IslandActivity
+    @State private var shown = false
+
+    var body: some View {
+        let letters = Array(activity.leadingText)
+        HStack(spacing: 6) {
+            ActivityIcon(activity: activity, size: activity.compactIconSize)
+                .opacity(shown ? 1 : 0)
+                .keyframeAnimator(initialValue: Squish.rest, trigger: shown) { icon, pose in
+                    icon
+                        .scaleEffect(x: pose.x, y: pose.y, anchor: .bottom)
+                        .offset(y: pose.lift)
+                        .opacity(pose.opacity)
+                } keyframes: { _ in
+                    KeyframeTrack(\.x) {
+                        MoveKeyframe(0.4)
+                        LinearKeyframe(0.4, duration: 0.1)
+                        CubicKeyframe(0.9, duration: 0.15)
+                        CubicKeyframe(1.2, duration: 0.1)
+                        CubicKeyframe(0.95, duration: 0.14)
+                        CubicKeyframe(1, duration: 0.16)
+                    }
+                    KeyframeTrack(\.y) {
+                        MoveKeyframe(0.4)
+                        LinearKeyframe(0.4, duration: 0.1)
+                        CubicKeyframe(1.16, duration: 0.15)
+                        CubicKeyframe(0.8, duration: 0.1)
+                        CubicKeyframe(1.05, duration: 0.14)
+                        CubicKeyframe(1, duration: 0.16)
+                    }
+                    KeyframeTrack(\.lift) {
+                        MoveKeyframe(-9)
+                        LinearKeyframe(-9, duration: 0.1)
+                        CubicKeyframe(0, duration: 0.15)
+                    }
+                    KeyframeTrack(\.opacity) {
+                        MoveKeyframe(0)
+                        LinearKeyframe(0, duration: 0.1)
+                        LinearKeyframe(1, duration: 0.08)
+                    }
+                }
+            HStack(spacing: 0) {
+                ForEach(Array(letters.enumerated()), id: \.offset) { index, letter in
+                    Text(String(letter))
+                        .opacity(shown ? 1 : 0)
+                        .offset(x: shown ? 0 : -5, y: shown ? 0 : 5)
+                        .blur(radius: shown ? 0 : 3)
+                        .animation(
+                            .spring(response: 0.36, dampingFraction: 0.62).delay(0.2 + Double(index) * 0.026),
+                            value: shown
+                        )
+                }
+            }
+            .lineLimit(1)
+        }
+        .onAppear { shown = true }
+    }
+}
+
+/// 작업 완료 때 오른쪽 결과. 아이콘이 앉은 뒤 한 자씩 뿅 튀어나온다.
+private struct AgentTrail: View {
+    let activity: IslandActivity
+    @State private var shown = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(activity.trailingText.enumerated()), id: \.offset) { index, letter in
+                Text(String(letter))
+                    .scaleEffect(shown ? 1 : 0.3)
+                    .rotationEffect(.degrees(shown ? 0 : 14))
+                    .offset(y: shown ? 0 : 4)
+                    .opacity(shown ? 1 : 0)
+                    .animation(
+                        .spring(response: 0.38, dampingFraction: 0.48).delay(0.34 + Double(index) * 0.06),
+                        value: shown
+                    )
+            }
+        }
+        .foregroundStyle(activity.tint)
+        .onAppear { shown = true }
+    }
+}
+
+private struct Squish {
+    var x: CGFloat
+    var y: CGFloat
+    var lift: CGFloat
+    var opacity: Double
+
+    static let rest = Squish(x: 1, y: 1, lift: 0, opacity: 1)
+}
+
 private struct CompactIslandContent: View {
     @Environment(AppModel.self) private var model
     let metrics: IslandMetrics
@@ -442,7 +549,18 @@ private struct CompactIslandContent: View {
 
     @ViewBuilder
     private func ear(_ activity: IslandActivity?, alignment: Alignment) -> some View {
-        if let activity, !activity.isIntro {
+        if let activity, case .agent = activity.payload {
+            if alignment == .leading {
+                AgentLead(activity: activity)
+                    .id(activity.id)
+                    .padding(.leading, 14)
+            } else {
+                AgentTrail(activity: activity)
+                    .id(activity.id)
+                    .padding(.trailing, 14)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        } else if let activity, !activity.isIntro {
             if alignment == .leading {
                 HStack(spacing: 6) {
                     ActivityIcon(activity: activity, size: activity.compactIconSize)

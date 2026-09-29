@@ -53,6 +53,8 @@ final class AppModel {
     private var pendingPresentation: IslandPresentation?
     private(set) var serverError: String?
     private(set) var shakeToken = 0
+    /// 작업이 끝나 펼쳐질 때 노치가 아래로 한 번 말랑하게 늘어난다.
+    private(set) var boingToken = 0
     private(set) var chargePulse = 0
     private(set) var notificationAccess: NotificationAccess = .starting
     private(set) var duoMessage: String?
@@ -618,7 +620,7 @@ final class AppModel {
         }
         switch tool {
         case .cursor, .claude, .codex:
-            let rgb = tool.screenTintRGB
+            let rgb = tool.edgeTintRGB
             return NSColor(srgbRed: rgb.0, green: rgb.1, blue: rgb.2, alpha: 1)
         case .custom:
             return IconTint.color(for: tool)
@@ -839,10 +841,12 @@ final class AppModel {
         }
         featuredID = activity.id
         if case .agent(let tool, let outcome, _, _, _) = activity.payload, tool.playsDuo, outcome != .cancelled {
-            DuoPulse.shared.play(tint: Self.duoTint(for: tool, outcome: outcome))
+            DuoPulse.shared.play(tint: Self.duoTint(for: tool, outcome: outcome), rim: outcome == .failed ? 1 : tool.edgeRim)
         }
         if activity.isFailure {
             shakeToken += 1
+        } else if case .agent(_, let outcome, _, _, _) = activity.payload, outcome != .cancelled, !isHovering {
+            boingToken += 1
         }
         if let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
            activity.clearsWhenFocused(front),

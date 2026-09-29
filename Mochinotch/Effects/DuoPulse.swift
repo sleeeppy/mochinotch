@@ -92,7 +92,7 @@ enum IconTint {
     }
 }
 
-/// Cursor, Claude, Codex가 끝날 때, 찍힌 화면 자체를 가장자리에서 유리처럼 굴절시킨다.
+/// Cursor, Claude, Codex가 끝날 때, 찍힌 화면의 가장자리에 노치에서 흘러나온 빛과 앱 색을 입힌다.
 /// 선으로 테두리를 그리지 않는다. 앱 색은 휜 가장자리에만 얇게 섞인다.
 @MainActor
 final class DuoPulse: NSObject {
@@ -108,13 +108,16 @@ final class DuoPulse: NSObject {
     private var displayLink: CADisplayLink?
     private var stream: SCStream?
     private var startedAt: TimeInterval = 0
+    private var requestedAt: TimeInterval = 0
     private var generation = 0
-    private let duration: TimeInterval = 6.2
+    private var duration: TimeInterval { Self.fallStart + Self.fallLength }
     private let renderer = LiveRenderer()
 
-    func play(tint color: NSColor) {
+    /// `rim`이 1보다 크면 가장자리 색이 화면 끝에 바짝 붙는다.
+    func play(tint color: NSColor, rim: Double = 1) {
         let rgb = color.usingColorSpace(.sRGB) ?? color
         tint = (rgb.redComponent, rgb.greenComponent, rgb.blueComponent)
+        renderer.setRim(rim)
         guard CGPreflightScreenCaptureAccess() else {
             onStatus?("화면 왜곡 · 화면 기록 스위치가 이 실행 파일에는 아직 안 붙었어요")
             Self.log("preflight denied, prompt skipped")
@@ -154,7 +157,11 @@ final class DuoPulse: NSObject {
         guard let display = content.displays.first(where: { $0.displayID == displayID }) ?? content.displays.first else {
             throw CaptureError.noDisplay
         }
-        renderer.resize(pixels: CGSize(width: display.width, height: display.height), points: screen.frame.size)
+        // `SCDisplay` 크기는 포인트다. 그대로 찍으면 레티나에서 반 해상도라, 효과 동안 화면 전체가 뿌예진다.
+        let scale = screen.backingScaleFactor
+        let pixelWidth = Int((CGFloat(display.width) * scale).rounded())
+        let pixelHeight = Int((CGFloat(display.height) * scale).rounded())
+        renderer.resize(pixels: CGSize(width: pixelWidth, height: pixelHeight), points: screen.frame.size)
         renderer.placeNotch(notch)
         renderer.update(envelope: 0, time: 0, tint: tint, active: true)
 
@@ -189,8 +196,8 @@ final class DuoPulse: NSObject {
         let excluded = content.applications.filter { $0.bundleIdentifier == ownID }
         let filter = SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: [])
         let configuration = SCStreamConfiguration()
-        configuration.width = display.width
-        configuration.height = display.height
+        configuration.width = pixelWidth
+        configuration.height = pixelHeight
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
         configuration.showsCursor = false
         configuration.capturesAudio = false
@@ -202,6 +209,7 @@ final class DuoPulse: NSObject {
         self.stream = stream
 
         startedAt = CACurrentMediaTime()
+        requestedAt = startedAt
         guard let view else { return }
         let link = view.displayLink(target: self, selector: #selector(tick(_:)))
         link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
@@ -214,16 +222,27 @@ final class DuoPulse: NSObject {
     }
 
     private func step() {
-        let t = (CACurrentMediaTime() - startedAt) / duration
-        if t >= 1 {
+        // 첫 프레임이 늦게 오면 그동안 흐른 시간만큼 창이 한 번에 켜진다. 첫 프레임이 그려진 때부터 잰다.
+        guard renderer.hasPresented else {
+            startedAt = CACurrentMediaTime()
+            window?.alphaValue = 0
+            if startedAt - requestedAt > 1.5 { finish() }
+            return
+        }
+        let seconds = CACurrentMediaTime() - startedAt
+        if seconds >= duration {
             finish()
             return
         }
-        let envelope = Self.level(t)
-        window?.alphaValue = envelope
-        renderer.update(envelope: envelope, time: t * duration, tint: tint, active: true)
+        let envelope = Self.level(seconds)
+        let falling = seconds >= Self.fallStart
+        // 차오르는 동안은 창을 다 띄우고 세기는 효과 안에서만 올린다. 창 투명도와 세기를 같이 올리면
+        // 둘이 곱해져 초반이 비고, 둘이 따로 움직이면 그 사이에서 깜빡인다.
+        window?.alphaValue = falling ? envelope : Double(Self.smoothstep(0, 0.12, CGFloat(seconds)))
+        let strength = falling ? envelope : Self.swell(seconds)
+        renderer.update(envelope: strength, time: seconds, tint: tint, active: true)
         let color = NSColor(srgbRed: tint.0, green: tint.1, blue: tint.2, alpha: 1)
-        onGlow?(envelope, t, color)
+        onGlow?(envelope, seconds / Self.glowSpan, color)
     }
 
     private func finish() {
@@ -245,12 +264,25 @@ final class DuoPulse: NSObject {
         displayLink = nil
     }
 
-    /// 들어올 때는 약 1.7초. 1.2초 머문 뒤, 초점과 테두리가 약 3.3초에 걸쳐 같이 사라진다.
-    private static func level(_ t: TimeInterval) -> Double {
-        let clamped = min(1, max(0, t))
-        let rise = smootherstep(0, 0.28, clamped)
-        let fall = 1 - smootherstep(0.47, 1, clamped)
-        return rise * fall
+    /// 테두리 색이 사라지기 시작하는 시각.
+    private static let fallStart: TimeInterval = 2.25
+    /// 사라지는 데 걸리는 시간.
+    private static let fallLength: TimeInterval = 3
+    /// 노치 빛줄기의 진행이 0에서 1까지 가는 시간. 효과 길이와 따로 두어 빛줄기 속도는 그대로다.
+    private static let glowSpan: TimeInterval = 6.2
+
+    /// 노치 빛줄기가 따르는 세기. 들어올 때는 약 1.7초. 머문 뒤, 테두리 색과 같이 3초에 걸쳐 사라진다.
+    private static func level(_ seconds: TimeInterval) -> Double {
+        let rise = smootherstep(0, 1.74, CGFloat(seconds))
+        let fall = 1 - smootherstep(CGFloat(fallStart), CGFloat(fallStart + fallLength), CGFloat(seconds))
+        return Double(rise * fall)
+    }
+
+    /// 들어올 때 테두리 색이 차오르는 세기. 쏟아지는 빛 바로 뒤를 따라가도록 처음부터 차오르고,
+    /// 빛이 바닥에 닿을 무렵 부드럽게 다 찬다.
+    private static func swell(_ seconds: Double) -> Double {
+        let linear = min(1, max(0, seconds / 1.45))
+        return 1 - pow(1 - linear, 2.2)
     }
 
     /// 맥북 패널 모서리. 포인트 단위.
@@ -260,7 +292,9 @@ final class DuoPulse: NSObject {
     nonisolated fileprivate static func frame(
         source: CIImage,
         envelope: Double,
+        time: Double,
         tint: (CGFloat, CGFloat, CGFloat),
+        rim: Double,
         cornerRadius: CGFloat,
         notch: CGRect
     ) -> CIImage {
@@ -268,70 +302,134 @@ final class DuoPulse: NSObject {
             source,
             extent: source.extent,
             envelope: envelope,
+            time: time,
             tint: tint,
+            rim: rim,
             cornerRadius: cornerRadius,
             notch: notch
         )
     }
 
-    /// 가장자리만 흐리고, 그 흐린 자리에 앱 색을 아주 약하게 섞는다. 가운데는 원본이다.
+    /// 가장자리에만 앱 색을 아주 약하게 섞는다. 가운데는 원본이다.
     /// 경계는 원이 아니라 맥북 화면처럼 모서리가 살짝 둥근 사각형이다.
+    /// 효과는 노치에서 쏟아져 나와 가장자리를 타고 흘러내린다. 흐르는 앞머리는 앱 색 빛으로 밝다.
     nonisolated private static func focusFrame(
         _ source: CIImage,
         extent: CGRect,
         envelope: Double,
+        time: Double,
         tint: (CGFloat, CGFloat, CGFloat),
+        rim: Double,
         cornerRadius: CGFloat,
         notch: CGRect
     ) -> CIImage {
-        guard envelope > 0.001 else { return source }
-        // 검은 노치를 흐리면 그 어둠이 바닥 아래로 번져, 그 아래를 지나는 글로우만 약해진다.
-        let clean = coveringNotch(source, notch: notch)
-        let small = clean.transformed(by: CGAffineTransform(scaleX: 0.22, y: 0.22))
-        let blurredSmall = small.clampedToExtent()
-            .applyingGaussianBlur(sigma: 5.5 * envelope)
-            .cropped(to: small.extent)
-        let blurred = blurredSmall
-            .transformed(by: CGAffineTransform(scaleX: 1 / 0.22, y: 1 / 0.22))
-            .cropped(to: extent)
+        let pour = pourState(time)
+        guard envelope > 0.001 || pour.front > 0.001 else { return source }
         let wash = CIImage(color: CIColor(red: tint.0, green: tint.1, blue: tint.2, alpha: 1))
             .cropped(to: extent)
-        let border = featheredBorder(extent: extent, cornerRadius: cornerRadius)
+        let feathered = featheredBorder(extent: extent, cornerRadius: cornerRadius)
+        let border = rim > 1.001
+            ? feathered.applyingFilter("CIGammaAdjust", parameters: ["inputPower": rim])
+            : feathered
+        let origin = notch.width > 2
+            ? CGPoint(x: notch.midX, y: notch.minY)
+            : CGPoint(x: extent.midX, y: extent.maxY)
+        let reach = hypot(max(origin.x - extent.minX, extent.maxX - origin.x), origin.y - extent.minY) * 1.05
+        let spill = pourMasks(origin: origin, reach: reach, progress: pour.progress, extent: extent)
+        let poured = multiply(border, spill.reveal)
+        let front = multiply(border, spill.front)
         // 가장자리는 0.44. 화면 안쪽 끝은 같은 자리에서 더 부드럽게 0이 된다.
-        let tintMask = border.applyingFilter("CIColorMatrix", parameters: [
-            "inputRVector": CIVector(x: 0.44 * envelope, y: 0, z: 0, w: 0),
-            "inputGVector": CIVector(x: 0, y: 0.44 * envelope, z: 0, w: 0),
-            "inputBVector": CIVector(x: 0, y: 0, z: 0.44 * envelope, w: 0),
-            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1)
-        ])
+        let tintMask = add(scaled(front, by: 0.34 * pour.front), to: scaled(poured, by: 0.44 * envelope))
         let tinted = wash.applyingFilter("CIBlendWithMask", parameters: [
-            kCIInputBackgroundImageKey: blurred,
-            kCIInputMaskImageKey: tintMask
+            kCIInputBackgroundImageKey: source,
+            kCIInputMaskImageKey: multiply(tintMask, scaled(poured, by: envelope))
         ])
-        let falloff = border.applyingFilter("CIColorMatrix", parameters: [
-            "inputRVector": CIVector(x: envelope, y: 0, z: 0, w: 0),
-            "inputGVector": CIVector(x: 0, y: envelope, z: 0, w: 0),
-            "inputBVector": CIVector(x: 0, y: 0, z: envelope, w: 0),
+        // 밝은 화면에 어두운 앱 색(Cursor 회색)이 섞이면 가장자리가 눌려 보인다. 원래보다 조금만 어두워진다.
+        let focused = tinted.applyingFilter("CIMaximumCompositing", parameters: [
+            kCIInputBackgroundImageKey: scaled(source, by: 0.9)
+        ])
+        guard pour.front > 0.001 else { return focused }
+        // 앞머리 빛. 어두운 앱 색도 빛으로 보이게 흰색 쪽으로 들어 올린다.
+        let lift: CGFloat = 0.45
+        let strength = CGFloat(0.4 * pour.front)
+        let light = front.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: (tint.0 + (1 - tint.0) * lift) * strength, y: 0, z: 0, w: 0),
+            "inputGVector": CIVector(x: 0, y: (tint.1 + (1 - tint.1) * lift) * strength, z: 0, w: 0),
+            "inputBVector": CIVector(x: 0, y: 0, z: (tint.2 + (1 - tint.2) * lift) * strength, w: 0),
             "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1)
         ])
-        return tinted.applyingFilter("CIBlendWithMask", parameters: [
-            kCIInputBackgroundImageKey: source,
-            kCIInputMaskImageKey: falloff
-        ])
+        return add(light, to: focused).cropped(to: extent)
     }
 
-    /// 하드웨어 노치 픽셀을 바로 아래 메뉴 막대 색으로 덮는다. 블러 입력에서만 쓴다.
-    nonisolated private static func coveringNotch(_ source: CIImage, notch: CGRect) -> CIImage {
-        let extent = source.extent
-        let hole = notch.intersection(extent)
-        guard hole.width > 2, hole.height > 2 else { return source }
-        let sample = CGRect(x: hole.minX, y: hole.minY - 2, width: hole.width, height: 2)
-        guard extent.contains(sample) else { return source }
-        let cover = source
-            .cropped(to: sample)
-            .clampedToExtent()
-            .cropped(to: hole)
-        return cover.composited(over: source)
+    /// 색만 더하고 불투명도는 1로 둔다. `CIAdditionCompositing`은 불투명도까지 더해 2가 되고,
+    /// 그 상태로 색이 변환되면 효과가 없는 가운데까지 밝아졌다가 빛이 끝날 때 확 어두워진다.
+    nonisolated private static func add(_ image: CIImage, to background: CIImage) -> CIImage {
+        image.applyingFilter("CILinearDodgeBlendMode", parameters: [kCIInputBackgroundImageKey: background])
+    }
+
+    /// 쏟아지는 데 걸리는 시간. 처음엔 빠르게 튀어나오고 아래로 갈수록 느려진다.
+    nonisolated private static let pourDuration = 1.35
+
+    /// 진행(0~1, 감속)과 앞머리 빛의 세기. 빛은 바로 켜지고 다 흘러내리면 꺼진다.
+    /// 노치 옆에서 세게 켜지면 앞머리가 금방 지나가 그 자리가 확 어두워진다. 노치에서는 은은하게 나와
+    /// 옆으로 흐르며 밝아진다.
+    nonisolated private static func pourState(_ time: Double) -> (progress: CGFloat, front: Double) {
+        let linear = min(1, max(0, time / pourDuration))
+        let eased = 1 - pow(1 - linear, 2)
+        let front = Double(smoothstep(0, 0.25, CGFloat(linear))) * pow(1 - linear, 1.3)
+        return (CGFloat(eased), front)
+    }
+
+    /// 노치에서 퍼지는 원. 안쪽은 이미 흘러내린 자리, 테는 지금 흐르는 앞머리다.
+    nonisolated private static func pourMasks(
+        origin: CGPoint,
+        reach: CGFloat,
+        progress: CGFloat,
+        extent: CGRect
+    ) -> (reveal: CIImage, front: CIImage) {
+        let soft = reach * 0.45
+        let radius = progress * (reach + soft)
+        let center = CIVector(x: origin.x, y: origin.y)
+        func disc(inner: CGFloat, outer: CGFloat) -> CIImage {
+            CIFilter(name: "CIRadialGradient", parameters: [
+                "inputCenter": center,
+                "inputRadius0": max(0, inner),
+                "inputRadius1": max(1, outer),
+                "inputColor0": CIColor.white,
+                "inputColor1": CIColor.black
+            ])?.outputImage?.cropped(to: extent) ?? CIImage(color: .black).cropped(to: extent)
+        }
+        // 원 그라데이션은 직선이라, 다 찬 자리에서 차오르는 속도가 꺾여 멈칫해 보인다. 양 끝을 눕힌다.
+        let reveal = progress >= 1
+            ? CIImage(color: .white).cropped(to: extent)
+            : disc(inner: radius - soft, outer: radius).applyingFilter("CIToneCurve", parameters: [
+                "inputPoint0": CIVector(x: 0, y: 0),
+                "inputPoint1": CIVector(x: 0.25, y: 0.12),
+                "inputPoint2": CIVector(x: 0.5, y: 0.5),
+                "inputPoint3": CIVector(x: 0.75, y: 0.88),
+                "inputPoint4": CIVector(x: 1, y: 1)
+            ])
+        // 앞은 짧게 밝아지고, 지나간 뒤는 길게 식는다.
+        let band = soft * 0.5
+        let outer = disc(inner: radius - band, outer: radius)
+        let inner = disc(inner: radius - band * 4.5, outer: radius - band)
+        let front = inner.applyingFilter("CISubtractBlendMode", parameters: [
+            kCIInputBackgroundImageKey: outer
+        ])
+        return (reveal, front)
+    }
+
+    nonisolated private static func multiply(_ image: CIImage, _ mask: CIImage) -> CIImage {
+        image.applyingFilter("CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: mask])
+    }
+
+    nonisolated private static func scaled(_ mask: CIImage, by amount: Double) -> CIImage {
+        mask.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: amount, y: 0, z: 0, w: 0),
+            "inputGVector": CIVector(x: 0, y: amount, z: 0, w: 0),
+            "inputBVector": CIVector(x: 0, y: 0, z: amount, w: 0),
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1)
+        ])
     }
 
     /// 도달 거리는 그대로 두고, 화면 안쪽 끝만 흐린다.
@@ -432,7 +530,7 @@ final class DuoPulse: NSObject {
     }
 }
 
-/// 화면 스트림의 각 프레임을 그 자리에서 굴절시킨다. 콜백이 끝나는 버퍼는 붙잡지 않는다.
+/// 화면 스트림의 각 프레임에 그 자리에서 효과를 입힌다. 콜백이 끝나는 버퍼는 붙잡지 않는다.
 private final class LiveRenderer: NSObject, SCStreamOutput {
     let metalLayer = CAMetalLayer()
     let queue = DispatchQueue(label: "dev.sleeeppy.mochinotch.duo.stream", qos: .userInteractive)
@@ -478,11 +576,21 @@ private final class LiveRenderer: NSObject, SCStreamOutput {
 
     func update(envelope: Double, time: TimeInterval, tint: (CGFloat, CGFloat, CGFloat), active: Bool) {
         state.withLock {
+            if active, !$0.active { $0.presented = false }
             $0.envelope = envelope
             $0.time = time
             $0.tint = tint
             $0.active = active
         }
+    }
+
+    func setRim(_ rim: Double) {
+        state.withLock { $0.rim = rim }
+    }
+
+    /// 이번 효과에서 한 프레임이라도 그렸는지.
+    var hasPresented: Bool {
+        state.withLock { $0.presented }
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
@@ -496,7 +604,9 @@ private final class LiveRenderer: NSObject, SCStreamOutput {
         let output = DuoPulse.frame(
             source: source,
             envelope: visuals.envelope,
+            time: visuals.time,
             tint: visuals.tint,
+            rim: visuals.rim,
             cornerRadius: visuals.cornerRadius,
             notch: Visuals.notchPixels(visuals.notch, points: visuals.points, extent: source.extent)
         )
@@ -509,14 +619,17 @@ private final class LiveRenderer: NSObject, SCStreamOutput {
         )
         buffer.present(drawable)
         buffer.commit()
+        state.withLock { if $0.active { $0.presented = true } }
     }
 }
 
 private struct Visuals: Sendable {
     var active = false
+    var presented = false
     var envelope = 0.0
     var time = 0.0
     var tint = (CGFloat(0.5), CGFloat(0.5), CGFloat(0.5))
+    var rim = 1.0
     var cornerRadius: CGFloat = 32
     /// 화면 원점 기준 포인트. 노치가 없으면 zero.
     var notch = CGRect.zero
