@@ -13,7 +13,7 @@ struct IslandRootView: View {
 
     /// 창은 고정이고, 모양은 그 안 위 가운데에 붙어 자란다. 글자는 최종 크기로 먼저 놓이고 모양이 그걸 드러낸다.
     private func plate(metrics: IslandMetrics, animation: Animation) -> some View {
-        MorphingNotch(target: metrics, animation: animation) { shown in
+        MorphingNotch(target: metrics, animation: animation, instant: model.introDirect) { shown in
             let shape = NotchShape(shoulder: shown.shoulder, radius: shown.radius)
             let depth = min(1, max(0, (shown.height - 70) / 140))
 
@@ -21,6 +21,11 @@ struct IslandRootView: View {
                 shape
                     .fill(IslandColor.plate)
                     .frame(width: shown.width, height: shown.height)
+                    .background(alignment: .top) {
+                        if !model.introBeads.isEmpty {
+                            IntroBeads(shown: shown, beads: model.introBeads)
+                        }
+                    }
                     .shadow(color: .black.opacity(0.45 * depth), radius: 18, y: 8)
 
                 NotchGlow(
@@ -143,6 +148,8 @@ private struct NotchGlow: View {
 private struct MorphingNotch<Content: View>: View {
     let target: IslandMetrics
     let animation: Animation
+    /// 켤 때 인사처럼 모양을 밖에서 매 프레임 그릴 때. 스프링을 다시 걸지 않는다.
+    var instant = false
     @ViewBuilder var content: (IslandMetrics) -> Content
 
     @State private var base: IslandMetrics?
@@ -170,6 +177,13 @@ private struct MorphingNotch<Content: View>: View {
             self.base = base.morphed(to: goal, progress: clock.value)
             self.goal = new
             guard let base = self.base, base != new else { return }
+            if instant {
+                self.base = new
+                self.goal = new
+                progress = 1
+                clock.value = 1
+                return
+            }
             progress = 0
             clock.value = 0
             let shrinking = new.height + 4 < base.height || new.width + 8 < base.width
@@ -328,6 +342,70 @@ private struct IslandFace: View {
     }
 }
 
+/// 켤 때 인사의 모찌 방울. 몸통과 같이 흐린 뒤 잘라내서, 가까우면 늘어진 목으로 이어지고 멀어지면 끊긴다.
+private struct IntroBeads: View {
+    let shown: IslandMetrics
+    let beads: [IntroBead]
+    private let reach: CGFloat = 200
+
+    var body: some View {
+        Canvas { context, size in
+            // 위 어깨의 오목한 곡선까지 흐리면 메뉴 막대 쪽이 메워진다. 목이 생기는 아래만 그린다.
+            context.clip(to: Path(CGRect(x: 0, y: 9, width: size.width, height: size.height)))
+            context.addFilter(.alphaThreshold(min: 0.5, color: IslandColor.plate))
+            context.addFilter(.blur(radius: 6))
+            context.drawLayer { layer in
+                let body = NotchShape(shoulder: shown.shoulder, radius: shown.radius)
+                    .path(in: CGRect(x: reach, y: 0, width: shown.width, height: shown.height))
+                layer.fill(body, with: .color(.black))
+                for bead in beads {
+                    let x = size.width / 2 + bead.x - shown.shift
+                    let oval = CGRect(x: x - bead.rx, y: bead.y - bead.ry, width: bead.rx * 2, height: bead.ry * 2)
+                    layer.fill(Path(ellipseIn: oval), with: .color(.black))
+                }
+            }
+        }
+        .frame(width: shown.width + reach * 2, height: shown.height + reach)
+        .allowsHitTesting(false)
+    }
+}
+
+private struct IntroMark: View {
+    let activity: IslandActivity
+    @State private var icon = false
+    @State private var name = false
+
+    var body: some View {
+        HStack(spacing: 11) {
+            // 바닥에 붙어 납작하게 떨어졌다가 튀어 선다.
+            ActivityIcon(activity: activity, size: 36)
+                .scaleEffect(x: icon ? 1 : 1.5, y: icon ? 1 : 0.5, anchor: .bottom)
+                .rotationEffect(.degrees(icon ? 0 : -12), anchor: .bottom)
+                .opacity(icon ? 1 : 0)
+                .animation(.spring(response: 0.42, dampingFraction: 0.42), value: icon)
+            // 글자마다 한 박자씩 늦게 올라온다.
+            HStack(spacing: 0) {
+                ForEach(Array(activity.leadingText.enumerated()), id: \.offset) { index, letter in
+                    Text(String(letter))
+                        .opacity(name ? 1 : 0)
+                        .offset(y: name ? 0 : 10)
+                        .scaleEffect(name ? 1 : 0.4, anchor: .bottom)
+                        .blur(radius: name ? 0 : 4)
+                        .animation(
+                            .spring(response: 0.44, dampingFraction: 0.52).delay(0.1 + Double(index) * 0.05),
+                            value: name
+                        )
+                }
+            }
+            .font(.system(size: 21, weight: .bold, design: .rounded))
+        }
+        .onAppear {
+            icon = true
+            name = true
+        }
+    }
+}
+
 private struct CompactIslandContent: View {
     @Environment(AppModel.self) private var model
     let metrics: IslandMetrics
@@ -335,15 +413,23 @@ private struct CompactIslandContent: View {
 
     var body: some View {
         // 귀가 비어도 폭을 지키도록 빈 칸 위에 얹는다. 빈 뷰에 건 frame은 폭이 사라져 글자가 노치 밑으로 밀린다.
-        HStack(spacing: 0) {
-            Color.clear
-                .frame(width: metrics.ear)
-                .overlay(alignment: .leading) { ear(activity, alignment: .leading) }
-            Color.clear
-                .frame(width: metrics.camera)
-            Color.clear
-                .frame(width: metrics.ear)
-                .overlay(alignment: .trailing) { ear(activity, alignment: .trailing) }
+        ZStack {
+            HStack(spacing: 0) {
+                Color.clear
+                    .frame(width: metrics.ear)
+                    .overlay(alignment: .leading) { ear(activity, alignment: .leading) }
+                Color.clear
+                    .frame(width: metrics.camera)
+                Color.clear
+                    .frame(width: metrics.ear)
+                    .overlay(alignment: .trailing) { ear(activity, alignment: .trailing) }
+            }
+            if let activity, activity.isIntro {
+                IntroMark(activity: activity)
+                    .id(activity.id)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 10)
+            }
         }
         .padding(.horizontal, metrics.camera > 0 ? 0 : 4)
         .font(.system(size: 13, weight: .semibold, design: .rounded))
@@ -356,7 +442,7 @@ private struct CompactIslandContent: View {
 
     @ViewBuilder
     private func ear(_ activity: IslandActivity?, alignment: Alignment) -> some View {
-        if let activity {
+        if let activity, !activity.isIntro {
             if alignment == .leading {
                 HStack(spacing: 6) {
                     ActivityIcon(activity: activity, size: activity.compactIconSize)

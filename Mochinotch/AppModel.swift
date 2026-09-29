@@ -1,8 +1,36 @@
 import AppKit
 import ApplicationServices
 import Observation
+import QuartzCore
 import ServiceManagement
 import SwiftUI
+
+/// 화면 주사율에 맞춰 인사 시계를 돌린다. `Task.sleep`으로 찍으면 프레임이 밀리거나 겹친다.
+@MainActor
+private final class IntroClock: NSObject {
+    private var link: CADisplayLink?
+    private var onFrame: ((CFTimeInterval) -> Void)?
+
+    func start(_ onFrame: @escaping (CFTimeInterval) -> Void) {
+        stop()
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        self.onFrame = onFrame
+        let link = screen.displayLink(target: self, selector: #selector(tick(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    func stop() {
+        link?.invalidate()
+        link = nil
+        onFrame = nil
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        onFrame?(link.targetTimestamp)
+    }
+}
 
 @MainActor
 @Observable
@@ -40,6 +68,15 @@ final class AppModel {
     private var hoverTask: Task<Void, Never>?
     private var leaveTask: Task<Void, Never>?
     private var dismissTask: Task<Void, Never>?
+    private var introTask: Task<Void, Never>?
+    private let introClock = IntroClock()
+    /// 켤 때 인사. 노치보다 통통한 모양을 직접 잡는다.
+    private var introShape: IslandMetrics?
+    /// 인사 도중에는 노치 스프링을 쓰지 않고, 안무가 그린 모양을 그대로 보여 준다.
+    private(set) var introDirect = false
+    /// 노치에서 떨어져 나온 모찌 방울들.
+    private(set) var introBeads: [IntroBead] = []
+    private var introGlowing = false
     private var clearTask: Task<Void, Never>?
     /// 지우기 직후 높이를 잠깐 유지한다. 글자가 사라진 뒤에 모양이 따라 줄어든다.
     private var frozenRows: Int?
@@ -58,7 +95,8 @@ final class AppModel {
     }
 
     var metrics: IslandMetrics {
-        IslandMetrics.resolve(
+        if let introShape { return introShape }
+        return IslandMetrics.resolve(
             notch: notch,
             presentation: presentation,
             rowCount: frozenRows ?? activities.count,
@@ -621,14 +659,122 @@ final class AppModel {
         alert.runModal()
     }
 
+    func previewIntro(_ study: IntroStudy) {
+        playIntro(study, quietOnly: false)
+    }
+
+    /// 앱을 켤 때는 모찌 시안.
     private func showWelcome() {
+        playIntro(.mochi, quietOnly: true)
+    }
+
+    private func playIntro(_ study: IntroStudy, quietOnly: Bool) {
+        cancelIntro()
+        introTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(quietOnly ? 240 : 40))
+            guard let self, !Task.isCancelled else { return }
+            if quietOnly, !self.activities.isEmpty || self.presentation != .idle || self.isHovering { return }
+            if self.isHovering { return }
+            self.startIntro(IntroScript.make(study))
+        }
+    }
+
+    /// 안무는 시각만으로 모양을 정한다. 프레임이 늦게 와도 그 시각의 모양을 그려서 밀리지 않는다.
+    private func startIntro(_ script: IntroScript) {
+        activities.removeAll { $0.isIntro }
+        presentation = .idle
+        let idle = IslandMetrics.resolve(notch: notch, presentation: .idle, rowCount: 0)
+        introDirect = true
+        var began: CFTimeInterval?
+        var revealed = false
+        introClock.start { [weak self] now in
+            guard let self else { return }
+            let start = began ?? now
+            began = start
+            let t = now - start
+            if self.isHovering {
+                self.finishIntro(fold: false)
+                return
+            }
+            let pose = script.pose(t)
+            self.introShape = self.introBlob(from: idle, left: pose.left, right: pose.right, extraHeight: pose.drop)
+            if self.introBeads != pose.beads {
+                self.introBeads = pose.beads
+            }
+            if !revealed, t >= script.reveal {
+                revealed = true
+                self.revealIntro()
+            }
+            if let glow = script.glow {
+                self.introGlow(t - glow)
+            }
+            if t >= script.length {
+                self.finishIntro(fold: true)
+            }
+        }
+    }
+
+    /// 벌어진 윤곽을 따라 빛이 한 바퀴 돈다. 에이전트 완료 때와 같은 선이다.
+    private func introGlow(_ elapsed: Double) {
+        guard elapsed >= 0 else { return }
+        let travel = min(1, elapsed / 1.9)
+        introGlowing = true
+        edgeGlowColor = Color(red: 1, green: 0.9, blue: 0.95)
+        edgeGlowTravel = travel
+        edgeGlow = travel < 0.47 ? 1 : max(0, 1 - (travel - 0.47) / 0.16)
+    }
+
+    private func revealIntro() {
         let activity = IslandActivity(
             id: UUID(),
             payload: .hint(title: "もちノッチ", detail: "노치에 마우스를 올려보세요"),
             createdAt: Date(),
             keepsHistory: false
         )
-        present(activity, seconds: 2.8)
+        activities.removeAll { $0.isIntro }
+        activities.insert(activity, at: 0)
+        featuredID = activity.id
+        presentation = .compact
+    }
+
+    private func finishIntro(fold: Bool) {
+        introTask = nil
+        introClock.stop()
+        introDirect = false
+        introShape = nil
+        introBeads = []
+        if introGlowing {
+            introGlowing = false
+            edgeGlow = 0
+            edgeGlowTravel = 0
+        }
+        activities.removeAll { $0.isIntro }
+        if fold {
+            setPresentation(.idle)
+        }
+    }
+
+    private func cancelIntro() {
+        introTask?.cancel()
+        finishIntro(fold: false)
+    }
+
+    /// `left`·`right`는 노치 밖으로 한쪽만 더 내미는 길이.
+    private func introBlob(from idle: IslandMetrics, left: CGFloat, right: CGFloat, extraHeight: CGFloat) -> IslandMetrics {
+        var shape = idle
+        // 노치 아래로 내려온 만큼 옆벽을 노치 밖에 둔다. 세로 변은 어깨만큼 안쪽에 서서, 안 밀면 노치 모서리가 비친다.
+        let hang = max(0, extraHeight)
+        let clearance = (idle.shoulder + 1) * min(1, hang / 1.5)
+        let leftEdge = -(idle.width / 2) - max(left, clearance)
+        let rightEdge = idle.width / 2 + max(right, clearance)
+        shape.width = max(1, rightEdge - leftEdge)
+        shape.shift = (leftEdge + rightEdge) / 2
+        // 튕겨 올라오며 노치 위로 넘친 만큼 줄이면 노치 바닥이 아래로 삐져나온다.
+        shape.height = idle.height + hang
+        // 늘어난 만큼만 둥글게 한다. 늘어나기 시작하는 순간 반경을 바꾸면 모서리가 튄다.
+        shape.radius = min(28, idle.radius + max(0, extraHeight) * 0.46)
+        shape.ear = max(0, (shape.width - idle.camera) / 2)
+        return shape
     }
 
     private func handlePower(_ event: PowerEvent) {
@@ -674,6 +820,7 @@ final class AppModel {
     }
 
     private func present(_ activity: IslandActivity, seconds: Double) {
+        cancelIntro()
         hoverTask?.cancel()
         leaveTask?.cancel()
         clearTask?.cancel()

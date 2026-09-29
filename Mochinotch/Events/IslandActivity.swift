@@ -177,6 +177,12 @@ struct IslandActivity: Identifiable, Equatable {
         return false
     }
 
+    /// 켜질 때 노치가 한 번 깨어나는 인사. 아이콘과 이름을 가운데에 크게 둔다.
+    var isIntro: Bool {
+        if case .hint = payload { return true }
+        return false
+    }
+
     /// Cursor, Claude, Codex 알림. 오른쪽 개수 배지 대신 노치 왼쪽에 아이콘만 둔다.
     var isAgentNotice: Bool {
         guard case .notice(let appName, _, _, let bundleID) = payload else { return false }

@@ -32,6 +32,9 @@ struct MenuContent: View {
 
         Divider()
 
+        ForEach(IntroStudy.allCases, id: \.self) { study in
+            Button(study.title) { model.previewIntro(study) }
+        }
         Button("충전 연결 테스트") { model.simulateCharge() }
         Button("충전 해제 테스트") { model.simulateUnplug() }
         Button("Claude Code 완료 테스트") { model.simulateAgent(tool: .claude, outcome: .completed) }

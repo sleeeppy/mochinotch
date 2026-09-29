@@ -219,7 +219,6 @@ struct IslandMetrics: Equatable {
         let bloom = recenters ? Self.smooth(progress, from: 0.14) : progress
         let notchWidth = max(camera, target.camera)
         let notchHeight = min(height, target.height)
-        let keepWallsOut = abs(shift) > 1 || abs(target.shift) > 1
         var shown = target
         shown.ear = lerp(ear, target.ear, progress)
         shown.camera = lerp(camera, target.camera, progress)
@@ -246,18 +245,23 @@ struct IslandMetrics: Equatable {
             shown.width = max(1, lerp(width, target.width, bloom))
             shown.shift = lerp(shift, target.shift, bloom)
         }
-        return shown.covering(notchWidth: notchWidth, notchHeight: notchHeight, keepWallsOut: keepWallsOut)
+        // 한쪽으로 치우치거나 노치 아래로 내려온 만큼 세로 변을 카메라 밖으로 민다.
+        // 켜고 끄듯 밀면 치우침이나 높이가 1pt를 넘는 순간 벽이 7pt 튄다.
+        let offCenter = max(abs(shift), abs(target.shift))
+        let hang = shown.height - notchHeight
+        let wallWeight = min(1, max(0, max(offCenter, hang)) / 6)
+        return shown.covering(notchWidth: notchWidth, notchHeight: notchHeight, wallWeight: wallWeight)
     }
 
     /// 몸통이 하드웨어 노치보다 작아지거나 한쪽으로 빠져 노치 가장자리가 보이지 않게 한다.
     /// 세로 변은 바깥 폭보다 어깨만큼 안쪽에 있고, 아래 모서리는 거기서 더 들어간다.
-    private func covering(notchWidth: CGFloat, notchHeight: CGFloat, keepWallsOut: Bool) -> IslandMetrics {
+    private func covering(notchWidth: CGFloat, notchHeight: CGFloat, wallWeight: CGFloat) -> IslandMetrics {
         var shown = self
         if notchHeight > 1 {
             shown.height = max(shown.height, notchHeight)
         }
         if notchWidth > 1 {
-            let lip = keepWallsOut ? shown.wallClearance(notchHeight: notchHeight) : 0
+            let lip = shown.wallClearance(notchHeight: notchHeight) * wallWeight
             let leftEdge = min(shown.shift - shown.width / 2, -notchWidth / 2 - lip)
             let rightEdge = max(shown.shift + shown.width / 2, notchWidth / 2 + lip)
             shown.width = max(1, rightEdge - leftEdge)
