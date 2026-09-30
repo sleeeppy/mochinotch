@@ -309,6 +309,7 @@ enum IslandColor {
     static let claude = Color(red: 0.855, green: 0.467, blue: 0.341)
     static let cursor = Color(red: 0.486, green: 0.361, blue: 0.988)
     static let codex = Color(red: 0.133, green: 0.773, blue: 0.369)
+    static let kiro = Color(red: 0.53, green: 0.30, blue: 0.96)
 }
 
 enum MochinotchConfig {

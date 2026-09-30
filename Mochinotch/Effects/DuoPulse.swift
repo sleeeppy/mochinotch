@@ -92,7 +92,7 @@ enum IconTint {
     }
 }
 
-/// Cursor, Claude, Codex가 끝날 때, 찍힌 화면의 가장자리에 노치에서 흘러나온 빛과 앱 색을 입힌다.
+/// AI 도구가 끝날 때, 찍힌 화면의 가장자리에 노치에서 흘러나온 빛과 앱 색을 입힌다.
 /// 선으로 테두리를 그리지 않는다. 앱 색은 휜 가장자리에만 얇게 섞인다.
 @MainActor
 final class DuoPulse: NSObject {
@@ -216,7 +216,10 @@ final class DuoPulse: NSObject {
         guard renderer.hasPresented else {
             startedAt = CACurrentMediaTime()
             window?.alphaValue = 0
-            if startedAt - requestedAt > 1.5 { finish() }
+            if startedAt - requestedAt > 1.5 {
+                Self.log("no frame in 1.5s, skipped")
+                finish()
+            }
             return
         }
         let seconds = CACurrentMediaTime() - startedAt

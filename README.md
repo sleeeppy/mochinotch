@@ -34,7 +34,7 @@
 
 ### AI 작업이 끝나면
 
-Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지며 알려 줍니다. 테두리를 따라 빛이 한 바퀴 돌고, 화면 가장자리까지 그 앱 색으로 은은하게 빛나요.
+Claude Code, Cursor, Codex, Kiro가 작업을 마치면 노치가 옆으로 펼쳐지며 알려 줍니다. 테두리를 따라 빛이 한 바퀴 돌고, 화면 가장자리까지 그 앱 색으로 은은하게 빛나요.
 
 <p align="center">
   <img src="docs/images/complete.gif" width="720" alt="작업이 끝나면 화면 가장자리가 빛나는 모습">
@@ -164,7 +164,7 @@ Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지�
 
 1. 설정에서 **종료**를 누르고 `/Applications/Mochinotch.app`을 휴지통에 버립니다.
 2. hook을 넣었다면 위 표의 설정 파일에서 `mochinotch-notify`가 들어간 줄을 지우거나, `.mochinotch.bak`으로 되돌립니다.
-3. `~/.local/bin/mochinotch-notify`와 `~/Library/Logs/Mochinotch/` 폴더를 지웁니다.
+3. `~/.local/bin/mochinotch-notify`, `~/.kiro/hooks/mochinotch.json`, `~/Library/Logs/Mochinotch/` 폴더를 지웁니다.
 
 </details>
 
@@ -174,8 +174,8 @@ Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지�
 
 **필요한 것:** macOS 14 Sonoma 이상. 노치가 있는 맥북에서 가장 잘 어울리고, 노치가 없는 맥이나 외부 모니터에서는 화면 위 가운데에 작은 알약 모양으로 뜹니다.
 
-1. [Releases](https://github.com/sleeeppy/mochinotch/releases/latest) 페이지에서 최신 `Mochinotch.zip`을 받습니다.
-2. 압축을 풀고 `Mochinotch.app`을 **응용 프로그램** 폴더로 옮깁니다.
+1. [Releases](https://github.com/sleeeppy/mochinotch/releases/latest) 페이지에서 최신 `Mochinotch.dmg`를 받습니다.
+2. 파일을 열면 설치 창이 열려요. `Mochinotch.app`을 **Applications** 폴더로 끌어다 놓습니다.
 3. 앱을 엽니다.
 
 > [!NOTE]
@@ -203,12 +203,12 @@ Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지�
 | 앱 끄기 | 설정 맨 아래 **종료** |
 
 - 오른쪽 알림 아이콘은 목록을 한 번 펼쳐 보면 노치 안으로 들어갑니다.
-- 왼쪽 AI 작업 아이콘은 그 앱(Claude, Cursor, Codex)을 앞으로 가져오면 사라집니다.
+- 왼쪽 AI 작업 아이콘은 그 앱(Claude, Cursor, Codex, Kiro)을 앞으로 가져오면 사라집니다.
 - 목록은 앱을 켜 둔 동안만 쌓이고, 최근 30개까지 남습니다.
 
 ---
 
-<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/agents-dark.png"><img src="docs/images/headings/agents-light.png" alt="AI 에이전트 연결 (Claude Code · Cursor · Codex)" width="499" height="30"></picture></h3>
+<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/agents-dark.png"><img src="docs/images/headings/agents-light.png" alt="AI 에이전트 연결 (Claude Code · Cursor · Codex · Kiro)" width="559" height="30"></picture></h3>
 
 AI 도구가 작업을 끝냈다는 신호를 노치로 보내려면 각 도구에 hook을 한 번 넣어야 합니다. AI API를 호출하거나 대화 내용을 보내지 않습니다. 내 맥 안(`127.0.0.1:47321`)으로 "끝났다"는 신호만 갑니다.
 
@@ -217,7 +217,7 @@ AI 도구가 작업을 끝냈다는 신호를 노치로 보내려면 각 도구�
 처음 설정이나 설정 → **권한 · AI 연결**에서 **AI 에이전트 연결**의 **연결**을 누르세요. 터미널도, python 같은 추가 설치도 필요 없어요.
 
 1. 이 맥에서 찾은 도구의 설정 파일에만 hook을 넣습니다. 고치기 전에 원래 파일을 `.mochinotch.bak`으로 복사하고, 이미 연결된 파일은 건드리지 않아요.
-2. 켜져 있는 Cursor, Claude, Codex 앱은 저절로 다시 켜서 바로 적용합니다. 저장하지 않은 작업이 있어 앱이 종료를 물어보면 억지로 끄지 않고, 직접 다시 켜 달라고 알려 줘요.
+2. 켜져 있는 Cursor, Claude, Codex 앱은 저절로 다시 켜서 바로 적용합니다. 저장하지 않은 작업이 있어 앱이 종료를 물어보면 억지로 끄지 않고, 직접 다시 켜 달라고 알려 줘요. Kiro는 hook 폴더를 스스로 다시 읽어서 다시 켜지 않아요.
 3. 터미널에서 쓰는 Claude Code와 Codex는 새로 여는 세션부터 적용돼요.
 
 | 도구 | 파일 | 알려 주는 것 |
@@ -225,6 +225,7 @@ AI 도구가 작업을 끝냈다는 신호를 노치로 보내려면 각 도구�
 | Claude Code | `~/.claude/settings.json` | 작업 완료, 실패, 확인 필요 |
 | Cursor | `~/.cursor/hooks.json` | 작업 완료, 실패, 중단 |
 | Codex | `~/.codex/config.toml` | 작업 완료 (원래 있던 `notify`도 그대로 실행돼요) |
+| Kiro | `~/.kiro/hooks/mochinotch.json` | 작업 완료 (Mochinotch 전용 파일이라 다른 hook은 건드리지 않아요) |
 
 hook은 `~/.local/bin/mochinotch-notify`를 부르고, 이 파일이 앱을 불러 신호를 보냅니다. 앱을 옮기거나 업데이트해도 다음에 켤 때 이 파일만 새 위치로 고쳐서 연결이 끊기지 않아요.
 

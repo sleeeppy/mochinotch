@@ -81,21 +81,24 @@ enum HookRelay {
         let stdinEvent = readsStdin ? object(FileHandle.standardInput.readDataToEndOfFile()) : [:]
         let argEvent = object(Data(argPayload.utf8))
 
-        // Cursor는 ~/.claude/settings.json 의 hook도 불러온다. Cursor가 부른 Claude hook은 Cursor stop hook과 겹치니 버린다.
+        // Cursor는 ~/.claude/settings.json 의 hook도 불러오는데, 가끔 자기 stop hook은 빼고 이것만 부른다.
+        // Cursor 완료로 보내고, 둘 다 불리면 앱이 generation_id로 하나만 받는다.
         let fromCursor = stdinEvent["cursor_version"] != nil
             || (stdinEvent["conversation_id"] != nil && stdinEvent["session_id"] == nil)
-        if options.source == "claude", fromCursor {
-            log(options.source, stdinEvent, "skip: Cursor가 부른 Claude hook")
-            return
+        var source = options.source
+        if source == "claude", fromCursor {
+            source = "cursor"
+            log(options.source, stdinEvent, "send as cursor")
+        } else {
+            log(options.source, stdinEvent, "send")
         }
-        log(options.source, stdinEvent, "send")
 
         var tool = options.tool
         var title = options.title
         var detail = options.detail
         var kind = options.kind
 
-        switch options.source {
+        switch source {
         case "claude":
             if tool.isEmpty { tool = "claude" }
             switch stdinEvent["hook_event_name"] as? String ?? "" {
@@ -127,6 +130,12 @@ enum HookRelay {
             if detail.isEmpty, let root = (stdinEvent["workspace_roots"] as? [Any])?.first {
                 detail = folderName(String(describing: root))
             }
+        case "kiro":
+            // Kiro는 hook이 표준 출력에 낸 글을 에이전트에게 다시 넘긴다. 아무것도 쓰지 않는다.
+            if tool.isEmpty { tool = "kiro" }
+            if kind.isEmpty { kind = "completed" }
+            if title.isEmpty { title = "Kiro 작업 완료" }
+            if detail.isEmpty { detail = folderName(stdinEvent["cwd"] as? String) }
         case "codex":
             let event = argEvent.isEmpty ? stdinEvent : argEvent
             if let type = event["type"] as? String, type != "agent-turn-complete" { return }
@@ -152,6 +161,9 @@ enum HookRelay {
             "success": kind != "failed",
         ]
         if !bundle.isEmpty { payload["bundleID"] = bundle }
+        if source == "cursor", let generation = (stdinEvent["generation_id"] as? String).nonEmpty {
+            payload["id"] = "cursor:\(generation)"
+        }
         post(payload)
     }
 

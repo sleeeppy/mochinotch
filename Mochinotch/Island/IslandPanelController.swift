@@ -93,7 +93,7 @@ final class IslandPanelController {
         }
     }
 
-    private func trackPointer() {
+    func trackPointer() {
         updateMouse()
         let point = NSEvent.mouseLocation
         let inside = hoverRectProvider().insetBy(dx: -8, dy: -6).contains(point)

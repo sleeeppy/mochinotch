@@ -5,12 +5,14 @@ enum HookTool: String, CaseIterable, Sendable {
     case claude
     case cursor
     case codex
+    case kiro
 
     var displayName: String {
         switch self {
         case .claude: return "Claude Code"
         case .cursor: return "Cursor"
         case .codex: return "Codex"
+        case .kiro: return "Kiro"
         }
     }
 
@@ -20,7 +22,13 @@ enum HookTool: String, CaseIterable, Sendable {
         case .claude: return ["com.anthropic.claudefordesktop"]
         case .cursor: return ["com.todesktop.230313mzl4w4u92"]
         case .codex: return ["com.openai.codex"]
+        case .kiro: return ["dev.kiro.desktop"]
         }
+    }
+
+    /// Kiro는 `~/.kiro/hooks/`를 지켜보다가 바로 다시 읽는다.
+    var needsRestart: Bool {
+        self != .kiro
     }
 
     fileprivate var configPath: String {
@@ -28,6 +36,7 @@ enum HookTool: String, CaseIterable, Sendable {
         case .claude: return ".claude/settings.json"
         case .cursor: return ".cursor/hooks.json"
         case .codex: return ".codex/config.toml"
+        case .kiro: return ".kiro/hooks/mochinotch.json"
         }
     }
 
@@ -36,6 +45,7 @@ enum HookTool: String, CaseIterable, Sendable {
         case .claude: return ["claude"]
         case .cursor: return ["cursor-agent"]
         case .codex: return ["codex"]
+        case .kiro: return ["kiro-cli"]
         }
     }
 }
@@ -97,7 +107,7 @@ enum HookInstaller {
 
     static func isPresent(_ tool: HookTool) -> Bool {
         let manager = FileManager.default
-        let folder = home.appendingPathComponent(tool.configPath).deletingLastPathComponent()
+        let folder = home.appendingPathComponent(String(tool.configPath.prefix { $0 != "/" }))
         if manager.fileExists(atPath: folder.path) { return true }
         if tool.appBundleIDs.contains(where: { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil }) {
             return true
@@ -123,6 +133,12 @@ enum HookInstaller {
         case .codex:
             // 다른 도구가 notify를 감싸 우리 명령을 인자 안에 넣어 두기도 한다.
             return text.contains("mochinotch-notify")
+        case .kiro:
+            guard let hooks = (try? jsonObject(text))?["hooks"]?.arrayValue else { return false }
+            return hooks.contains { hook in
+                if case .bool(false)? = hook["enabled"] { return false }
+                return hook["trigger"]?.stringValue == "Stop" && hasRelay(hook["action"], source: "kiro")
+            }
         }
     }
 
@@ -202,6 +218,7 @@ enum HookInstaller {
         case .claude: updated = try mergedClaude(existing)
         case .cursor: updated = try mergedCursor(existing)
         case .codex: updated = try mergedCodex(existing ?? "")
+        case .kiro: updated = kiroHook()
         }
         if existing != nil {
             let backup = url.appendingPathExtension("mochinotch.bak")
@@ -241,6 +258,18 @@ enum HookInstaller {
         }
         root["hooks"] = hooks
         return root.text() + "\n"
+    }
+
+    /// Mochinotch만 쓰는 파일이라 통째로 쓴다.
+    private static func kiroHook() -> String {
+        let hook = OrderedJSON.object([
+            ("name", .string("Mochinotch")),
+            ("description", .string("작업이 끝나면 노치에 알려요")),
+            ("trigger", .string("Stop")),
+            ("action", .object([("type", .string("command")), ("command", .string(relayCommand(source: "kiro")))])),
+            ("timeout", .number("10")),
+        ])
+        return OrderedJSON.object([("version", .string("v1")), ("hooks", .array([hook]))]).text() + "\n"
     }
 
     private static func objectValue(_ value: OrderedJSON?) throws -> OrderedJSON {

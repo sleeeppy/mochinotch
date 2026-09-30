@@ -135,7 +135,7 @@ struct SetupView: View {
         }
         if !status.movedFromDownloads { return "앱을 응용 프로그램 폴더로 옮긴 뒤 연결할 수 있어요" }
         let present = status.agents.present
-        if present.isEmpty { return "Claude Code · Cursor · Codex를 찾지 못했어요" }
+        if present.isEmpty { return "Claude Code · Cursor · Codex · Kiro를 찾지 못했어요" }
         let names = present.map(\.displayName).joined(separator: " · ")
         if status.agents.ready { return "\(names) 연결됨" }
         return "\(names)\n켜 둔 앱은 연결한 뒤 다시 켜져요"

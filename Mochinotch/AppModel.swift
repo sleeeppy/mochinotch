@@ -111,6 +111,7 @@ final class AppModel {
     private var setupTimer: Timer?
     /// 지우기로 치운 설정 알림은 이번에 켜 있는 동안 다시 넣지 않는다.
     private var setupReminderDismissed = false
+    private var recentEventKeys: [String: Date] = [:]
     private var screenObserver: NSObjectProtocol?
     private var activationObserver: NSObjectProtocol?
 
@@ -182,7 +183,10 @@ final class AppModel {
             rootView: IslandRootView().environment(self)
         )
         controller.hoverRectProvider = { [weak self] in
-            self?.hoverScreenRect ?? .zero
+            // 인트로는 노치 밖으로 내밀었다가 도로 들어온다. 그 모양으로 호버를 보면,
+            // 커서가 그 자리에 있기만 해도 끝난 뒤 목록이 펼쳐진다.
+            guard let self, !self.introDirect else { return .zero }
+            return self.hoverScreenRect
         }
         controller.interactiveRectProvider = { [weak self] in
             self?.interactiveScreenRect
@@ -346,6 +350,12 @@ final class AppModel {
         let title = event.title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             ?? "\(tool.displayName) \(outcome.shortLabel)"
         let detail = event.detail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let now = Date()
+        recentEventKeys = recentEventKeys.filter { $0.value > now }
+        let key = event.id ?? "\(tool.rawValue)|\(event.kind ?? "")|\(title)|\(detail)"
+        if recentEventKeys[key] != nil { return }
+        // 내용이 같은 건 거의 같이 온 것만 겹친 걸로 본다. 같은 curl을 다시 보내 보는 건 막지 않는다.
+        recentEventKeys[key] = now.addingTimeInterval(event.id == nil ? 2 : 60)
         let bundles = event.bundleID.map { [$0] } ?? []
         let activity = IslandActivity(
             id: UUID(),
@@ -543,7 +553,7 @@ final class AppModel {
             }
             var restarted: [String] = []
             var stuck: [String] = []
-            for tool in result.changed {
+            for tool in result.changed where tool.needsRestart {
                 for app in tool.appBundleIDs.flatMap(NSRunningApplication.runningApplications(withBundleIdentifier:)) {
                     // Codex 앱은 프로세스 이름이 ChatGPT다. 사람들이 아는 건 앱 파일 이름이다.
                     let name = app.bundleURL?.deletingPathExtension().lastPathComponent ?? tool.displayName
@@ -560,6 +570,8 @@ final class AppModel {
                 notes.append("이미 연결돼 있어요")
             } else if !restarted.isEmpty {
                 notes.append("\(restarted.joined(separator: ", ")) 다시 켰어요")
+            } else if stuck.isEmpty {
+                notes.append("연결했어요")
             }
             if !stuck.isEmpty {
                 notes.append("\(stuck.joined(separator: ", "))는 직접 다시 켜 주세요")
@@ -894,7 +906,7 @@ final class AppModel {
             return NSColor(srgbRed: 1, green: 0.271, blue: 0.227, alpha: 1)
         }
         switch tool {
-        case .cursor, .claude, .codex:
+        case .cursor, .claude, .codex, .kiro:
             let rgb = tool.edgeTintRGB
             return NSColor(srgbRed: rgb.0, green: rgb.1, blue: rgb.2, alpha: 1)
         case .custom:
@@ -961,6 +973,12 @@ final class AppModel {
                 // 안내를 열 거면 접지 않고 인사한 모양에서 바로 펼친다.
                 self.finishIntro(fold: !self.setupPending)
                 self.presentSetupIfPending()
+                // 인트로 중에는 호버를 보지 않아서, 시작 전에 노치 위에 있던 커서가 그대로면
+                // 끝난 뒤 목록이 펼쳐진다. 노치 위에 없을 때만 접는다.
+                self.panel?.trackPointer()
+                if !self.setupPending, !self.isHovering, self.presentation != .idle {
+                    self.setPresentation(.idle)
+                }
             }
         }
     }
