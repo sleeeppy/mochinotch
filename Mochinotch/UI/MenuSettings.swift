@@ -54,7 +54,7 @@ struct SettingsView: View {
             }
 
             HStack {
-                Text(verbatim: "もちノッチ 0.1.0")
+                Text(verbatim: "v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
                     .font(.system(size: 10.5, weight: .medium, design: .rounded))
                     .foregroundStyle(Color.white.opacity(0.36))
                 Spacer()
