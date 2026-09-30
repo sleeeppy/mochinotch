@@ -10,13 +10,18 @@ enum AgentTool: String, Equatable {
     case claude
     case cursor
     case codex
+    case kiro
     case custom
+
+    /// 완료 연출을 하는 도구.
+    static let agents: [AgentTool] = [.cursor, .claude, .codex, .kiro]
 
     var displayName: String {
         switch self {
         case .claude: return "Claude"
         case .cursor: return "Cursor"
         case .codex: return "Codex"
+        case .kiro: return "Kiro"
         case .custom: return "작업"
         }
     }
@@ -29,6 +34,8 @@ enum AgentTool: String, Equatable {
             return ["com.anthropic.claudefordesktop", "com.anthropic.claude"]
         case .codex:
             return ["com.openai.codex"]
+        case .kiro:
+            return ["dev.kiro.desktop"]
         case .custom:
             return []
         }
@@ -45,6 +52,7 @@ enum AgentTool: String, Equatable {
         case .cursor: return ["Cursor"]
         case .claude: return ["Claude"]
         case .codex: return ["Codex"]
+        case .kiro: return ["Kiro"]
         case .custom: return []
         }
     }
@@ -54,6 +62,7 @@ enum AgentTool: String, Equatable {
         case .claude: return "sparkle"
         case .cursor: return "cursorarrow.rays"
         case .codex: return "terminal.fill"
+        case .kiro: return "moon.stars.fill"
         case .custom: return "app.fill"
         }
     }
@@ -63,6 +72,7 @@ enum AgentTool: String, Equatable {
         case .claude: return IslandColor.claude
         case .cursor: return IslandColor.cursor
         case .codex: return IslandColor.codex
+        case .kiro: return IslandColor.kiro
         case .custom: return Color.white.opacity(0.85)
         }
     }
@@ -73,6 +83,7 @@ enum AgentTool: String, Equatable {
         case .cursor: return (0.34, 0.35, 0.37)
         case .claude: return (0.95, 0.45, 0.27)
         case .codex: return (1, 1, 1)
+        case .kiro: return (0.53, 0.30, 0.96)
         case .custom: return (1, 1, 1)
         }
     }
@@ -95,16 +106,11 @@ enum AgentTool: String, Equatable {
     }
 
     /// 이 앱에서 온 시스템 알림은 일반 알림이 아니라 작업 완료로 본다.
-    static let noticeBundleIDs: Set<String> = Set(
-        [AgentTool.cursor, .claude, .codex].flatMap(\.iconBundleIDs)
-    )
+    static let noticeBundleIDs: Set<String> = Set(agents.flatMap(\.iconBundleIDs))
 
-    /// 화면 가장자리 왜곡은 이 세 도구에만 쓴다.
+    /// 화면 가장자리 왜곡은 AI 도구에만 쓴다.
     var playsDuo: Bool {
-        switch self {
-        case .claude, .cursor, .codex: return true
-        case .custom: return false
-        }
+        self != .custom
     }
 }
 
@@ -180,8 +186,7 @@ struct IslandActivity: Identifiable, Equatable {
         guard staysOnLeft else { return false }
         if case .agent(let tool, _, _, _, _) = payload, tool.iconBundleIDs.contains(bundleID) { return true }
         if iconBundleIDs.contains(bundleID) { return true }
-        let tools: [AgentTool] = [.cursor, .claude, .codex]
-        guard let tool = tools.first(where: { $0.iconBundleIDs.contains(bundleID) }) else { return false }
+        guard let tool = AgentTool.agents.first(where: { $0.iconBundleIDs.contains(bundleID) }) else { return false }
         if tool.iconBundleIDs.contains(where: iconBundleIDs.contains) { return true }
         return tool.appNames.contains { $0.caseInsensitiveCompare(leadingText) == .orderedSame }
     }
@@ -212,12 +217,12 @@ struct IslandActivity: Identifiable, Equatable {
         return false
     }
 
-    /// Cursor, Claude, Codex 알림. 오른쪽 개수 배지 대신 노치 왼쪽에 아이콘만 둔다.
+    /// AI 도구 알림. 오른쪽 개수 배지 대신 노치 왼쪽에 아이콘만 둔다.
     var isAgentNotice: Bool {
         guard case .notice(let appName, _, _, let bundleID) = payload else { return false }
         if let bundleID, AgentTool.noticeBundleIDs.contains(bundleID) { return true }
         switch appName.lowercased() {
-        case "cursor", "claude", "claude code", "codex": return true
+        case "cursor", "claude", "claude code", "codex", "kiro": return true
         default: return false
         }
     }
@@ -384,7 +389,7 @@ struct IslandActivity: Identifiable, Equatable {
     }
 
     private static func agentTool(bundleID: String) -> AgentTool? {
-        [AgentTool.cursor, .claude, .codex].first { $0.iconBundleIDs.contains(bundleID) }
+        AgentTool.agents.first { $0.iconBundleIDs.contains(bundleID) }
     }
 
     private static func agentTool(name: String) -> AgentTool? {
@@ -392,6 +397,7 @@ struct IslandActivity: Identifiable, Equatable {
         case "cursor": return .cursor
         case "claude", "claude code": return .claude
         case "codex": return .codex
+        case "kiro": return .kiro
         default: return nil
         }
     }

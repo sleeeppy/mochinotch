@@ -30,8 +30,9 @@ enum Launcher {
         for (tool, message) in result.failures {
             print("\(tool.displayName): \(message)")
         }
-        if !result.changed.isEmpty {
-            print("켜져 있는 \(result.changed.map(\.displayName).joined(separator: ", "))는 다시 시작해야 적용돼요.")
+        let restarts = result.changed.filter(\.needsRestart)
+        if !restarts.isEmpty {
+            print("켜져 있는 \(restarts.map(\.displayName).joined(separator: ", "))는 다시 시작해야 적용돼요.")
         }
         return result.failures.isEmpty ? 0 : 1
     }

@@ -111,6 +111,8 @@ final class EventServer {
 }
 
 struct IncomingEvent: Decodable, Equatable {
+    /// 같은 작업에 hook이 두 번 불려도 한 번만 보이게 하는 키. 없으면 내용으로 가린다.
+    var id: String?
     var tool: String?
     var title: String?
     var detail: String?

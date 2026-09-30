@@ -29,7 +29,7 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>Cursor, Claude, Codex 작업이 끝날 때 화면 가장자리를 굴절시키려고 화면을 캡처합니다.</string>
+	<string>Cursor, Claude, Codex, Kiro 작업이 끝날 때 화면 가장자리를 굴절시키려고 화면을 캡처합니다.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>CFBundleURLTypes</key>
