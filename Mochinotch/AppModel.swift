@@ -641,13 +641,13 @@ final class AppModel {
         return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
     }
 
-    /// 왼쪽 AI 작업만. 그 앱을 앞으로 가져오면 접힌다. 오른쪽 알림은 그대로 둔다.
+    /// 왼쪽 AI 작업만. 그 앱이나, CLI로 돌렸다면 그 터미널을 앞으로 가져오면 접힌다. 오른쪽 알림은 그대로 둔다.
     private func acknowledgeAgent(bundleID: String) {
         let indexes = activities.indices.filter { activities[$0].clearsWhenFocused(bundleID) && !activities[$0].hidesPeek }
         let foldCompact: Bool = {
             guard presentation == .compact, !isHovering, let featured else { return false }
-            if case .agent(let tool, _, _, _, _) = featured.payload {
-                return tool.iconBundleIDs.contains(bundleID)
+            if case .agent(let tool, _, _, _, let openIDs) = featured.payload {
+                return tool.iconBundleIDs.contains(bundleID) || openIDs.contains(bundleID)
             }
             return false
         }()

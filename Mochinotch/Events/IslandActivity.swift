@@ -35,7 +35,7 @@ enum AgentTool: String, Equatable {
         case .codex:
             return ["com.openai.codex"]
         case .kiro:
-            return ["dev.kiro.desktop"]
+            return ["dev.kiro.desktop", "dev.kiro.cli"]
         case .custom:
             return []
         }
@@ -52,7 +52,7 @@ enum AgentTool: String, Equatable {
         case .cursor: return ["Cursor"]
         case .claude: return ["Claude"]
         case .codex: return ["Codex"]
-        case .kiro: return ["Kiro"]
+        case .kiro: return ["Kiro", "Kiro CLI"]
         case .custom: return []
         }
     }
@@ -181,10 +181,11 @@ struct IslandActivity: Identifiable, Equatable {
         return false
     }
 
-    /// 왼쪽 작업 완료. 이 앱을 앞으로 가져오면 접힌다.
+    /// 왼쪽 작업 완료. 그 앱이나, CLI로 돌렸다면 그 터미널을 앞으로 가져오면 접힌다.
     func clearsWhenFocused(_ bundleID: String) -> Bool {
         guard staysOnLeft else { return false }
-        if case .agent(let tool, _, _, _, _) = payload, tool.iconBundleIDs.contains(bundleID) { return true }
+        if case .agent(let tool, _, _, _, let openIDs) = payload,
+           tool.iconBundleIDs.contains(bundleID) || openIDs.contains(bundleID) { return true }
         if iconBundleIDs.contains(bundleID) { return true }
         guard let tool = AgentTool.agents.first(where: { $0.iconBundleIDs.contains(bundleID) }) else { return false }
         if tool.iconBundleIDs.contains(where: iconBundleIDs.contains) { return true }

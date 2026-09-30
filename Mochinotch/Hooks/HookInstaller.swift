@@ -22,7 +22,7 @@ enum HookTool: String, CaseIterable, Sendable {
         case .claude: return ["com.anthropic.claudefordesktop"]
         case .cursor: return ["com.todesktop.230313mzl4w4u92"]
         case .codex: return ["com.openai.codex"]
-        case .kiro: return ["dev.kiro.desktop"]
+        case .kiro: return ["dev.kiro.desktop", "dev.kiro.cli"]
         }
     }
 
