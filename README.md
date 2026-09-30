@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/icon.png" width="128" alt="Mochinotch 아이콘">
+  <img src="docs/images/icon-v2.png" width="128" alt="Mochinotch 아이콘">
 </p>
 
 <h3 align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/title-dark.png"><img src="docs/images/headings/title-light.png" alt="もちノッチ(Mochinotch)" width="287" height="46"></picture></h3>
