@@ -16,12 +16,12 @@
 
 ### 알림이 노치 옆에 쌓여요
 
-메시지, Slack, 카카오톡 같은 앱의 알림이 오면 노치 오른쪽에 앱 아이콘이 톡 튀어나오고, Dock처럼 개수 배지가 붙습니다. 다른 앱 알림이 오면 한 칸씩 더 늘어나요.
+메시지, Slack, 카카오톡 같은 앱의 알림이 오면 노치 오른쪽에 앱 아이콘이 톡 튀어나오고, Dock처럼 알림 배지가 붙습니다. 다른 앱 알림이 오면 한 칸씩 더 늘어나요.
 
 <p align="center">
   <img src="docs/images/notice.gif" width="500" alt="알림이 오면 노치 오른쪽에 아이콘과 배지가 붙는 모습">
 </p>
-
+<br/>
 
 ### 충전기를 꽂으면
 
@@ -30,11 +30,12 @@
 <p align="center">
   <img src="docs/images/charge.gif" width="500" alt="충전기를 꽂았을 때 노치에 충전 82%가 뜨는 모습">
 </p>
-
+<br/>
 
 ### AI 작업이 끝나면
 
-Claude Code, Cursor, Codex, Kiro가 작업을 마치면 노치가 옆으로 펼쳐지며 알려 줍니다. 테두리를 따라 빛이 한 바퀴 돌고, 화면 가장자리까지 그 앱 색으로 은은하게 빛나요.
+AI Agent(Claude Code, Cursor, Codex, Kiro)가 작업을 마치면 노치가 옆으로 펼쳐지며 알려 줍니다. <br/>
+테두리를 따라 빛이 한 바퀴 돌고, 화면 가장자리까지 그 앱 색으로 은은하게 빛나요.
 
 <p align="center">
   <img src="docs/images/complete.gif" width="720" alt="작업이 끝나면 화면 가장자리가 빛나는 모습">
@@ -42,6 +43,7 @@ Claude Code, Cursor, Codex, Kiro가 작업을 마치면 노치가 옆으로 펼�
 
 작업이 실패하면 노치가 짧게 흔들리고 붉은 테두리가 생깁니다.
 
+<br/>
 
 ### 마우스를 올리면 목록이 펼쳐져요
 
@@ -50,7 +52,7 @@ Claude Code, Cursor, Codex, Kiro가 작업을 마치면 노치가 옆으로 펼�
 <p align="center">
   <img src="docs/images/expand.gif" width="560" alt="노치에 마우스를 올리면 목록이 펼쳐지는 모습">
 </p>
-
+<br/>
 
 ### 인트로
 
@@ -87,16 +89,20 @@ Claude Code, Cursor, Codex, Kiro가 작업을 마치면 노치가 옆으로 펼�
 </p>
 
 - 항목마다 **허용**을 누르면 macOS 안내 창이나 **시스템 설정 → 개인정보 보호 및 보안**의 해당 목록이 열립니다. 켠 항목은 저절로 초록 체크로 바뀌어요.
-- **전체 디스크 접근 권한** 목록에 Mochinotch가 없으면 아래 **+**를 눌러 `응용 프로그램`의 `Mochinotch`를 추가하세요.
+- **전체 디스크 접근 권한** 목록에 Mochinotch가 없으면 아래 +를 눌러 `응용 프로그램`의 `Mochinotch`를 추가하세요.
 - **화면 기록**은 켠 뒤 앱을 다시 켜야 적용돼요. 처음 설정 아래의 **다시 켜기**를 누르면 됩니다.
 - **AI 에이전트 연결**의 **연결**을 누르면 hook까지 한 번에 넣어요. 자세한 건 아래 AI 에이전트 연결을 보세요.
 - **나중에**를 누르면 닫히고 다시 저절로 뜨지 않아요. 설정 → **권한 · AI 연결**에서 언제든 다시 열 수 있어요.
+  
+<br/>
 
 | 권한 | 어디에 쓰나요 | 없으면 |
 |---|---|---|
 | **전체 디스크 접근 권한** | 알림 센터 기록을 읽어 노치에 알림을 띄워요 | 다른 앱 알림이 노치에 안 떠요. 충전과 AI 작업 완료는 그대로 돼요 |
 | **손쉬운 사용** | 알림 배너를 뜨자마자 읽고, 채팅방을 열거나 Dock 배지가 사라지면 읽음으로 처리해요 | 알림이 조금 늦게 뜨고, 읽은 알림이 노치에 더 오래 남아요 |
 | **화면 기록** | 작업이 끝날 때 화면 가장자리 연출을 그려요 | 화면 가장자리 연출만 빠지고, 노치 테두리 빛은 그대로예요 |
+
+<br/>
 
 > [!TIP]
 > 화면을 녹화하거나 전송하지 않습니다. 화면 기록 권한은 연출하는 몇 초 동안 화면을 비춰 휘게 그리는 데에만 씁니다.
@@ -172,11 +178,15 @@ Claude Code, Cursor, Codex, Kiro가 작업을 마치면 노치가 옆으로 펼�
 
 <h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/install-dark.png"><img src="docs/images/headings/install-light.png" alt="설치" width="43" height="30"></picture></h3>
 
-**필요한 것:** macOS 14 Sonoma 이상. 노치가 있는 맥북에서 가장 잘 어울리고, 노치가 없는 맥이나 외부 모니터에서는 화면 위 가운데에 작은 알약 모양으로 뜹니다.
+**요구 사항:** macOS 14 Sonoma 이상
 
+노치가 있는 맥북에서 가장 잘 어울리고, 노치가 없는 맥이나 외부 모니터에서는 화면 위 가운데에 작은 알약 모양으로 뜹니다.
+<br/>
 1. [Releases](https://github.com/sleeeppy/mochinotch/releases/latest) 페이지에서 최신 `Mochinotch.dmg`를 받습니다.
 2. 파일을 열면 설치 창이 열려요. `Mochinotch.app`을 **Applications** 폴더로 끌어다 놓습니다.
 3. 앱을 엽니다.
+
+<br/>
 
 > [!NOTE]
 > 애플 공증을 받지 않은 앱이라 처음 열 때 "확인되지 않은 개발자" 경고가 뜰 수 있어요.
@@ -188,7 +198,10 @@ Claude Code, Cursor, Codex, Kiro가 작업을 마치면 노치가 옆으로 펼�
 >   xattr -dr com.apple.quarantine /Applications/Mochinotch.app
 >   ```
 
-앱이 켜지면 노치가 한 번 인사하고, 이어서 **처음 설정**을 펼칩니다. 위 권한 설정을 보세요. Dock이나 메뉴 막대에는 아이콘이 생기지 않아요. 모든 조작은 노치에서 합니다.
+<br/>
+
+앱이 켜지면 노치가 한 번 인사하고, 이어서 **처음 설정**을 펼칩니다. <br/>
+Dock이나 메뉴 막대에는 아이콘이 생기지 않아요. 모든 조작은 노치에서 합니다.
 
 ---
 
@@ -210,7 +223,7 @@ Claude Code, Cursor, Codex, Kiro가 작업을 마치면 노치가 옆으로 펼�
 
 <h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/agents-dark.png"><img src="docs/images/headings/agents-light.png" alt="AI 에이전트 연결 (Claude Code · Cursor · Codex · Kiro)" width="559" height="30"></picture></h3>
 
-AI 도구가 작업을 끝냈다는 신호를 노치로 보내려면 각 도구에 hook을 한 번 넣어야 합니다. AI API를 호출하거나 대화 내용을 보내지 않습니다. 내 맥 안(`127.0.0.1:47321`)으로 "끝났다"는 신호만 갑니다.
+AI 도구가 작업을 끝냈다는 신호를 노치로 보내려면 각 도구에 hook을 한 번 넣어야 합니다. AI API를 호출하거나 대화 내용을 보내지 않습니다. 내 맥 안(`127.0.0.1:47321`)으로 "끝났다"는 신호만 갑니다. 
 
 ### 버튼 하나로 연결
 
