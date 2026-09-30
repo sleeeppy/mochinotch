@@ -939,7 +939,7 @@ private struct ActivityIcon: View {
     var size: CGFloat
 
     var body: some View {
-        if activity.showsAppIcon, let image = Self.appIcon(activity.iconBundleIDs, names: activity.iconAppNames) {
+        if activity.showsAppIcon, let image = Self.appIcon(activity.iconBundleIDs, names: activity.iconAppNames) ?? Self.bundledIcon(activity) {
             Image(nsImage: image)
                 .resizable()
                 .interpolation(.high)
@@ -973,6 +973,16 @@ private struct ActivityIcon: View {
             .filter { FileManager.default.fileExists(atPath: $0.path) }
         guard let url = byID.first ?? byName.first else { return nil }
         let image = NSWorkspace.shared.icon(forFile: url.path)
+        image.size = NSSize(width: 128, height: 128)
+        return image
+    }
+
+    /// 앱이 없고 CLI만 있을 때. 설치된 앱 아이콘을 못 찾으면 앱에 넣어 둔 아이콘을 쓴다.
+    private static func bundledIcon(_ activity: IslandActivity) -> NSImage? {
+        guard case .agent(let tool, _, _, _, _) = activity.payload, tool != .custom else { return nil }
+        let url = Bundle.main.url(forResource: tool.rawValue, withExtension: "png")
+            ?? Bundle.main.url(forResource: tool.rawValue, withExtension: "png", subdirectory: "ToolIcons")
+        guard let url, let image = NSImage(contentsOf: url) else { return nil }
         image.size = NSSize(width: 128, height: 128)
         return image
     }
