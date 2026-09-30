@@ -74,6 +74,7 @@ Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지�
 - **로그인할 때 열기**: 맥을 켜면 자동으로 시작합니다.
 - **인트로**: 켤 때 인사를 `모찌`, `늘리기` 중에서 고릅니다. 고른 뒤 노치에서 마우스를 치우면 바로 한 번 보여 줘요.
 - **화면 가장자리 연출**: 끄면 AI 작업이 끝날 때 노치 테두리만 빛나고 화면은 그대로 둡니다.
+- **권한 · AI 연결**: 처음 켰을 때 뜨는 **처음 설정** 화면을 다시 엽니다. 아직 꺼진 항목이 몇 개인지 보여 줘요.
 
 ---
 
@@ -92,7 +93,7 @@ Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지�
 <br>
 
 - Mochinotch가 켜져 있는지 확인하세요. 꺼져 있으면 신호는 조용히 버려집니다.
-- hook을 넣은 뒤 그 도구를 다시 시작했는지 확인하세요.
+- 설정 → **권한 · AI 연결**에서 **AI 에이전트 연결**에 초록 체크가 있는지 확인하세요. 터미널에서 쓰는 Claude Code와 Codex는 연결한 뒤 새로 연 세션부터 적용돼요.
 - 위 [직접 보내 보기](#직접-보내-보기)의 `curl`로 노치가 반응하는지 보면 앱과 hook 중 어디가 문제인지 알 수 있어요.
 - hook 실행 기록은 `~/Library/Logs/Mochinotch/hooks.log`에 남습니다.
 
@@ -102,7 +103,7 @@ Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지�
 <summary><b>화면 가장자리 연출이 안 나와요</b></summary>
 <br>
 
-**화면 기록** 권한이 필요합니다. 권한이 없으면 설정 화면에 안내와 **열기** 버튼이 뜹니다. 연출이 부담스럽다면 설정에서 **화면 가장자리 연출**을 끄세요.
+**화면 기록** 권한이 필요합니다. 설정 → **권한 · AI 연결**에서 **화면 기록**의 **허용**을 누르고, 시스템 설정에서 켠 뒤 **다시 켜기**를 누르세요. 화면 기록은 앱을 다시 켜야 적용돼요. 연출이 부담스럽다면 설정에서 **화면 가장자리 연출**을 끄세요.
 
 </details>
 
@@ -162,13 +163,23 @@ Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지�
 >   xattr -dr com.apple.quarantine /Applications/Mochinotch.app
 >   ```
 
-앱이 켜지면 노치가 한 번 인사합니다. Dock이나 메뉴 막대에는 아이콘이 생기지 않아요. 모든 조작은 노치에서 합니다.
+앱이 켜지면 노치가 한 번 인사하고, 이어서 **처음 설정**을 펼칩니다. 아래 권한 설정을 보세요. Dock이나 메뉴 막대에는 아이콘이 생기지 않아요. 모든 조작은 노치에서 합니다.
 
 ---
 
 <h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/permissions-dark.png"><img src="docs/images/headings/permissions-light.png" alt="권한 설정" width="90" height="30"></picture></h3>
 
-기능에 따라 macOS 권한이 필요합니다. 모두 **시스템 설정 → 개인정보 보호 및 보안**에서 켭니다. 권한을 켠 뒤에는 앱을 한 번 종료했다가 다시 여세요.
+처음 켜면 인사가 끝난 뒤 노치가 **처음 설정**을 펼칩니다. 시스템 설정을 오가는 동안 접히지 않고 기다려요.
+
+<p align="center">
+  <img src="docs/images/setup.png" width="500" alt="노치 안에 펼쳐진 처음 설정 화면. 권한 세 가지와 AI 에이전트 연결이 모두 켜져 있다">
+</p>
+
+- 항목마다 **허용**을 누르면 macOS 안내 창이나 **시스템 설정 → 개인정보 보호 및 보안**의 해당 목록이 열립니다. 켠 항목은 저절로 초록 체크로 바뀌어요.
+- **전체 디스크 접근 권한** 목록에 Mochinotch가 없으면 아래 **+**를 눌러 `응용 프로그램`의 `Mochinotch`를 추가하세요.
+- **화면 기록**은 켠 뒤 앱을 다시 켜야 적용돼요. 처음 설정 아래의 **다시 켜기**를 누르면 됩니다.
+- **AI 에이전트 연결**의 **연결**을 누르면 hook까지 한 번에 넣어요. 자세한 건 아래 AI 에이전트 연결을 보세요.
+- **나중에**를 누르면 닫히고 다시 저절로 뜨지 않아요. 설정 → **권한 · AI 연결**에서 언제든 다시 열 수 있어요.
 
 | 권한 | 어디에 쓰나요 | 없으면 |
 |---|---|---|
@@ -201,17 +212,13 @@ Claude Code, Cursor, Codex가 작업을 마치면 노치가 옆으로 펼쳐지�
 
 AI 도구가 작업을 끝냈다는 신호를 노치로 보내려면 각 도구에 hook을 한 번 넣어야 합니다. AI API를 호출하거나 대화 내용을 보내지 않습니다. 내 맥 안(`127.0.0.1:47321`)으로 "끝났다"는 신호만 갑니다.
 
-### 자동으로 넣기
+### 버튼 하나로 연결
 
-이 저장소를 받은 뒤 터미널에서 실행합니다.
+처음 설정이나 설정 → **권한 · AI 연결**에서 **AI 에이전트 연결**의 **연결**을 누르세요. 터미널도, python 같은 추가 설치도 필요 없어요.
 
-```bash
-git clone https://github.com/sleeeppy/mochinotch.git
-cd mochinotch
-./scripts/install-hooks.sh --apply
-```
-
-아래 설정 파일에 hook이 추가됩니다. 고치기 전에 원래 파일을 `.mochinotch.bak`으로 복사해 둡니다.
+1. 이 맥에서 찾은 도구의 설정 파일에만 hook을 넣습니다. 고치기 전에 원래 파일을 `.mochinotch.bak`으로 복사하고, 이미 연결된 파일은 건드리지 않아요.
+2. 켜져 있는 Cursor, Claude, Codex 앱은 저절로 다시 켜서 바로 적용합니다. 저장하지 않은 작업이 있어 앱이 종료를 물어보면 억지로 끄지 않고, 직접 다시 켜 달라고 알려 줘요.
+3. 터미널에서 쓰는 Claude Code와 Codex는 새로 여는 세션부터 적용돼요.
 
 | 도구 | 파일 | 알려 주는 것 |
 |---|---|---|
@@ -219,7 +226,13 @@ cd mochinotch
 | Cursor | `~/.cursor/hooks.json` | 작업 완료, 실패, 중단 |
 | Codex | `~/.codex/config.toml` | 작업 완료 (원래 있던 `notify`도 그대로 실행돼요) |
 
-넣은 뒤 각 도구를 다시 시작하세요.
+hook은 `~/.local/bin/mochinotch-notify`를 부르고, 이 파일이 앱을 불러 신호를 보냅니다. 앱을 옮기거나 업데이트해도 다음에 켤 때 이 파일만 새 위치로 고쳐서 연결이 끊기지 않아요.
+
+터미널에서 연결하려면 이렇게 실행합니다. 이미 켜져 있는 도구는 직접 다시 켜 주세요.
+
+```bash
+/Applications/Mochinotch.app/Contents/MacOS/Mochinotch --install-hooks
+```
 
 ### 직접 보내 보기
 
@@ -261,7 +274,7 @@ Xcode에서 서명을 **Sign to Run Locally**로 두고 Run 합니다. 터미널
 | 경로 | 역할 |
 |---|---|
 | `Mochinotch/` | 앱 소스 |
-| `scripts/mochinotch-notify` | hook이 호출하는 전달 스크립트 |
-| `scripts/install-hooks.sh` | 전달 스크립트 설치와 hook 병합 |
+| `Mochinotch/Hooks/` | hook 전달(`--hook`)과 설정 병합(`--install-hooks`) |
+| `scripts/install-hooks.sh` | 빌드한 앱으로 `--install-hooks` 실행 |
 | `hooks/` | 도구별 설정 예시 |
 | `docs/` | 개발 플랜과 README 이미지 |
