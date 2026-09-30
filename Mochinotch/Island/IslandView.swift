@@ -695,7 +695,10 @@ private struct ExpandedIslandContent: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 6)
             ZStack(alignment: .topLeading) {
-                if model.showsSettings {
+                if model.showsSetup {
+                    SetupView()
+                        .transition(.opacity.combined(with: .offset(y: 6)))
+                } else if model.showsSettings {
                     SettingsView()
                         .transition(.opacity.combined(with: .offset(y: 6)))
                 } else if model.activities.isEmpty {
@@ -713,6 +716,7 @@ private struct ExpandedIslandContent: View {
             }
             .animation(.easeInOut(duration: 0.32), value: model.activities.isEmpty)
             .animation(IslandMotion.morph, value: model.showsSettings)
+            .animation(IslandMotion.morph, value: model.showsSetup)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .padding(.horizontal, metrics.shoulder)
@@ -723,29 +727,13 @@ private struct ExpandedIslandContent: View {
             Text("もちノッチ")
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .foregroundStyle(Color.white.opacity(0.82))
-            Button {
-                model.toggleSettings()
-            } label: {
-                Image(systemName: model.showsSettings ? "gearshape.fill" : "gearshape")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(
-                        model.showsSettings || settingsHovered ? IslandColor.primary : IslandColor.secondary
-                    )
-                    .frame(width: 22, height: 22)
-                    .background(
-                        Circle().fill(
-                            model.showsSettings || settingsHovered ? IslandColor.rowHighlight : Color.clear
-                        )
-                    )
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .help(model.showsSettings ? "목록" : "설정")
-            .onHover { hovering in
-                withAnimation(.easeOut(duration: 0.15)) { settingsHovered = hovering }
+            if !model.showsSetup {
+                settingsButton
             }
             Spacer()
-            if model.showsSettings {
+            if model.showsSetup {
+                EmptyView()
+            } else if model.showsSettings {
                 headerChip("닫기", hovered: closeHovered) {
                     model.closeSettings()
                 }
@@ -763,8 +751,34 @@ private struct ExpandedIslandContent: View {
                 .transition(.opacity)
             }
         }
+        .frame(height: 22)
         .animation(.easeInOut(duration: 0.22), value: model.activities.isEmpty)
         .animation(.easeInOut(duration: 0.22), value: model.showsSettings)
+        .animation(.easeInOut(duration: 0.22), value: model.showsSetup)
+    }
+
+    private var settingsButton: some View {
+        Button {
+            model.toggleSettings()
+        } label: {
+            Image(systemName: model.showsSettings ? "gearshape.fill" : "gearshape")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(
+                    model.showsSettings || settingsHovered ? IslandColor.primary : IslandColor.secondary
+                )
+                .frame(width: 22, height: 22)
+                .background(
+                    Circle().fill(
+                        model.showsSettings || settingsHovered ? IslandColor.rowHighlight : Color.clear
+                    )
+                )
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(model.showsSettings ? "목록" : "설정")
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.15)) { settingsHovered = hovering }
+        }
     }
 
     private func headerChip(_ title: String, hovered: Bool, danger: Bool = false, action: @escaping () -> Void) -> some View {
@@ -839,7 +853,7 @@ private struct ActivityRow: View {
 
     var body: some View {
         Group {
-            if activity.openBundleIDs.isEmpty {
+            if !activity.isTappable {
                 row
             } else {
                 Button {
@@ -895,7 +909,7 @@ private struct ActivityRow: View {
                         .multilineTextAlignment(.leading)
                 }
             }
-            if !activity.openBundleIDs.isEmpty {
+            if activity.isTappable {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(Color.white.opacity(hovered ? 0.42 : 0.22))

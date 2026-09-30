@@ -57,7 +57,6 @@ final class AppModel {
     private(set) var boingToken = 0
     private(set) var chargePulse = 0
     private(set) var notificationAccess: NotificationAccess = .starting
-    private(set) var duoMessage: String?
     /// 화면 효과와 함께 노치 테두리를 지나가는 글로우.
     private(set) var edgeGlow: Double = 0
     private(set) var edgeGlowTravel: Double = 0
@@ -102,6 +101,16 @@ final class AppModel {
     private var frozenListHeight: CGFloat?
     /// 펼친 채로 인트로를 고르면, 마우스를 치운 뒤에 한 번 보여 준다.
     private(set) var pendingIntroPreview: IntroStudy?
+    /// 권한과 AI 연결 안내. 처음 켰을 때 인트로 뒤에 열리고, 닫기 전까지 펼친 채로 둔다.
+    private(set) var showsSetup = false
+    private(set) var setupStatus = SetupStatus()
+    private(set) var agentLinkProgress = AgentLinkProgress.idle
+    /// 화면 기록은 켠 뒤 앱을 다시 켜야 적용된다.
+    private(set) var requestedScreenRecording = false
+    private var setupPending = false
+    private var setupTimer: Timer?
+    /// 지우기로 치운 설정 알림은 이번에 켜 있는 동안 다시 넣지 않는다.
+    private var setupReminderDismissed = false
     private var screenObserver: NSObjectProtocol?
     private var activationObserver: NSObjectProtocol?
 
@@ -120,7 +129,7 @@ final class AppModel {
             rowCount: frozenRows ?? activities.count,
             peekSlots: noticeGroups.count,
             agentSlots: agentEarSuppressed ? 0 : agentGroups.count,
-            settingsHeight: showsSettings ? settingsHeight : nil,
+            settingsHeight: showsSettings || showsSetup ? settingsHeight : nil,
             listHeight: frozenRows != nil ? frozenListHeight : (activities.isEmpty ? nil : listHeight)
         )
     }
@@ -215,6 +224,7 @@ final class AppModel {
         }
         notifications.onAccessChange = { [weak self] access in
             self?.notificationAccess = access
+            self?.refreshSetup()
         }
         notifications.start()
         Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
@@ -224,9 +234,6 @@ final class AppModel {
             }
         }
 
-        DuoPulse.shared.onStatus = { [weak self] message in
-            self?.duoMessage = message
-        }
         DuoPulse.shared.onGlow = { [weak self] envelope, travel, color in
             guard let self else { return }
             let rgb = color.usingColorSpace(.sRGB) ?? color
@@ -265,11 +272,25 @@ final class AppModel {
         }
 
         refreshPanel()
+        Task.detached(priority: .utility) {
+            HookInstaller.refreshRelayIfNeeded()
+        }
+        if !UserDefaults.standard.bool(forKey: Self.setupDoneKey) {
+            setupPending = true
+            // 인트로가 알림에 밀려 끝나지 못해도 안내는 연다.
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(8))
+                self?.presentSetupIfPending()
+            }
+        }
         showWelcome()
     }
 
     private static let introStudyKey = "introStudy"
     private static let screenEffectKey = "playsScreenEffect"
+    private static let setupDoneKey = "setupDone"
+    private static let askedAccessibilityKey = "askedAccessibility"
+    private static let askedScreenRecordingKey = "askedScreenRecording"
 
     func setIntro(_ study: IntroStudy) {
         introStudy = study
@@ -359,10 +380,214 @@ final class AppModel {
     }
 
     func openSettings() {
+        refreshSetup()
         withAnimation(IslandMotion.morph) {
             showsSettings = true
         }
         expandNow()
+    }
+
+    // MARK: 권한과 AI 연결
+
+    func openSetup() {
+        refreshSetup()
+        startSetupPolling()
+        hoverTask?.cancel()
+        leaveTask?.cancel()
+        dismissTask?.cancel()
+        withAnimation(IslandMotion.morph) {
+            showsSettings = false
+            showsSetup = true
+        }
+        setPresentation(.expanded)
+    }
+
+    /// 다 켜지 않았어도 닫으면 다음부터는 저절로 열지 않는다. 설정에서 다시 연다.
+    func finishSetup() {
+        UserDefaults.standard.set(true, forKey: Self.setupDoneKey)
+        setupPending = false
+        stopSetupPolling()
+        withAnimation(IslandMotion.morph) {
+            showsSetup = false
+        }
+        if !isHovering {
+            setPresentation(.idle)
+        }
+    }
+
+    private func presentSetupIfPending() {
+        guard setupPending, !introDirect else { return }
+        setupPending = false
+        // 알림 권한은 켠 직후에야 확인된다. 인트로가 끝날 즈음 보면 이미 다 켠 사람은 건너뛴다.
+        refreshSetup()
+        if setupStatus.remaining == 0 {
+            UserDefaults.standard.set(true, forKey: Self.setupDoneKey)
+            if presentation != .idle, !isHovering {
+                setPresentation(.idle)
+            }
+            return
+        }
+        openSetup()
+    }
+
+    func refreshSetup() {
+        let next = SetupStatus(
+            notifications: notificationAccess == .watching,
+            accessibility: AXIsProcessTrusted(),
+            screenRecording: CGPreflightScreenCaptureAccess(),
+            agents: HookInstaller.status(),
+            movedFromDownloads: !HookInstaller.isTranslocated
+        )
+        if next != setupStatus {
+            withAnimation(.easeInOut(duration: 0.22)) {
+                setupStatus = next
+            }
+        }
+        syncSetupReminder()
+    }
+
+    /// 꺼진 게 있으면 펼친 목록에 Mochinotch가 보낸 알림을 하나 둔다. 다 켜면 저절로 빠진다.
+    private func syncSetupReminder() {
+        var missing: [String] = []
+        // 알림 권한은 켤 때 잠깐 확인 중이다. 그 사이에 넣으면 다 켠 사람에게도 한 번 번쩍 뜬다.
+        if !setupStatus.notifications, notificationAccess != .starting { missing.append("알림 읽기") }
+        if !setupStatus.accessibility { missing.append("손쉬운 사용") }
+        if !setupStatus.screenRecording { missing.append("화면 기록") }
+        if !setupStatus.agentsDone { missing.append("AI 연결") }
+        let index = activities.firstIndex(where: \.isSetupReminder)
+        if missing.isEmpty || setupReminderDismissed {
+            if let index {
+                withAnimation(IslandMotion.morph) {
+                    _ = activities.remove(at: index)
+                }
+            }
+            return
+        }
+        let payload = ActivityPayload.setup(missing: missing)
+        if let index {
+            if activities[index].payload != payload {
+                activities[index].payload = payload
+            }
+            return
+        }
+        activities.insert(
+            IslandActivity(id: UUID(), payload: payload, createdAt: Date(), keepsHistory: true),
+            at: 0
+        )
+    }
+
+    private func startSetupPolling() {
+        setupTimer?.invalidate()
+        setupTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshSetup()
+            }
+        }
+    }
+
+    private func stopSetupPolling() {
+        setupTimer?.invalidate()
+        setupTimer = nil
+    }
+
+    func requestAccessibility() {
+        // 처음 한 번은 시스템 안내 창이 앱을 목록에 올려 준다. 그 뒤로는 창이 다시 뜨지 않아 설정을 바로 연다.
+        if !UserDefaults.standard.bool(forKey: Self.askedAccessibilityKey) {
+            UserDefaults.standard.set(true, forKey: Self.askedAccessibilityKey)
+            let prompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+            _ = AXIsProcessTrustedWithOptions([prompt: true] as CFDictionary)
+            return
+        }
+        openPrivacyPane("Privacy_Accessibility")
+    }
+
+    func requestScreenRecording() {
+        requestedScreenRecording = true
+        if !UserDefaults.standard.bool(forKey: Self.askedScreenRecordingKey) {
+            UserDefaults.standard.set(true, forKey: Self.askedScreenRecordingKey)
+            if CGRequestScreenCaptureAccess() { refreshSetup() }
+            return
+        }
+        openPrivacyPane("Privacy_ScreenCapture")
+    }
+
+    private func openPrivacyPane(_ anchor: String) {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// 권한 몇 가지는 켠 뒤 다시 켜야 적용된다. 새 앱이 뜨기 전에 이 앱이 먼저 꺼진다.
+    func relaunch() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "sleep 0.8; /usr/bin/open \"$0\"", Bundle.main.bundlePath]
+        try? process.run()
+        NSApp.terminate(nil)
+    }
+
+    /// hook을 넣고, 설정이 바뀐 도구의 앱이 켜져 있으면 다시 켠다.
+    func connectAgents() {
+        if case .working = agentLinkProgress { return }
+        let tools = setupStatus.agents.present
+        guard !tools.isEmpty else { return }
+        agentLinkProgress = .working("연결하는 중")
+        Task { @MainActor [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                HookInstaller.install(tools: tools)
+            }.value
+            guard let self else { return }
+            if let failure = result.failures.first {
+                self.agentLinkProgress = .failed("\(failure.tool.displayName) · \(failure.message)")
+                self.refreshSetup()
+                return
+            }
+            var restarted: [String] = []
+            var stuck: [String] = []
+            for tool in result.changed {
+                for app in tool.appBundleIDs.flatMap(NSRunningApplication.runningApplications(withBundleIdentifier:)) {
+                    // Codex 앱은 프로세스 이름이 ChatGPT다. 사람들이 아는 건 앱 파일 이름이다.
+                    let name = app.bundleURL?.deletingPathExtension().lastPathComponent ?? tool.displayName
+                    self.agentLinkProgress = .working("\(name) 다시 켜는 중")
+                    if await Self.restart(app) {
+                        restarted.append(name)
+                    } else {
+                        stuck.append(name)
+                    }
+                }
+            }
+            var notes: [String] = []
+            if result.changed.isEmpty {
+                notes.append("이미 연결돼 있어요")
+            } else if !restarted.isEmpty {
+                notes.append("\(restarted.joined(separator: ", ")) 다시 켰어요")
+            }
+            if !stuck.isEmpty {
+                notes.append("\(stuck.joined(separator: ", "))는 직접 다시 켜 주세요")
+            }
+            if result.changed.contains(where: { $0 == .claude || $0 == .codex }) {
+                notes.append("터미널은 새 세션부터 적용돼요")
+            }
+            self.agentLinkProgress = .done(notes.joined(separator: " · "))
+            self.refreshSetup()
+        }
+    }
+
+    /// 저장하지 않은 문서가 있으면 앱이 종료를 물어본다. 그때는 억지로 끄지 않는다.
+    /// Cursor는 창과 에이전트를 정리하느라 20초 넘게 걸리기도 한다.
+    private static func restart(_ app: NSRunningApplication) async -> Bool {
+        guard let url = app.bundleURL, let bundleID = app.bundleIdentifier else { return false }
+        app.terminate()
+        for _ in 0..<360 where !app.isTerminated {
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        guard app.isTerminated else { return false }
+        try? await Task.sleep(for: .milliseconds(400))
+        if NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).contains(where: { !$0.isTerminated }) {
+            return true
+        }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = false
+        return (try? await NSWorkspace.shared.openApplication(at: url, configuration: configuration)) != nil
     }
 
     func closeSettings() {
@@ -617,6 +842,7 @@ final class AppModel {
 
     func clearHistory() {
         clearTask?.cancel()
+        setupReminderDismissed = true
         let rows = activities.count
         if isHovering, rows > 0 {
             frozenRows = rows
@@ -640,6 +866,10 @@ final class AppModel {
     }
 
     func open(_ activity: IslandActivity) {
+        if activity.isSetupReminder {
+            openSetup()
+            return
+        }
         for id in activity.openBundleIDs {
             guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else { continue }
             let configuration = NSWorkspace.OpenConfiguration()
@@ -672,10 +902,6 @@ final class AppModel {
         }
     }
 
-    func openScreenRecordingSettings() {
-        DuoPulse.shared.openSettings()
-    }
-
     private func showWelcome() {
         playIntro(introStudy, quietOnly: true)
     }
@@ -691,7 +917,11 @@ final class AppModel {
         introTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(quietOnly ? 240 : 40))
             guard let self, !Task.isCancelled else { return }
-            if quietOnly, !self.activities.isEmpty || self.presentation != .idle || self.isHovering { return }
+            let hasHistory = self.activities.contains { !$0.isSetupReminder }
+            if quietOnly, hasHistory || self.presentation != .idle || self.isHovering {
+                self.presentSetupIfPending()
+                return
+            }
             if self.isHovering { return }
             self.startIntro(IntroScript.make(study))
         }
@@ -712,6 +942,7 @@ final class AppModel {
             let t = now - start
             if self.isHovering {
                 self.finishIntro(fold: false)
+                self.presentSetupIfPending()
                 return
             }
             let pose = script.pose(t)
@@ -727,7 +958,9 @@ final class AppModel {
                 self.introGlow(t - glow)
             }
             if t >= script.length {
-                self.finishIntro(fold: true)
+                // 안내를 열 거면 접지 않고 인사한 모양에서 바로 펼친다.
+                self.finishIntro(fold: !self.setupPending)
+                self.presentSetupIfPending()
             }
         }
     }
@@ -907,7 +1140,7 @@ final class AppModel {
         }
         if activity.isFailure {
             shakeToken += 1
-        } else if activity.bouncesIsland, !isHovering {
+        } else if activity.bouncesIsland, !isHovering, !showsSetup {
             boingToken += 1
         }
         if let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
@@ -915,7 +1148,7 @@ final class AppModel {
            let index = activities.firstIndex(where: { $0.id == activity.id }) {
             activities[index].hidesPeek = true
         }
-        if isHovering {
+        if isHovering || showsSetup {
             setPresentation(.expanded)
         } else if activity.isNotice {
             setPresentation(.idle)
@@ -940,6 +1173,8 @@ final class AppModel {
                 try? await Task.sleep(for: MochinotchConfig.hoverIn)
                 guard !Task.isCancelled, let self, self.isHovering else { return }
                 self.dismissTask?.cancel()
+                // 시스템 설정에서 따로 켠 권한도 펼칠 때 알림에 반영한다.
+                self.refreshSetup()
                 self.setPresentation(.expanded)
             }
         } else {
@@ -949,7 +1184,7 @@ final class AppModel {
                 try? await Task.sleep(for: MochinotchConfig.hoverOut)
                 guard !Task.isCancelled, let self else { return }
                 self.isHovering = false
-                if self.presentation == .expanded {
+                if self.presentation == .expanded, !self.showsSetup {
                     self.setPresentation(.idle)
                 }
                 // 접히는 스프링이 끝나기 전에 인트로가 모양을 가로채면 접힘이 끊긴다.
@@ -1005,6 +1240,10 @@ final class AppModel {
     private func commitPresentation(_ next: IslandPresentation) {
         if presentation == .expanded, next != .expanded {
             showsSettings = false
+            if showsSetup {
+                showsSetup = false
+                stopSetupPolling()
+            }
             noticesSeenAt = Date()
             clearTask?.cancel()
             frozenRows = nil

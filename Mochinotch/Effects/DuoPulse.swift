@@ -98,7 +98,6 @@ enum IconTint {
 final class DuoPulse: NSObject {
     static let shared = DuoPulse()
 
-    var onStatus: ((String?) -> Void)?
     /// 화면 효과와 같이 움직인다. envelope, 0~1 진행, 틴트.
     var onGlow: ((Double, Double, NSColor) -> Void)?
 
@@ -119,7 +118,6 @@ final class DuoPulse: NSObject {
         tint = (rgb.redComponent, rgb.greenComponent, rgb.blueComponent)
         renderer.setRim(rim)
         guard CGPreflightScreenCaptureAccess() else {
-            onStatus?("화면 왜곡 · 화면 기록 스위치가 이 실행 파일에는 아직 안 붙었어요")
             Self.log("preflight denied, prompt skipped")
             return
         }
@@ -129,19 +127,11 @@ final class DuoPulse: NSObject {
             guard let self else { return }
             do {
                 try await self.startLive()
-                guard token == self.generation else { return }
-                self.onStatus?(nil)
             } catch {
                 guard token == self.generation else { return }
-                self.onStatus?("화면 왜곡 · 화면을 읽지 못했어요")
                 Self.log("capture failed: \(error)")
             }
         }
-    }
-
-    func openSettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") else { return }
-        NSWorkspace.shared.open(url)
     }
 
     private func startLive() async throws {
