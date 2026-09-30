@@ -41,17 +41,15 @@ struct SettingsView: View {
                 ) {
                     model.setPlaysScreenEffect(!model.playsScreenEffect)
                 }
-                if model.notificationAccess == .denied {
-                    SettingsDivider()
-                    ActionRow(title: "알림 권한이 필요해요", subtitle: "전체 디스크 접근 권한에 추가") {
-                        model.openFullDiskAccessSettings()
-                    }
-                }
-                if let duoMessage = model.duoMessage {
-                    SettingsDivider()
-                    ActionRow(title: "화면 기록 권한", subtitle: duoMessage) {
-                        model.openScreenRecordingSettings()
-                    }
+                SettingsDivider()
+                ActionRow(
+                    title: "권한 · AI 연결",
+                    subtitle: model.setupStatus.remaining == 0
+                        ? "모두 준비됐어요"
+                        : "\(model.setupStatus.remaining)개가 아직 꺼져 있어요",
+                    highlighted: model.setupStatus.remaining > 0
+                ) {
+                    model.openSetup()
                 }
             }
 
@@ -106,11 +104,11 @@ struct SettingsView: View {
     }
 }
 
-private enum SettingsLayout {
+enum SettingsLayout {
     static let horizontal: CGFloat = 14
 }
 
-private struct SettingsHeightKey: PreferenceKey {
+struct SettingsHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
@@ -124,7 +122,7 @@ private struct IntroAnchorKey: PreferenceKey {
     }
 }
 
-private struct SettingsCard<Content: View>: View {
+struct SettingsCard<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -140,7 +138,7 @@ private struct SettingsCard<Content: View>: View {
     }
 }
 
-private struct SettingsDivider: View {
+struct SettingsDivider: View {
     var body: some View {
         Rectangle()
             .fill(Color.white.opacity(0.07))
@@ -149,7 +147,7 @@ private struct SettingsDivider: View {
     }
 }
 
-private struct SettingsRow<Trailing: View>: View {
+struct SettingsRow<Trailing: View>: View {
     var title: String
     var subtitle: String?
     @ViewBuilder var trailing: Trailing
@@ -203,18 +201,20 @@ private struct SwitchRow: View {
 private struct ActionRow: View {
     var title: String
     var subtitle: String
+    var highlighted = true
     var action: () -> Void
     @State private var hovered = false
 
     var body: some View {
+        let tint = highlighted ? IslandColor.warning : IslandColor.secondary
         Button(action: action) {
             SettingsRow(title: title, subtitle: subtitle) {
                 Text("열기")
                     .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(IslandColor.warning)
+                    .foregroundStyle(tint)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
-                    .background(Capsule().fill(IslandColor.warning.opacity(hovered ? 0.24 : 0.15)))
+                    .background(Capsule().fill(tint.opacity(hovered ? 0.24 : 0.15)))
             }
             .background(Color.white.opacity(hovered ? 0.04 : 0))
         }
