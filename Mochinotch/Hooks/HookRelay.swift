@@ -97,6 +97,7 @@ enum HookRelay {
         var title = options.title
         var detail = options.detail
         var kind = options.kind
+        var dedupeID: String?
 
         switch source {
         case "claude":
@@ -139,6 +140,7 @@ enum HookRelay {
         case "codex":
             let event = argEvent.isEmpty ? stdinEvent : argEvent
             if let type = event["type"] as? String, type != "agent-turn-complete" { return }
+            if let turn = (event["turn-id"] as? String).nonEmpty { dedupeID = "codex:\(turn)" }
             if tool.isEmpty { tool = "codex" }
             if kind.isEmpty { kind = "completed" }
             if title.isEmpty { title = "Codex 작업 완료" }
@@ -162,8 +164,9 @@ enum HookRelay {
         ]
         if !bundle.isEmpty { payload["bundleID"] = bundle }
         if source == "cursor", let generation = (stdinEvent["generation_id"] as? String).nonEmpty {
-            payload["id"] = "cursor:\(generation)"
+            dedupeID = "cursor:\(generation)"
         }
+        if let dedupeID { payload["id"] = dedupeID }
         post(payload)
     }
 

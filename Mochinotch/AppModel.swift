@@ -66,6 +66,9 @@ final class AppModel {
     private(set) var introStudy = IntroStudy.stored
     /// 작업이 끝날 때 화면 가장자리 연출. 꺼도 노치 연출은 그대로다.
     private(set) var playsScreenEffect = UserDefaults.standard.object(forKey: AppModel.screenEffectKey) as? Bool ?? true
+    /// GitHub 최신 릴리즈가 이 앱보다 새로울 때.
+    private(set) var updateAvailable = false
+    private var checkedForUpdate = false
 
     private var featuredID: UUID?
     private var noticesSeenAt = Date.distantPast
@@ -231,6 +234,7 @@ final class AppModel {
             self?.refreshSetup()
         }
         notifications.start()
+        checkForUpdate()
         Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.syncOpenConversation()
@@ -356,6 +360,15 @@ final class AppModel {
         if recentEventKeys[key] != nil { return }
         // 내용이 같은 건 거의 같이 온 것만 겹친 걸로 본다. 같은 curl을 다시 보내 보는 건 막지 않는다.
         recentEventKeys[key] = now.addingTimeInterval(event.id == nil ? 2 : 60)
+        // 앱이 보내는 배너는 hook과 같은 완료다. hook이 오면 방금 뜬 배너는 뺀다.
+        activities.removeAll { activity in
+            guard activity.createdAt.timeIntervalSince(now) > -15,
+                  case .notice(_, _, _, let bundleID) = activity.payload,
+                  let bundleID,
+                  let noticeTool = AgentTool.agents.first(where: { $0.iconBundleIDs.contains(bundleID) })
+            else { return false }
+            return noticeTool == tool
+        }
         let bundles = event.bundleID.map { [$0] } ?? []
         let activity = IslandActivity(
             id: UUID(),
@@ -374,6 +387,15 @@ final class AppModel {
     }
 
     func ingest(_ notice: SystemNotice) {
+        // hook이 방금 같은 도구의 완료를 보냈으면 앱 배너는 겹치니 버린다.
+        if let tool = AgentTool.agents.first(where: { $0.iconBundleIDs.contains(notice.bundleID) }),
+           activities.contains(where: { activity in
+               guard activity.createdAt.timeIntervalSinceNow > -15,
+                     case .agent(let existing, _, _, _, _) = activity.payload else { return false }
+               return existing == tool
+           }) {
+            return
+        }
         let title = [notice.title, notice.subtitle].filter { !$0.isEmpty }.joined(separator: " · ")
         let activity = IslandActivity(
             id: UUID(),
@@ -391,10 +413,96 @@ final class AppModel {
 
     func openSettings() {
         refreshSetup()
+        checkForUpdate()
         withAnimation(IslandMotion.morph) {
             showsSettings = true
         }
         expandNow()
+    }
+
+    func openUpdate() {
+        guard let url = URL(string: "https://github.com/sleeeppy/mochinotch/releases/latest") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func openGuide() {
+        guard let url = URL(string: "https://github.com/sleeeppy/mochinotch#readme") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// 최신 릴리즈 태그만 본다. 실패하면 다음 설정 열기 때 다시 본다.
+    func checkForUpdate() {
+        guard !checkedForUpdate else { return }
+        checkedForUpdate = true
+        let local = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            switch await Self.githubUpdateAvailable(local: local) {
+            case .newer(let tag):
+                self.updateAvailable = true
+                self.announceUpdate(tag)
+            case .current:
+                break
+            case .failed:
+                self.checkedForUpdate = false
+            }
+        }
+    }
+
+    private static let announcedUpdateKey = "announcedUpdateVersion"
+
+    private enum UpdateCheck {
+        case newer(String)
+        case current
+        case failed
+    }
+
+    private static func githubUpdateAvailable(local: String) async -> UpdateCheck {
+        guard let url = URL(string: "https://api.github.com/repos/sleeeppy/mochinotch/releases/latest") else { return .failed }
+        var request = URLRequest(url: url, timeoutInterval: 5)
+        request.setValue("Mochinotch", forHTTPHeaderField: "User-Agent")
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse, http.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tag = json["tag_name"] as? String
+        else { return .failed }
+        return isNewerRelease(tag, than: local) ? .newer(tag) : .current
+    }
+
+    /// 이 버전은 한 번만 알린다. 다음 버전이 나오면 다시 한 번.
+    private func announceUpdate(_ tag: String) {
+        let version = Self.versionParts(tag).map(String.init).joined(separator: ".")
+        guard !version.isEmpty else { return }
+        if UserDefaults.standard.string(forKey: Self.announcedUpdateKey) == version { return }
+        UserDefaults.standard.set(version, forKey: Self.announcedUpdateKey)
+        present(
+            IslandActivity(
+                id: UUID(),
+                payload: .update(version: version),
+                createdAt: Date(),
+                keepsHistory: true
+            ),
+            seconds: 6
+        )
+    }
+
+    private static func isNewerRelease(_ remote: String, than local: String) -> Bool {
+        let remoteParts = versionParts(remote)
+        let localParts = versionParts(local)
+        guard !remoteParts.isEmpty, !localParts.isEmpty else { return false }
+        for index in 0..<max(remoteParts.count, localParts.count) {
+            let remotePart = index < remoteParts.count ? remoteParts[index] : 0
+            let localPart = index < localParts.count ? localParts[index] : 0
+            if remotePart != localPart { return remotePart > localPart }
+        }
+        return false
+    }
+
+    private static func versionParts(_ text: String) -> [Int] {
+        text.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
+            .split(separator: ".")
+            .compactMap { Int($0) }
     }
 
     // MARK: 권한과 AI 연결
@@ -880,6 +988,10 @@ final class AppModel {
     func open(_ activity: IslandActivity) {
         if activity.isSetupReminder {
             openSetup()
+            return
+        }
+        if activity.isUpdateNotice {
+            openUpdate()
             return
         }
         for id in activity.openBundleIDs {
