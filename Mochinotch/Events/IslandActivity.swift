@@ -457,7 +457,9 @@ struct IslandActivity: Identifiable, Equatable {
 
     /// 펼쳐질 때 노치가 아래로 한 번 말랑하게 늘어난다. 화면 연출이 같이 나오는 작업 완료에만 쓴다.
     var bouncesIsland: Bool {
-        if case .agent(_, let outcome, _, _, _) = payload { return outcome != .cancelled && outcome != .failed }
+        if case .agent(_, let outcome, _, _, _) = payload {
+            return outcome != .cancelled && outcome != .failed && outcome != .needsInput
+        }
         return false
     }
 }

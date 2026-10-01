@@ -77,7 +77,8 @@ struct HookInstallResult: Sendable {
 /// 앱을 옮기거나 업데이트해도 설정 파일은 그대로 두고 이 파일만 고친다.
 enum HookInstaller {
     static let relayMarker = "# mochinotch-relay"
-    private static let claudeEvents = ["Stop", "Notification", "StopFailure"]
+    private static let claudeEvents = ["Stop", "Notification", "StopFailure", "PermissionRequest", "PreToolUse"]
+    private static let cursorEvents = ["stop", "preToolUse", "postToolUse"]
 
     static var home: URL {
         let path = ProcessInfo.processInfo.environment["HOME"].flatMap { $0.isEmpty ? nil : $0 } ?? NSHomeDirectory()
@@ -129,10 +130,14 @@ enum HookInstaller {
             }
         case .cursor:
             guard let hooks = (try? jsonObject(text))?["hooks"] else { return false }
-            return hasRelay(hooks["stop"], source: "cursor")
+            return cursorEvents.allSatisfy { hasRelay(hooks[$0], source: "cursor") }
         case .codex:
             // 다른 도구가 notify를 감싸 우리 명령을 인자 안에 넣어 두기도 한다.
-            return text.contains("mochinotch-notify")
+            guard text.contains("mochinotch-notify") else { return false }
+            let hooksURL = home.appendingPathComponent(".codex/hooks.json")
+            guard let hooksText = try? String(contentsOf: hooksURL, encoding: .utf8),
+                  let hooks = (try? jsonObject(hooksText))?["hooks"] else { return false }
+            return hasRelay(hooks["PermissionRequest"], source: "codex")
         case .kiro:
             guard let hooks = (try? jsonObject(text))?["hooks"]?.arrayValue else { return false }
             return hooks.contains { hook in
@@ -178,6 +183,14 @@ enum HookInstaller {
         try? writeRelay()
     }
 
+    /// 이미 연결해 둔 도구에, 승인 요청 hook이 없으면 그 이벤트만 더한다. 승인은 대신 누르지 않는다.
+    static func upgradeInstalledHooks() {
+        for tool in HookTool.allCases {
+            guard hasExistingRelay(tool), !isConnected(tool) else { continue }
+            _ = try? merge(tool)
+        }
+    }
+
     private static func relayPointsHere() -> Bool {
         guard let text = try? String(contentsOf: relayURL, encoding: .utf8),
               let executable = Bundle.main.executablePath else { return false }
@@ -206,7 +219,7 @@ enum HookInstaller {
         try manager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: relayURL.path)
     }
 
-    /// 고쳤으면 true. 이미 연결돼 있으면 파일을 건드리지 않는다.
+    /// 고쳤으면 true. 이미 승인 요청까지 연결돼 있으면 파일을 건드리지 않는다.
     private static func merge(_ tool: HookTool) throws -> Bool {
         if isConnected(tool) { return false }
         let url = home.appendingPathComponent(tool.configPath)
@@ -220,13 +233,24 @@ enum HookInstaller {
         case .codex: updated = try mergedCodex(existing ?? "")
         case .kiro: updated = kiroHook()
         }
-        if existing != nil {
-            let backup = url.appendingPathExtension("mochinotch.bak")
-            try? manager.removeItem(at: backup)
-            try manager.copyItem(at: url, to: backup)
+        var changed = false
+        if existing != updated {
+            if existing != nil {
+                let backup = url.appendingPathExtension("mochinotch.bak")
+                try? manager.removeItem(at: backup)
+                try manager.copyItem(at: url, to: backup)
+            }
+            try Data(updated.utf8).write(to: url, options: .atomic)
+            changed = true
         }
-        try Data(updated.utf8).write(to: url, options: .atomic)
-        return true
+        if tool == .codex, try mergeCodexPermissionHooks() { changed = true }
+        return changed
+    }
+
+    private static func hasExistingRelay(_ tool: HookTool) -> Bool {
+        let url = home.appendingPathComponent(tool.configPath)
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return false }
+        return text.contains("mochinotch-notify")
     }
 
     private static func relayCommand(source: String) -> String {
@@ -238,23 +262,38 @@ enum HookInstaller {
     private static func mergedClaude(_ existing: String?) throws -> String {
         var root = try jsonObject(existing ?? "")
         var hooks = try objectValue(root["hooks"])
-        let entry = OrderedJSON.object([
-            ("hooks", .array([.object([("type", .string("command")), ("command", .string(relayCommand(source: "claude")))])])),
-        ])
         for event in claudeEvents where !hasRelay(hooks[event], source: "claude") {
-            hooks[event] = .array(try arrayValue(hooks[event]) + [entry])
+            let matcher = event == "PreToolUse" ? "AskUserQuestion" : nil
+            hooks[event] = .array(try arrayValue(hooks[event]) + [claudeHook(matcher: matcher)])
         }
         root["hooks"] = hooks
         return root.text() + "\n"
+    }
+
+    /// `PreToolUse`는 질문 카드에만 붙인다. 매처가 없으면 도구를 쓸 때마다 불린다.
+    private static func claudeHook(matcher: String?) -> OrderedJSON {
+        var group: [(String, OrderedJSON)] = [
+            ("hooks", .array([.object([
+                ("type", .string("command")),
+                ("command", .string(relayCommand(source: "claude"))),
+            ])])),
+        ]
+        if let matcher {
+            group.insert(("matcher", .string(matcher)), at: 0)
+        }
+        return .object(group)
     }
 
     private static func mergedCursor(_ existing: String?) throws -> String {
         var root = try jsonObject(existing ?? "")
         if root["version"] == nil { root["version"] = .number("1") }
         var hooks = try objectValue(root["hooks"])
-        if !hasRelay(hooks["stop"], source: "cursor") {
-            let entry = OrderedJSON.object([("command", .string(relayCommand(source: "cursor")))])
-            hooks["stop"] = .array(try arrayValue(hooks["stop"]) + [entry])
+        for event in cursorEvents where !hasRelay(hooks[event], source: "cursor") {
+            var members: [(String, OrderedJSON)] = [("command", .string(relayCommand(source: "cursor")))]
+            if event == "preToolUse" || event == "postToolUse" {
+                members.append(("matcher", .string("AskQuestion|AskUserQuestion")))
+            }
+            hooks[event] = .array(try arrayValue(hooks[event]) + [.object(members)])
         }
         root["hooks"] = hooks
         return root.text() + "\n"
@@ -291,6 +330,9 @@ enum HookInstaller {
         let tail = existing[headEnd...]
         var command = [relayURL.path, "--source", "codex"]
         if let found = try TOMLNotify.find(in: head) {
+            if found.values.contains(where: { $0.contains("mochinotch-notify") }) {
+                return existing
+            }
             if !found.values.isEmpty {
                 command += ["--chain", OrderedJSON.array(found.values.map(OrderedJSON.string)).text(indent: nil)]
             }
@@ -303,6 +345,29 @@ enum HookInstaller {
         prefix += "# Mochinotch\nnotify = \(TOMLNotify.array(command))\n"
         if !tail.isEmpty { prefix += "\n" }
         return prefix + tail
+    }
+
+    /// 완료 알림용 `notify`와 따로, 승인을 물어볼 때만 부르는 hook이다. 결정은 하지 않는다.
+    private static func mergeCodexPermissionHooks() throws -> Bool {
+        let url = home.appendingPathComponent(".codex/hooks.json")
+        let manager = FileManager.default
+        try manager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let existing = try? String(contentsOf: url, encoding: .utf8)
+        var root = try jsonObject(existing ?? "")
+        var hooks = try objectValue(root["hooks"])
+        if hasRelay(hooks["PermissionRequest"], source: "codex") { return false }
+        let entry = OrderedJSON.object([
+            ("hooks", .array([.object([("type", .string("command")), ("command", .string(relayCommand(source: "codex")))])])),
+        ])
+        hooks["PermissionRequest"] = .array(try arrayValue(hooks["PermissionRequest"]) + [entry])
+        root["hooks"] = hooks
+        if existing != nil {
+            let backup = url.appendingPathExtension("mochinotch.bak")
+            try? manager.removeItem(at: backup)
+            try manager.copyItem(at: url, to: backup)
+        }
+        try Data((root.text() + "\n").utf8).write(to: url, options: .atomic)
+        return true
     }
 
     private static func firstTableHeader(in text: String) -> String.Index? {

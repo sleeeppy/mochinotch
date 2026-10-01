@@ -235,10 +235,10 @@ AI 도구가 작업을 끝냈다는 신호를 노치로 보내려면 각 도구�
 
 | 도구 | 파일 | 알려 주는 것 |
 |---|---|---|
-| Claude Code | `~/.claude/settings.json` | 작업 완료, 실패, 확인 필요 |
-| Cursor | `~/.cursor/hooks.json` | 작업 완료, 실패, 중단 |
-| Codex | `~/.codex/config.toml` | 작업 완료 (원래 있던 `notify`도 그대로 실행돼요) |
-| Kiro | `~/.kiro/hooks/mochinotch.json` | 작업 완료 (Mochinotch 전용 파일이라 다른 hook은 건드리지 않아요) |
+| Claude Code | `~/.claude/settings.json` | 작업 완료, 실패, 승인 창, 질문 카드 |
+| Cursor | `~/.cursor/hooks.json` | 작업 완료, 실패, 중단, 질문 카드 |
+| Codex | `~/.codex/config.toml`, `~/.codex/hooks.json` | 작업 완료, 승인 창 (원래 있던 `notify`도 그대로 실행돼요) |
+| Kiro | `~/.kiro/hooks/mochinotch.json` | 작업 완료. 입력 대기 화면용 hook은 Kiro가 아직 보내지 않아요 |
 
 hook은 `~/.local/bin/mochinotch-notify`를 부르고, 이 파일이 앱을 불러 신호를 보냅니다. 앱을 옮기거나 업데이트해도 다음에 켤 때 이 파일만 새 위치로 고쳐서 연결이 끊기지 않아요.
 

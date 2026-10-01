@@ -34,12 +34,11 @@ enum HookRelay {
             index += 1
         }
         // Cursor hook은 표준 출력에 {} 만 내야 이어서 질문을 던지지 않는다.
-        defer {
-            if options.source == "cursor" {
-                FileHandle.standardOutput.write(Data("{}\n".utf8))
-            }
+        // 승인 hook은 {} 를 내면 명령이 막힐 수 있어, 완료 hook만 응답한다.
+        let acknowledgeCursor = relay(options)
+        if acknowledgeCursor {
+            FileHandle.standardOutput.write(Data("{}\n".utf8))
         }
-        relay(options)
         return 0
     }
 
@@ -55,7 +54,8 @@ enum HookRelay {
         var positional: [String] = []
     }
 
-    private static func relay(_ options: Options) {
+    /// 완료 hook이면 Cursor에 `{}`를 돌려줘야 하면 true. 승인 요청은 결정을 하지 않는다.
+    private static func relay(_ options: Options) -> Bool {
         let environment = ProcessInfo.processInfo.environment
         let argPayload = options.positional.last ?? ""
         if !options.chain.isEmpty {
@@ -103,9 +103,23 @@ enum HookRelay {
         case "claude":
             if tool.isEmpty { tool = "claude" }
             switch stdinEvent["hook_event_name"] as? String ?? "" {
-            case "Notification":
+            case "PermissionRequest":
                 if kind.isEmpty { kind = "needsInput" }
-                if title.isEmpty { title = (stdinEvent["title"] as? String).nonEmpty ?? "Claude Code" }
+                if title.isEmpty { title = "Claude 확인 필요" }
+                if detail.isEmpty { detail = waitingDetail(stdinEvent) }
+            case "PreToolUse":
+                let name = stdinEvent["tool_name"] as? String ?? ""
+                guard Self.isUserQuestion(name) else { return false }
+                if kind.isEmpty { kind = "needsInput" }
+                if title.isEmpty { title = "Claude 확인 필요" }
+                if detail.isEmpty { detail = questionDetail(stdinEvent) }
+            case "Notification":
+                let type = stdinEvent["notification_type"] as? String ?? ""
+                // 권한 창이 뜬 뒤 6초 뒤에 다시 오는 permission_prompt는 같은 화면이라 받지 않는다.
+                let asks = ["agent_needs_input", "elicitation_dialog", "elicitation_url_dialog"]
+                if !asks.contains(type) { return false }
+                if kind.isEmpty { kind = "needsInput" }
+                if title.isEmpty { title = (stdinEvent["title"] as? String).nonEmpty ?? "Claude 확인 필요" }
                 if detail.isEmpty { detail = firstLine(stdinEvent["message"] as? String) }
             case "StopFailure":
                 if kind.isEmpty { kind = "failed" }
@@ -117,19 +131,37 @@ enum HookRelay {
             }
         case "cursor":
             if tool.isEmpty { tool = "cursor" }
-            let status = (stdinEvent["status"] as? String ?? "completed").lowercased()
-            if status == "error" {
-                if kind.isEmpty { kind = "failed" }
-                if title.isEmpty { title = "Cursor 작업 실패" }
-            } else if ["aborted", "cancelled", "canceled"].contains(status) {
-                if kind.isEmpty { kind = "cancelled" }
-                if title.isEmpty { title = "Cursor 작업 중단" }
+            let eventName = stdinEvent["hook_event_name"] as? String ?? ""
+            // 명령이 실행되기 전에 매번 불린다. 승인 창이 뜬 것이 아니라서 알리지 않는다.
+            if eventName == "beforeShellExecution" || eventName == "beforeMCPExecution" { return false }
+            if eventName == "preToolUse" {
+                let name = stdinEvent["tool_name"] as? String ?? ""
+                guard Self.isUserQuestion(name) else { return false }
+                if kind.isEmpty { kind = "needsInput" }
+                if title.isEmpty { title = "Cursor 확인 필요" }
+                if detail.isEmpty { detail = questionDetail(stdinEvent) }
+                if let id = (stdinEvent["tool_use_id"] as? String)?.split(separator: "\n").first, !id.isEmpty {
+                    dedupeID = "cursor-ask:\(id)"
+                }
+            } else if eventName == "postToolUse" {
+                let name = stdinEvent["tool_name"] as? String ?? ""
+                guard Self.isUserQuestion(name) else { return false }
+                kind = "resolved"
             } else {
-                if kind.isEmpty { kind = "completed" }
-                if title.isEmpty { title = "Cursor 작업 완료" }
-            }
-            if detail.isEmpty, let root = (stdinEvent["workspace_roots"] as? [Any])?.first {
-                detail = folderName(String(describing: root))
+                let status = (stdinEvent["status"] as? String ?? "completed").lowercased()
+                if status == "error" {
+                    if kind.isEmpty { kind = "failed" }
+                    if title.isEmpty { title = "Cursor 작업 실패" }
+                } else if ["aborted", "cancelled", "canceled"].contains(status) {
+                    if kind.isEmpty { kind = "cancelled" }
+                    if title.isEmpty { title = "Cursor 작업 중단" }
+                } else {
+                    if kind.isEmpty { kind = "completed" }
+                    if title.isEmpty { title = "Cursor 작업 완료" }
+                }
+                if detail.isEmpty, let root = (stdinEvent["workspace_roots"] as? [Any])?.first {
+                    detail = folderName(String(describing: root))
+                }
             }
         case "kiro":
             // Kiro는 hook이 표준 출력에 낸 글을 에이전트에게 다시 넘긴다. 아무것도 쓰지 않는다.
@@ -139,13 +171,20 @@ enum HookRelay {
             if detail.isEmpty { detail = folderName(stdinEvent["cwd"] as? String) }
         case "codex":
             let event = argEvent.isEmpty ? stdinEvent : argEvent
-            if let type = event["type"] as? String, type != "agent-turn-complete" { return }
-            if let turn = (event["turn-id"] as? String).nonEmpty { dedupeID = "codex:\(turn)" }
-            if tool.isEmpty { tool = "codex" }
-            if kind.isEmpty { kind = "completed" }
-            if title.isEmpty { title = "Codex 작업 완료" }
-            if detail.isEmpty { detail = firstLine(event["last-assistant-message"] as? String) }
-            if detail.isEmpty { detail = folderName(event["cwd"] as? String) }
+            if (event["hook_event_name"] as? String) == "PermissionRequest" {
+                if tool.isEmpty { tool = "codex" }
+                if kind.isEmpty { kind = "needsInput" }
+                if title.isEmpty { title = "Codex 확인 필요" }
+                if detail.isEmpty { detail = permissionDetail(event) }
+            } else {
+                if let type = event["type"] as? String, type != "agent-turn-complete" { return false }
+                if let turn = (event["turn-id"] as? String).nonEmpty { dedupeID = "codex:\(turn)" }
+                if tool.isEmpty { tool = "codex" }
+                if kind.isEmpty { kind = "completed" }
+                if title.isEmpty { title = "Codex 작업 완료" }
+                if detail.isEmpty { detail = firstLine(event["last-assistant-message"] as? String) }
+                if detail.isEmpty { detail = folderName(event["cwd"] as? String) }
+            }
         default:
             if tool.isEmpty { tool = "custom" }
             if kind.isEmpty { kind = options.success == false ? "failed" : "completed" }
@@ -163,11 +202,46 @@ enum HookRelay {
             "success": kind != "failed",
         ]
         if !bundle.isEmpty { payload["bundleID"] = bundle }
-        if source == "cursor", let generation = (stdinEvent["generation_id"] as? String).nonEmpty {
+        if dedupeID == nil, source == "cursor", kind != "needsInput", let generation = (stdinEvent["generation_id"] as? String).nonEmpty {
             dedupeID = "cursor:\(generation)"
         }
         if let dedupeID { payload["id"] = dedupeID }
         post(payload)
+        return source == "cursor" && kind != "needsInput" && kind != "resolved"
+    }
+
+    private static func isUserQuestion(_ name: String) -> Bool {
+        let normalized = name.lowercased().replacingOccurrences(of: "_", with: "")
+        return normalized == "askquestion" || normalized == "askuserquestion"
+    }
+
+    /// 질문 제목만 짧게. 선택지와 대화 내용은 넣지 않는다.
+    private static func questionDetail(_ event: [String: Any]) -> String {
+        let input = event["tool_input"] as? [String: Any]
+        let title = firstLine((input?["title"] as? String) ?? (input?["prompt"] as? String))
+        return title.isEmpty ? "답변을 기다리고 있어요" : title
+    }
+
+    /// 승인 창과 질문 카드는 같은 제목으로 붙여, 한 화면이 훅을 두 번 불러도 한 번만 보이게 한다.
+    private static func waitingDetail(_ event: [String: Any]) -> String {
+        let name = event["tool_name"] as? String ?? ""
+        if isUserQuestion(name) { return questionDetail(event) }
+        return permissionDetail(event)
+    }
+
+    /// 도구 이름과 짧은 명령만. 파일 내용이나 대화는 넣지 않는다.
+    private static func permissionDetail(_ event: [String: Any]) -> String {
+        let name = (event["tool_name"] as? String) ?? ""
+        let input = event["tool_input"] as? [String: Any]
+        let summary = firstLine(
+            (input?["command"] as? String)
+                ?? (input?["file_path"] as? String)
+                ?? (input?["description"] as? String)
+        )
+        if name.isEmpty { return summary }
+        if summary.isEmpty { return name }
+        let line = "\(name) · \(summary)"
+        return String(line.prefix(90))
     }
 
     private static func post(_ payload: [String: Any]) {

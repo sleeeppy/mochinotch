@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import SwiftUI
 
 /// 노치 위에 붙는 비활성 패널. 창은 모든 상태를 담는 크기로 고정하고, 모양은 SwiftUI가 그 안에서 모핑한다.
@@ -26,7 +27,9 @@ final class IslandPanelController {
         panel.backgroundColor = .clear
         panel.hasShadow = false
         panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 3)
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle, .transient]
+        // transient는 Exposé에 창을 숨기게 해서, 모서리로 바탕화면을 열면 노치가 같이 밀린다.
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        panel.animationBehavior = .none
         panel.isMovable = false
         panel.hidesOnDeactivate = false
         panel.ignoresMouseEvents = true
@@ -59,9 +62,12 @@ final class IslandPanelController {
 
         let workspace = NSWorkspace.shared.notificationCenter
         workspace.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.panel.orderFrontRegardless()
+            guard let self else { return }
+            self.panel.orderFrontRegardless()
+            ExposeShield.attach(to: self.panel)
         }
         panel.orderFrontRegardless()
+        ExposeShield.attach(to: panel)
     }
 
     func stop() {
@@ -82,6 +88,7 @@ final class IslandPanelController {
         }
         updateMouse()
         panel.orderFrontRegardless()
+        ExposeShield.attach(to: panel)
     }
 
     /// 창이 커도 보이는 모양 위에서만 클릭을 막는다.
@@ -115,5 +122,23 @@ final class IslandHostingView: NSHostingView<AnyView> {
         super.viewDidMoveToWindow()
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
+    }
+}
+
+/// 바탕화면 보기(모서리)가 일반 창을 밀어낼 때 노치 창은 그 자리에 둔다.
+private enum ExposeShield {
+    private static let ignoreForExpose: Int32 = 1 << 7
+
+    static func attach(to window: NSWindow) {
+        guard window.windowNumber > 0 else { return }
+        typealias Connection = @convention(c) () -> Int32
+        typealias SetTags = @convention(c) (Int32, UInt32, UnsafePointer<Int32>, Int) -> Int32
+        let coreGraphics = dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", RTLD_LAZY)
+        guard let connectionSymbol = dlsym(coreGraphics, "CGSMainConnectionID"),
+              let setTagsSymbol = dlsym(coreGraphics, "CGSSetWindowTags") else { return }
+        let connection = unsafeBitCast(connectionSymbol, to: Connection.self)
+        let setTags = unsafeBitCast(setTagsSymbol, to: SetTags.self)
+        var tags = [ignoreForExpose, Int32(0)]
+        _ = setTags(connection(), UInt32(window.windowNumber), &tags, 64)
     }
 }

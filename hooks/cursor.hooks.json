@@ -5,6 +5,12 @@
       {
         "command": "~/.local/bin/mochinotch-notify --source cursor"
       }
+    ],
+    "preToolUse": [
+      {
+        "command": "~/.local/bin/mochinotch-notify --source cursor",
+        "matcher": "AskQuestion|AskUserQuestion"
+      }
     ]
   }
 }

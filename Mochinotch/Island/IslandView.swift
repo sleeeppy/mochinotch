@@ -680,6 +680,7 @@ private struct ExpandedIslandContent: View {
     let metrics: IslandMetrics
     @State private var clearHovered = false
     @State private var closeHovered = false
+    @State private var laterHovered = false
     @State private var settingsHovered = false
 
     var body: some View {
@@ -732,7 +733,15 @@ private struct ExpandedIslandContent: View {
             }
             Spacer()
             if model.showsSetup {
-                EmptyView()
+                if model.setupStatus.remaining > 0 {
+                    headerChip("나중에", hovered: laterHovered) {
+                        model.finishSetup()
+                    }
+                    .onHover { hovering in
+                        withAnimation(.easeOut(duration: 0.15)) { laterHovered = hovering }
+                    }
+                    .transition(.opacity)
+                }
             } else if model.showsSettings {
                 headerChip("닫기", hovered: closeHovered) {
                     model.closeSettings()
@@ -755,6 +764,7 @@ private struct ExpandedIslandContent: View {
         .animation(.easeInOut(duration: 0.22), value: model.activities.isEmpty)
         .animation(.easeInOut(duration: 0.22), value: model.showsSettings)
         .animation(.easeInOut(duration: 0.22), value: model.showsSetup)
+        .animation(.easeInOut(duration: 0.22), value: model.setupStatus.remaining)
     }
 
     private var settingsButton: some View {
