@@ -703,7 +703,7 @@ private struct ExpandedIslandContent: View {
                         .transition(.opacity.combined(with: .offset(y: 6)))
                 } else if model.activities.isEmpty {
                     empty
-                        .transition(.opacity.animation(.easeOut(duration: 0.26).delay(0.14)))
+                        .transition(.opacity.animation(.easeOut(duration: 0.18).delay(0.08)))
                 } else {
                     history
                         .transition(
