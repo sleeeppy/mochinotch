@@ -1,0 +1,30 @@
+{
+  "fill" : {
+    "solid" : "extended-srgb:0.00000,0.00000,0.00000,0.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "mochi.png",
+          "name" : "mochi",
+          "position" : {
+            "scale" : 1.22,
+            "translation-in-points" : [ 0, 0 ]
+          }
+        }
+      ],
+      "shadow" : {
+        "kind" : "none",
+        "opacity" : 0
+      },
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [ "macOS" ]
+  }
+}

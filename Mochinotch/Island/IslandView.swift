@@ -909,11 +909,10 @@ private struct ActivityRow: View {
                         .multilineTextAlignment(.leading)
                 }
             }
-            if activity.isTappable {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(hovered ? 0.42 : 0.22))
-            }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(Color.white.opacity(hovered ? 0.42 : 0.22))
+                .opacity(activity.isTappable ? 1 : 0)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -963,7 +962,10 @@ private struct ActivityIcon: View {
     }
 
     private static func appIcon(_ bundleIDs: [String], names: [String]) -> NSImage? {
-        if bundleIDs.contains(Bundle.main.bundleIdentifier ?? ""), let image = NSApp.applicationIconImage {
+        // 시스템 아이콘은 뒤에 밝은 판을 깔 수 있다. 우리 아이콘은 넣어 둔 그림만 쓴다.
+        if bundleIDs.contains(Bundle.main.bundleIdentifier ?? ""),
+           let url = Bundle.main.url(forResource: "MochinotchIcon", withExtension: "png"),
+           let image = NSImage(contentsOf: url) {
             image.size = NSSize(width: 128, height: 128)
             return image
         }

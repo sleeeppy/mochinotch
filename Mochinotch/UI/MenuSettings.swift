@@ -61,7 +61,7 @@ struct SettingsView: View {
                     Button {
                         model.openUpdate()
                     } label: {
-                        Text("업데이트 필요")
+                        Text("업데이트")
                             .font(.system(size: 10.5, weight: .semibold, design: .rounded))
                             .foregroundStyle(IslandColor.warning)
                     }

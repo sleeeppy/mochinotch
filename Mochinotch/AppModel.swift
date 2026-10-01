@@ -68,6 +68,8 @@ final class AppModel {
     private(set) var playsScreenEffect = UserDefaults.standard.object(forKey: AppModel.screenEffectKey) as? Bool ?? true
     /// GitHub 최신 릴리즈가 이 앱보다 새로울 때.
     private(set) var updateAvailable = false
+    /// 최신 릴리즈의 다운로드 페이지. 받기 버튼이 있는 그 페이지다.
+    private var latestReleasePage: URL?
     private var checkedForUpdate = false
 
     private var featuredID: UUID?
@@ -297,9 +299,6 @@ final class AppModel {
     private static let introStudyKey = "introStudy"
     private static let screenEffectKey = "playsScreenEffect"
     private static let setupDoneKey = "setupDone"
-    private static let askedAccessibilityKey = "askedAccessibility"
-    private static let askedScreenRecordingKey = "askedScreenRecording"
-
     func setIntro(_ study: IntroStudy) {
         introStudy = study
         UserDefaults.standard.set(study.rawValue, forKey: Self.introStudyKey)
@@ -421,8 +420,9 @@ final class AppModel {
     }
 
     func openUpdate() {
-        guard let url = URL(string: "https://github.com/sleeeppy/mochinotch/releases/latest") else { return }
-        NSWorkspace.shared.open(url)
+        NSApp.activate(ignoringOtherApps: true)
+        let page = latestReleasePage ?? URL(string: "https://github.com/sleeeppy/mochinotch/releases/latest")!
+        NSWorkspace.shared.open(page)
     }
 
     func openGuide() {
@@ -438,7 +438,8 @@ final class AppModel {
         Task { @MainActor [weak self] in
             guard let self else { return }
             switch await Self.githubUpdateAvailable(local: local) {
-            case .newer(let tag):
+            case .newer(let tag, let page):
+                self.latestReleasePage = page
                 self.updateAvailable = true
                 self.announceUpdate(tag)
             case .current:
@@ -452,7 +453,7 @@ final class AppModel {
     private static let announcedUpdateKey = "announcedUpdateVersion"
 
     private enum UpdateCheck {
-        case newer(String)
+        case newer(String, URL)
         case current
         case failed
     }
@@ -467,7 +468,9 @@ final class AppModel {
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let tag = json["tag_name"] as? String
         else { return .failed }
-        return isNewerRelease(tag, than: local) ? .newer(tag) : .current
+        let page = (json["html_url"] as? String).flatMap(URL.init(string:))
+            ?? URL(string: "https://github.com/sleeeppy/mochinotch/releases/latest")!
+        return isNewerRelease(tag, than: local) ? .newer(tag, page) : .current
     }
 
     /// 이 버전은 한 번만 알린다. 다음 버전이 나오면 다시 한 번.
@@ -518,6 +521,7 @@ final class AppModel {
             showsSetup = true
         }
         setPresentation(.expanded)
+        promptMissingPermissions()
     }
 
     /// 다 켜지 않았어도 닫으면 다음부터는 저절로 열지 않는다. 설정에서 다시 연다.
@@ -608,25 +612,36 @@ final class AppModel {
         setupTimer = nil
     }
 
-    func requestAccessibility() {
-        // 처음 한 번은 시스템 안내 창이 앱을 목록에 올려 준다. 그 뒤로는 창이 다시 뜨지 않아 설정을 바로 연다.
-        if !UserDefaults.standard.bool(forKey: Self.askedAccessibilityKey) {
-            UserDefaults.standard.set(true, forKey: Self.askedAccessibilityKey)
+    /// 손쉬운 사용과 화면 기록은 시스템 요청 창을 띄운다. 앱과 터미널 hook은 같은 실행 파일이라 한 번이면 둘 다 적용된다.
+    /// 전체 디스크 접근 권한은 요청 창이 없어서 설정 목록만 연다.
+    func promptMissingPermissions() {
+        NSApp.activate(ignoringOtherApps: true)
+        if !AXIsProcessTrusted() {
             let prompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
             _ = AXIsProcessTrustedWithOptions([prompt: true] as CFDictionary)
-            return
         }
-        openPrivacyPane("Privacy_Accessibility")
+        if !CGPreflightScreenCaptureAccess() {
+            requestedScreenRecording = true
+            if CGRequestScreenCaptureAccess() { refreshSetup() }
+        }
+    }
+
+    func requestAccessibility() {
+        NSApp.activate(ignoringOtherApps: true)
+        let prompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+        if !AXIsProcessTrustedWithOptions([prompt: true] as CFDictionary) {
+            openPrivacyPane("Privacy_Accessibility")
+        }
+        refreshSetup()
     }
 
     func requestScreenRecording() {
+        NSApp.activate(ignoringOtherApps: true)
         requestedScreenRecording = true
-        if !UserDefaults.standard.bool(forKey: Self.askedScreenRecordingKey) {
-            UserDefaults.standard.set(true, forKey: Self.askedScreenRecordingKey)
-            if CGRequestScreenCaptureAccess() { refreshSetup() }
-            return
+        if !CGRequestScreenCaptureAccess() {
+            openPrivacyPane("Privacy_ScreenCapture")
         }
-        openPrivacyPane("Privacy_ScreenCapture")
+        refreshSetup()
     }
 
     private func openPrivacyPane(_ anchor: String) {

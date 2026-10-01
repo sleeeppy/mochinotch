@@ -60,7 +60,7 @@ struct SetupView: View {
                     title: "손쉬운 사용",
                     subtitle: status.accessibility
                         ? "알림을 바로 읽고, 읽은 알림은 거둬요"
-                        : "알림을 뜨자마자 읽고 읽음 처리해요"
+                        : "앱과 터미널 hook이 같이 써요. 요청 창이 떠요"
                 ) {
                     SetupAction(done: status.accessibility, title: "허용") {
                         model.requestAccessibility()
