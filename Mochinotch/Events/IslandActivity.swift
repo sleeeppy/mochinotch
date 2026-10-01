@@ -156,6 +156,8 @@ enum ActivityPayload: Equatable {
     case notice(appName: String, title: String, body: String, bundleID: String?)
     /// 아직 꺼진 권한이나 연결. 펼친 목록 맨 위에 Mochinotch가 보낸 알림처럼 둔다. 누르면 처음 설정이 열린다.
     case setup(missing: [String])
+    /// 새 릴리즈를 처음 발견했을 때 한 번. 누르면 릴리즈 페이지가 열린다.
+    case update(version: String)
 }
 
 enum PowerPhase: Equatable {
@@ -207,9 +209,14 @@ struct IslandActivity: Identifiable, Equatable {
         return false
     }
 
+    var isUpdateNotice: Bool {
+        if case .update = payload { return true }
+        return false
+    }
+
     /// 목록에서 눌러 무언가 열 수 있다.
     var isTappable: Bool {
-        isSetupReminder || !openBundleIDs.isEmpty
+        isSetupReminder || isUpdateNotice || !openBundleIDs.isEmpty
     }
 
     /// 켜질 때 노치가 한 번 깨어나는 인사. 아이콘과 이름을 가운데에 크게 둔다.
@@ -248,14 +255,14 @@ struct IslandActivity: Identifiable, Equatable {
             return tool.displayName
         case .notice(let appName, _, _, _):
             return appName
-        case .setup:
+        case .setup, .update:
             return "もちノッチ"
         }
     }
 
     var trailingText: String {
         switch payload {
-        case .hint, .setup:
+        case .hint, .setup, .update:
             return ""
         case .power(_, let percent):
             return "\(percent)%"
@@ -284,6 +291,8 @@ struct IslandActivity: Identifiable, Equatable {
             return title
         case .setup(let missing):
             return "설정할 게 \(missing.count)개 남았어요"
+        case .update(let version):
+            return "v\(version)이 나왔어요"
         }
     }
 
@@ -309,12 +318,15 @@ struct IslandActivity: Identifiable, Equatable {
             return body.isEmpty ? appName : body
         case .setup(let missing):
             return missing.joined(separator: " · ") + " · 눌러서 켜기"
+        case .update:
+            return "눌러서 받기"
         }
     }
 
     /// 완료가 아닌 작업만. 성공은 기본값이라 매번 뱃지를 달지 않는다.
     var expandedBadge: (label: String, color: Color)? {
         if isSetupReminder { return ("설정", IslandColor.warning) }
+        if isUpdateNotice { return ("업데이트", IslandColor.warning) }
         guard case .agent(_, let outcome, _, _, _) = payload, outcome != .completed else { return nil }
         return (outcome.shortLabel, outcome.tint)
     }
@@ -335,6 +347,8 @@ struct IslandActivity: Identifiable, Equatable {
             return "bell.fill"
         case .setup:
             return "gearshape.fill"
+        case .update:
+            return "arrow.down.circle.fill"
         }
     }
 
@@ -356,14 +370,14 @@ struct IslandActivity: Identifiable, Equatable {
             return tool.tint
         case .notice:
             return Color.white
-        case .setup:
+        case .setup, .update:
             return IslandColor.warning
         }
     }
 
     var iconBundleIDs: [String] {
         switch payload {
-        case .hint, .setup:
+        case .hint, .setup, .update:
             return [Bundle.main.bundleIdentifier].compactMap { $0 }
         case .agent(let tool, _, _, _, _):
             return tool.iconBundleIDs
@@ -423,7 +437,7 @@ struct IslandActivity: Identifiable, Equatable {
 
     var showsAppIcon: Bool {
         switch payload {
-        case .hint, .agent, .notice, .setup:
+        case .hint, .agent, .notice, .setup, .update:
             return true
         default:
             return false

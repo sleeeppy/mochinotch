@@ -53,10 +53,29 @@ struct SettingsView: View {
                 }
             }
 
-            HStack {
+            HStack(spacing: 8) {
                 Text(verbatim: "v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
                     .font(.system(size: 10.5, weight: .medium, design: .rounded))
                     .foregroundStyle(Color.white.opacity(0.36))
+                if model.updateAvailable {
+                    Button {
+                        model.openUpdate()
+                    } label: {
+                        Text("업데이트 필요")
+                            .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                            .foregroundStyle(IslandColor.warning)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Button {
+                    model.openGuide()
+                } label: {
+                    Text("사용방법")
+                        .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                        .underline()
+                        .foregroundStyle(Color.white.opacity(0.5))
+                }
+                .buttonStyle(.plain)
                 Spacer()
                 QuitButton()
             }

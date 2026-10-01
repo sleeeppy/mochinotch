@@ -33,7 +33,7 @@ struct SetupView: View {
         let status = model.setupStatus
         VStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("처음 설정")
+                Text("초기 권한 설정")
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(IslandColor.primary)
                 Text("켜 두면 알림과 작업 완료를 노치가 바로 보여 줘요. 켠 항목은 저절로 체크돼요.")
