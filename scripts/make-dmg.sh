@@ -19,6 +19,16 @@ trap 'rm -rf "$stage"; hdiutil detach /Volumes/Mochinotch >/dev/null 2>&1 || tru
 
 mkdir "$stage/stage"
 cp -R "$app" "$stage/stage/Mochinotch.app"
+# macOS 26은 일반 icns 뒤에 밝은 판을 깐다. 같은 그림을 Finder 아이콘으로 지정하면 판이 빠진다.
+swift -e "import AppKit
+let app = \"$stage/stage/Mochinotch.app\"
+guard let image = NSImage(contentsOfFile: app + \"/Contents/Resources/AppIcon.icns\") else {
+    fputs(\"icon missing\\n\", stderr); exit(1)
+}
+if !NSWorkspace.shared.setIcon(image, forFile: app, options: []) {
+    fputs(\"icon stamp failed\\n\", stderr); exit(1)
+}
+"
 ln -s /Applications "$stage/stage/Applications"
 mkdir "$stage/stage/.background"
 cp "$root/docs/images/dmg-background.png" "$stage/stage/.background/background.png"
