@@ -219,6 +219,9 @@ final class AppModel {
             self?.ingest(notice)
         }
         notifications.onDismiss = { [weak self] bundleID, title, body in
+            if let tool = Self.terminalPermission(SystemNotice(bundleID: bundleID, title: title, subtitle: "", body: body)) {
+                self?.resolveWaiting(tool)
+            }
             self?.acknowledgeStoredNotice(bundleID: bundleID, title: title, body: body)
         }
         notifications.onUnstored = { [weak self] bundleID in
@@ -284,6 +287,7 @@ final class AppModel {
         refreshPanel()
         Task.detached(priority: .utility) {
             HookInstaller.refreshRelayIfNeeded()
+            HookInstaller.upgradeInstalledHooks()
         }
         if !UserDefaults.standard.bool(forKey: Self.setupDoneKey) {
             setupPending = true
@@ -349,6 +353,10 @@ final class AppModel {
 
     func ingest(_ event: IncomingEvent) {
         let tool = AgentTool(rawValue: (event.tool ?? "custom").lowercased()) ?? .custom
+        if event.kind?.lowercased() == "resolved" {
+            resolveWaiting(tool)
+            return
+        }
         let outcome = outcome(for: event)
         let title = event.title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             ?? "\(tool.displayName) \(outcome.shortLabel)"
@@ -382,10 +390,23 @@ final class AppModel {
         case .cancelled: seconds = 3.2
         case .completed: seconds = 5.4
         }
+        if outcome != .needsInput {
+            resolveWaiting(tool)
+        }
         present(activity, seconds: seconds)
     }
 
     func ingest(_ notice: SystemNotice) {
+        if let ask = Self.terminalPermission(notice) {
+            ingest(IncomingEvent(
+                tool: ask.rawValue,
+                title: "\(ask.appTitle) 확인 필요",
+                detail: "Permission required",
+                kind: "needsInput",
+                bundleID: notice.bundleID
+            ))
+            return
+        }
         // hook이 방금 같은 도구의 완료를 보냈으면 앱 배너는 겹치니 버린다.
         if let tool = AgentTool.agents.first(where: { $0.iconBundleIDs.contains(notice.bundleID) }),
            activities.contains(where: { activity in
@@ -762,6 +783,24 @@ final class AppModel {
     private static func appName(_ bundleID: String) -> String {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return bundleID }
         return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+    }
+
+    /// 터미널이 CLI 승인 대기를 배너로 띄운 경우. Ghostty의 `kiro: ~` / `Permission required` 같은 알림이다.
+    private static func terminalPermission(_ notice: SystemNotice) -> AgentTool? {
+        let terminals: Set<String> = [
+            "com.mitchellh.ghostty",
+            "com.apple.terminal",
+            "com.googlecode.iterm2",
+            "dev.warp.warp-stable",
+        ]
+        guard terminals.contains(notice.bundleID.lowercased()) else { return nil }
+        let text = "\(notice.title)\n\(notice.subtitle)\n\(notice.body)".lowercased()
+        guard text.contains("permission required") else { return nil }
+        if text.contains("kiro") { return .kiro }
+        if text.contains("claude") { return .claude }
+        if text.contains("codex") { return .codex }
+        if text.contains("cursor") { return .cursor }
+        return nil
     }
 
     /// 왼쪽 AI 작업만. 그 앱이나, CLI로 돌렸다면 그 터미널을 앞으로 가져오면 접힌다. 오른쪽 알림은 그대로 둔다.
@@ -1269,7 +1308,8 @@ final class AppModel {
             return
         }
         featuredID = activity.id
-        if case .agent(let tool, let outcome, _, _, _) = activity.payload, tool.playsDuo, outcome != .cancelled {
+        if case .agent(let tool, let outcome, _, _, _) = activity.payload,
+           tool.playsDuo, outcome != .cancelled, outcome != .needsInput {
             let tint = Self.duoTint(for: tool, outcome: outcome)
             if playsScreenEffect {
                 DuoPulse.shared.play(tint: tint, rim: outcome == .failed ? 1 : tool.edgeRim)
@@ -1288,7 +1328,9 @@ final class AppModel {
         } else if activity.bouncesIsland, !isHovering, !showsSetup {
             boingToken += 1
         }
+        let waiting = if case .agent(_, .needsInput, _, _, _) = activity.payload { true } else { false }
         if let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+           !waiting,
            activity.clearsWhenFocused(front),
            let index = activities.firstIndex(where: { $0.id == activity.id }) {
             activities[index].hidesPeek = true
@@ -1297,6 +1339,9 @@ final class AppModel {
             setPresentation(.expanded)
         } else if activity.isNotice {
             setPresentation(.idle)
+        } else if case .agent(_, .needsInput, _, _, _) = activity.payload {
+            // 답을 고를 때까지 확인을 펼쳐 둔다. 왼쪽 아이콘만 남기지 않는다.
+            setPresentation(.compact)
         } else {
             setPresentation(.compact)
             dismissTask = Task { [weak self] in
@@ -1306,6 +1351,20 @@ final class AppModel {
                     self.setPresentation(.idle)
                 }
             }
+        }
+    }
+
+    /// 질문이나 승인 창이 닫히면 그 확인 요청을 접는다.
+    private func resolveWaiting(_ tool: AgentTool) {
+        let ids = Set(activities.compactMap { activity -> UUID? in
+            guard case .agent(let existing, .needsInput, _, _, _) = activity.payload, existing == tool else { return nil }
+            return activity.id
+        })
+        guard !ids.isEmpty else { return }
+        let wasShowing = featuredID.map { ids.contains($0) } == true
+        activities.removeAll { ids.contains($0.id) }
+        if wasShowing, !isHovering, !showsSetup {
+            setPresentation(.idle)
         }
     }
 

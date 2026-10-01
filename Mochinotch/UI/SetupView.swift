@@ -95,10 +95,6 @@ struct SetupView: View {
                     SetupPill(title: "시작하기", tint: IslandColor.charge, filled: true) {
                         model.finishSetup()
                     }
-                } else {
-                    SetupPill(title: "나중에", tint: IslandColor.secondary, filled: false) {
-                        model.finishSetup()
-                    }
                 }
             }
             .padding(.leading, 12)

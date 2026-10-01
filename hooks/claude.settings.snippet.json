@@ -20,6 +20,27 @@
         ]
       }
     ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.local/bin/mochinotch-notify --source claude"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.local/bin/mochinotch-notify --source claude"
+          }
+        ]
+      }
+    ],
     "Notification": [
       {
         "hooks": [
