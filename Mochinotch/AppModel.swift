@@ -68,14 +68,21 @@ final class AppModel {
     private(set) var playsScreenEffect = UserDefaults.standard.object(forKey: AppModel.screenEffectKey) as? Bool ?? true
     /// GitHub 최신 릴리즈가 이 앱보다 새로울 때.
     private(set) var updateAvailable = false
-    /// 새 버전을 받아 바꿔 넣을 준비를 하는 중. 끝나면 앱이 꺼졌다 새 버전으로 켜진다.
-    private(set) var installingUpdate = false
+    /// 새 버전을 받는 중이면 0에서 1, 다 받고 바꿔 넣을 준비를 하면 1. 끝나면 앱이 꺼졌다 새 버전으로 켜진다.
+    private(set) var updateProgress: Double?
+    var installingUpdate: Bool { updateProgress != nil }
+    var updateStatus: String? {
+        guard let updateProgress else { return nil }
+        return updateProgress < 1 ? "받는 중 · \(Int(updateProgress * 100))%" : "설치 준비 중"
+    }
     private var latestRelease: AppUpdater.Release?
     private var checkedForUpdate = false
 
     private var featuredID: UUID?
     private var noticesSeenAt = Date.distantPast
     private var isHovering = false
+    /// 끄는 중에는 노치를 다시 펼치지 않는다.
+    private var isQuitting = false
     private var hoverTask: Task<Void, Never>?
     private var leaveTask: Task<Void, Never>?
     private var dismissTask: Task<Void, Never>?
@@ -458,16 +465,40 @@ final class AppModel {
             openReleasePage()
             return
         }
-        installingUpdate = true
+        updateProgress = 0
+        featureUpdate(release.version)
         Task { @MainActor [weak self] in
             do {
-                try await AppUpdater.prepare(release)
-                NSApp.terminate(nil)
+                try await AppUpdater.prepare(release) { value in
+                    Task { @MainActor in
+                        guard let self, let current = self.updateProgress, value > current else { return }
+                        self.updateProgress = value
+                    }
+                }
+                self?.updateProgress = 1
+                self?.quit()
             } catch {
-                self?.installingUpdate = false
+                self?.updateProgress = nil
                 self?.openReleasePage()
             }
         }
+    }
+
+    /// 받는 동안 진행을 보여 줄 업데이트 줄. 목록에서 지웠으면 다시 넣는다.
+    private func featureUpdate(_ tag: String) {
+        if let existing = activities.first(where: \.isUpdateNotice) {
+            featuredID = existing.id
+            return
+        }
+        let version = Self.versionParts(tag).map(String.init).joined(separator: ".")
+        let activity = IslandActivity(
+            id: UUID(),
+            payload: .update(version: version),
+            createdAt: Date(),
+            keepsHistory: true
+        )
+        activities.insert(activity, at: 0)
+        featuredID = activity.id
     }
 
     private func openReleasePage() {
@@ -701,13 +732,38 @@ final class AppModel {
         NSWorkspace.shared.open(url)
     }
 
-    /// 권한 몇 가지는 켠 뒤 다시 켜야 적용된다. 새 앱이 뜨기 전에 이 앱이 먼저 꺼진다.
+    /// 권한 몇 가지는 켠 뒤 다시 켜야 적용된다. 이 앱이 다 꺼진 뒤에 새로 띄운다.
     func relaunch() {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", "sleep 0.8; /usr/bin/open \"$0\"", Bundle.main.bundlePath]
+        process.arguments = [
+            "-c",
+            "while kill -0 \"$1\" 2>/dev/null; do sleep 0.1; done; /usr/bin/open \"$0\"",
+            Bundle.main.bundlePath,
+            String(getpid()),
+        ]
         try? process.run()
-        NSApp.terminate(nil)
+        quit()
+    }
+
+    /// 펼친 노치를 먼저 접고, 다 접힌 뒤에 끈다.
+    func quit() {
+        guard !isQuitting else { return }
+        isQuitting = true
+        hoverTask?.cancel()
+        leaveTask?.cancel()
+        dismissTask?.cancel()
+        isHovering = false
+        let wasOpen = presentation != .idle
+        if wasOpen {
+            setPresentation(.idle)
+        }
+        Task { @MainActor in
+            if wasOpen {
+                try? await Task.sleep(for: .milliseconds(620))
+            }
+            NSApp.terminate(nil)
+        }
     }
 
     /// hook을 넣고, 설정이 바뀐 도구의 앱이 켜져 있으면 다시 켠다.
@@ -1410,6 +1466,7 @@ final class AppModel {
     }
 
     private func setHover(_ hovering: Bool) {
+        guard !isQuitting else { return }
         if hovering {
             leaveTask?.cancel()
             guard !isHovering else { return }
@@ -1430,7 +1487,13 @@ final class AppModel {
                 guard !Task.isCancelled, let self else { return }
                 self.isHovering = false
                 if self.presentation == .expanded, !self.showsSetup {
-                    self.setPresentation(.idle)
+                    // 받는 중이면 접힌 노치 귀에 진행을 남긴다.
+                    if self.installingUpdate, let update = self.activities.first(where: \.isUpdateNotice) {
+                        self.featuredID = update.id
+                        self.setPresentation(.compact)
+                    } else {
+                        self.setPresentation(.idle)
+                    }
                 }
                 // 접히는 스프링이 끝나기 전에 인트로가 모양을 가로채면 접힘이 끊긴다.
                 if self.pendingIntroPreview != nil {
@@ -1443,6 +1506,7 @@ final class AppModel {
     }
 
     private func setPresentation(_ next: IslandPresentation) {
+        if isQuitting, next != .idle { return }
         agentEarTask?.cancel()
         pendingPresentation = nil
         let hasLeft = !agentGroups.isEmpty

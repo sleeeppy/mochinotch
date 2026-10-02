@@ -659,7 +659,25 @@ private struct CompactIslandContent: View {
 
     @ViewBuilder
     private func trailing(_ activity: IslandActivity) -> some View {
-        if let percent = activity.percent {
+        if activity.isUpdateNotice, let progress = model.updateProgress {
+            HStack(spacing: 5) {
+                UpdateRing(progress: progress)
+                    .frame(width: 12, height: 12)
+                if progress < 1 {
+                    let percent = Int(progress * 100)
+                    HStack(spacing: 0) {
+                        Text("\(percent)")
+                            .contentTransition(.numericText(value: Double(percent)))
+                        Text("%")
+                    }
+                    .monospacedDigit()
+                    .animation(.snappy(duration: 0.25), value: percent)
+                } else {
+                    Text("설치")
+                }
+            }
+            .foregroundStyle(IslandColor.warning)
+        } else if let percent = activity.percent {
             HStack(spacing: 0) {
                 Text("\(percent)")
                     .contentTransition(.numericText(value: Double(percent)))
@@ -911,12 +929,23 @@ private struct ActivityRow: View {
                             .monospacedDigit()
                     }
                 }
-                if !activity.expandedDetail.isEmpty {
-                    Text(activity.expandedDetail)
+                let updating = activity.isUpdateNotice ? model.updateStatus : nil
+                let detail = updating ?? activity.expandedDetail
+                if !detail.isEmpty {
+                    Text(detail)
                         .font(.system(size: 12))
                         .foregroundStyle(IslandColor.secondary)
+                        .monospacedDigit()
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
+                        .contentTransition(.numericText())
+                        .animation(.snappy(duration: 0.25), value: detail)
+                }
+                if updating != nil, let progress = model.updateProgress {
+                    UpdateProgressBar(progress: progress)
+                        .frame(height: 3)
+                        .padding(.top, 4)
+                        .transition(.opacity)
                 }
             }
             Image(systemName: "chevron.right")
@@ -940,6 +969,50 @@ private struct ActivityRow: View {
         formatter.unitsStyle = .short
         return formatter
     }()
+}
+
+/// 업데이트를 받는 동안의 얇은 막대. 다 받고 설치를 준비하는 동안은 가득 찬 채로 숨 쉰다.
+struct UpdateProgressBar: View {
+    var progress: Double
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.1))
+                Capsule()
+                    .fill(IslandColor.warning)
+                    .frame(width: max(proxy.size.height, proxy.size.width * min(progress, 1)))
+                    .phaseAnimator([1.0, 0.45]) { content, phase in
+                        content.opacity(progress < 1 ? 1 : phase)
+                    } animation: { _ in
+                        .easeInOut(duration: 0.6)
+                    }
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: progress)
+    }
+}
+
+/// 접힌 노치 귀에 들어가는 작은 원. 다 받고 나면 짧은 호가 돈다.
+struct UpdateRing: View {
+    var progress: Double
+
+    var body: some View {
+        TimelineView(.animation(paused: progress < 1)) { context in
+            let spin = progress < 1
+                ? 0
+                : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9 * 360
+            ZStack {
+                Circle()
+                    .stroke(IslandColor.warning.opacity(0.25), lineWidth: 2)
+                Circle()
+                    .trim(from: 0, to: progress < 1 ? max(progress, 0.04) : 0.3)
+                    .stroke(IslandColor.warning, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .rotationEffect(.degrees(-90 + spin))
+                    .animation(.easeOut(duration: 0.2), value: progress)
+            }
+        }
+    }
 }
 
 private struct ActivityIcon: View {
