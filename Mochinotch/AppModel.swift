@@ -407,6 +407,16 @@ final class AppModel {
             ))
             return
         }
+        if let question = Self.cursorQuestion(notice) {
+            ingest(IncomingEvent(
+                tool: AgentTool.cursor.rawValue,
+                title: "Cursor 확인 필요",
+                detail: question,
+                kind: "needsInput",
+                bundleID: notice.bundleID
+            ))
+            return
+        }
         // hook이 방금 같은 도구의 완료를 보냈으면 앱 배너는 겹치니 버린다.
         if let tool = AgentTool.agents.first(where: { $0.iconBundleIDs.contains(notice.bundleID) }),
            activities.contains(where: { activity in
@@ -801,6 +811,16 @@ final class AppModel {
         if text.contains("codex") { return .codex }
         if text.contains("cursor") { return .cursor }
         return nil
+    }
+
+    /// Cursor는 질문 카드를 띄울 때 preToolUse hook을 부르지 않는다. 대신 `Input needed • 질문` 배너를 보낸다.
+    private static func cursorQuestion(_ notice: SystemNotice) -> String? {
+        guard AgentTool.cursor.iconBundleIDs.contains(notice.bundleID) else { return nil }
+        let headline = notice.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard headline.lowercased().hasPrefix("input needed") else { return nil }
+        let question = headline.split(separator: "•", maxSplits: 1).dropFirst().first
+            .map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+        return question.isEmpty ? "답변을 기다리고 있어요" : question
     }
 
     /// 왼쪽 AI 작업만. 그 앱이나, CLI로 돌렸다면 그 터미널을 앞으로 가져오면 접힌다. 오른쪽 알림은 그대로 둔다.
