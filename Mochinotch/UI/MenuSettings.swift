@@ -58,7 +58,7 @@ struct SettingsView: View {
                     .font(.system(size: 10.5, weight: .medium, design: .rounded))
                     .foregroundStyle(Color.white.opacity(0.36))
                 if model.updateAvailable {
-                    UpdateButton {
+                    UpdateButton(busy: model.installingUpdate) {
                         model.openUpdate()
                     }
                 }
@@ -348,19 +348,22 @@ private struct IntroMenuItem: View {
 }
 
 private struct UpdateButton: View {
+    var busy: Bool
     var action: () -> Void
     @State private var hovered = false
 
     var body: some View {
         Button(action: action) {
-            Text("업데이트")
+            Text(busy ? "받는 중…" : "업데이트")
                 .font(.system(size: 10.5, weight: .semibold, design: .rounded))
                 .foregroundStyle(IslandColor.warning)
+                .contentTransition(.opacity)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(Capsule().fill(IslandColor.warning.opacity(hovered ? 0.28 : 0.16)))
+                .background(Capsule().fill(IslandColor.warning.opacity(hovered && !busy ? 0.28 : 0.16)))
         }
         .buttonStyle(.plain)
+        .disabled(busy)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.15)) { hovered = hovering }
         }
