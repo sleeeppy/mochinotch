@@ -58,7 +58,7 @@ struct SettingsView: View {
                     .font(.system(size: 10.5, weight: .medium, design: .rounded))
                     .foregroundStyle(Color.white.opacity(0.36))
                 if model.updateAvailable {
-                    UpdateButton(busy: model.installingUpdate) {
+                    UpdateButton(progress: model.updateProgress) {
                         model.openUpdate()
                     }
                 }
@@ -347,26 +347,47 @@ private struct IntroMenuItem: View {
     }
 }
 
+/// 받는 동안은 캡슐이 진행만큼 차오른다.
 private struct UpdateButton: View {
-    var busy: Bool
+    var progress: Double?
     var action: () -> Void
     @State private var hovered = false
 
     var body: some View {
         Button(action: action) {
-            Text(busy ? "받는 중…" : "업데이트")
+            Text(label)
                 .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                .monospacedDigit()
                 .foregroundStyle(IslandColor.warning)
-                .contentTransition(.opacity)
+                .contentTransition(.numericText())
+                .animation(.snappy(duration: 0.25), value: label)
+                .frame(minWidth: 40)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(Capsule().fill(IslandColor.warning.opacity(hovered && !busy ? 0.28 : 0.16)))
+                .background {
+                    GeometryReader { proxy in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(IslandColor.warning.opacity(hovered && progress == nil ? 0.28 : 0.16))
+                            if let progress {
+                                Capsule()
+                                    .fill(IslandColor.warning.opacity(0.3))
+                                    .frame(width: max(proxy.size.height, proxy.size.width * min(progress, 1)))
+                                    .animation(.easeOut(duration: 0.2), value: progress)
+                            }
+                        }
+                    }
+                }
         }
         .buttonStyle(.plain)
-        .disabled(busy)
+        .disabled(progress != nil)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.15)) { hovered = hovering }
         }
+    }
+
+    private var label: String {
+        guard let progress else { return "업데이트" }
+        return progress < 1 ? "\(Int(progress * 100))%" : "설치 중"
     }
 }
 

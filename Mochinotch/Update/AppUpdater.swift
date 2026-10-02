@@ -45,7 +45,8 @@ enum AppUpdater {
     }
 
     /// 새 앱을 꺼내 확인하고, 이 앱이 꺼지길 기다렸다 바꿔 넣을 스크립트를 띄운다. 끝나면 앱을 끄면 된다.
-    static func prepare(_ release: Release) async throws {
+    /// `progress`는 받는 동안 0에서 1까지, 다 받으면 1로 한 번 더 불린다. 메인 스레드가 아닐 수 있다.
+    static func prepare(_ release: Release, progress: @escaping (Double) -> Void) async throws {
         let target = Bundle.main.bundleURL
         guard canReplace(target) else { throw Failure.notReplaceable }
         guard let source = release.dmg else { throw Failure.noDownload }
@@ -55,7 +56,8 @@ enum AppUpdater {
         try manager.createDirectory(at: work, withIntermediateDirectories: true)
         do {
             let dmg = work.appendingPathComponent("update.dmg")
-            try await download(source, to: dmg)
+            try await download(source, to: dmg, progress: progress)
+            progress(1)
             try verifyChecksum(dmg, expected: release.sha256)
             let staged = try extractApp(dmg, into: work)
             try verify(staged, version: release.version)
@@ -68,12 +70,35 @@ enum AppUpdater {
         }
     }
 
-    private static func download(_ url: URL, to destination: URL) async throws {
+    /// async `download(for:)`는 진행을 알려 주지 않아서, 작업의 `progress`를 지켜본다.
+    private static func download(_ url: URL, to destination: URL, progress: @escaping (Double) -> Void) async throws {
         var request = URLRequest(url: url, timeoutInterval: 60)
         request.setValue("Mochinotch", forHTTPHeaderField: "User-Agent")
-        let (file, response) = try await URLSession.shared.download(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw Failure.download }
-        try FileManager.default.moveItem(at: file, to: destination)
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            var observation: NSKeyValueObservation?
+            let task = URLSession.shared.downloadTask(with: request) { file, response, error in
+                observation?.invalidate()
+                guard let file, error == nil, (response as? HTTPURLResponse)?.statusCode == 200 else {
+                    continuation.resume(throwing: error ?? Failure.download)
+                    return
+                }
+                // 이 블록이 끝나면 받은 파일이 지워진다.
+                do {
+                    try FileManager.default.moveItem(at: file, to: destination)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+            var reported = -1
+            observation = task.progress.observe(\.fractionCompleted) { value, _ in
+                let percent = Int(value.fractionCompleted * 100)
+                guard percent != reported else { return }
+                reported = percent
+                progress(Double(percent) / 100)
+            }
+            task.resume()
+        }
     }
 
     /// 값이 없던 예전 릴리즈는 서명 확인만 한다.
