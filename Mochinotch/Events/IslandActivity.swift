@@ -255,8 +255,10 @@ struct IslandActivity: Identifiable, Equatable {
             return tool.displayName
         case .notice(let appName, _, _, _):
             return appName
-        case .setup, .update:
+        case .setup:
             return "もちノッチ"
+        case .update:
+            return "새 업데이트"
         }
     }
 
@@ -326,7 +328,7 @@ struct IslandActivity: Identifiable, Equatable {
     /// 완료가 아닌 작업만. 성공은 기본값이라 매번 뱃지를 달지 않는다.
     var expandedBadge: (label: String, color: Color)? {
         if isSetupReminder { return ("설정", IslandColor.warning) }
-        if isUpdateNotice { return ("업데이트", IslandColor.warning) }
+        if isUpdateNotice { return ("업데이트", IslandColor.update) }
         guard case .agent(_, let outcome, _, _, _) = payload, outcome != .completed else { return nil }
         return (outcome.shortLabel, outcome.tint)
     }
@@ -370,8 +372,10 @@ struct IslandActivity: Identifiable, Equatable {
             return tool.tint
         case .notice:
             return Color.white
-        case .setup, .update:
+        case .setup:
             return IslandColor.warning
+        case .update:
+            return IslandColor.update
         }
     }
 

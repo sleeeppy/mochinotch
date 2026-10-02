@@ -647,6 +647,7 @@ private struct CompactIslandContent: View {
                     ActivityIcon(activity: activity, size: activity.compactIconSize)
                     Text(activity.leadingText)
                         .lineLimit(1)
+                        .foregroundStyle(activity.isUpdateNotice ? activity.tint : IslandColor.primary)
                 }
                 .padding(.leading, 14)
             } else {
@@ -676,7 +677,7 @@ private struct CompactIslandContent: View {
                     Text("설치")
                 }
             }
-            .foregroundStyle(IslandColor.warning)
+            .foregroundStyle(IslandColor.update)
         } else if let percent = activity.percent {
             HStack(spacing: 0) {
                 Text("\(percent)")
@@ -980,7 +981,7 @@ struct UpdateProgressBar: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.white.opacity(0.1))
                 Capsule()
-                    .fill(IslandColor.warning)
+                    .fill(IslandColor.update)
                     .frame(width: max(proxy.size.height, proxy.size.width * min(progress, 1)))
                     .phaseAnimator([1.0, 0.45]) { content, phase in
                         content.opacity(progress < 1 ? 1 : phase)
@@ -1004,10 +1005,10 @@ struct UpdateRing: View {
                 : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9 * 360
             ZStack {
                 Circle()
-                    .stroke(IslandColor.warning.opacity(0.25), lineWidth: 2)
+                    .stroke(IslandColor.update.opacity(0.25), lineWidth: 2)
                 Circle()
                     .trim(from: 0, to: progress < 1 ? max(progress, 0.04) : 0.3)
-                    .stroke(IslandColor.warning, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .stroke(IslandColor.update, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                     .rotationEffect(.degrees(-90 + spin))
                     .animation(.easeOut(duration: 0.2), value: progress)
             }

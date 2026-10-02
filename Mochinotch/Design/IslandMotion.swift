@@ -306,6 +306,8 @@ enum IslandColor {
     /// Dock 배지의 빨강. 시스템 빨강보다 조금 짙다.
     static let dockBadge = Color(red: 0.96, green: 0.23, blue: 0.19)
     static let warning = Color(red: 1.0, green: 0.624, blue: 0.039)
+    /// 업데이트 알림. 경고보다 조금 더 주황이다.
+    static let update = Color(red: 1.0, green: 0.52, blue: 0.22)
     static let claude = Color(red: 0.855, green: 0.467, blue: 0.341)
     static let cursor = Color(red: 0.486, green: 0.361, blue: 0.988)
     static let codex = Color(red: 0.133, green: 0.773, blue: 0.369)
