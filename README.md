@@ -41,8 +41,6 @@ AI Agent(Claude Code, Cursor, Codex, Kiro)가 작업을 마치면 노치가 옆�
   <img src="docs/images/complete.gif" width="720" alt="작업이 끝나면 화면 가장자리가 빛나는 모습">
 </p>
 
-작업이 실패하면 노치가 짧게 흔들리고 붉은 테두리가 생깁니다.
-
 <br/>
 
 ### 에이전트가 답을 기다리면
