@@ -824,23 +824,8 @@ private struct CompactIslandContent: View {
     @ViewBuilder
     private func trailing(_ activity: IslandActivity) -> some View {
         if activity.isUpdateNotice, let progress = model.updateProgress {
-            HStack(spacing: 5) {
-                UpdateRing(progress: progress)
-                    .frame(width: 12, height: 12)
-                if progress < 1 {
-                    let percent = Int(progress * 100)
-                    HStack(spacing: 0) {
-                        Text("\(percent)")
-                            .contentTransition(.numericText(value: Double(percent)))
-                        Text("%")
-                    }
-                    .monospacedDigit()
-                    .animation(.snappy(duration: 0.25), value: percent)
-                } else {
-                    Text("설치")
-                }
-            }
-            .foregroundStyle(IslandColor.update)
+            UpdateRing(progress: progress)
+                .frame(width: 14, height: 14)
         } else if let percent = activity.percent {
             HStack(spacing: 0) {
                 Text("\(percent)")
