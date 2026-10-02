@@ -1,4 +1,6 @@
 import AppKit
+import Observation
+import QuartzCore
 import SwiftUI
 
 struct IslandRootView: View {
@@ -6,14 +8,12 @@ struct IslandRootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let animation: Animation = reduceMotion ? .easeInOut(duration: 0.18) : IslandMotion.morph
-
-        plate(metrics: model.metrics, animation: animation)
+        plate(metrics: model.metrics, reduceMotion: reduceMotion)
     }
 
     /// 창은 고정이고, 모양은 그 안 위 가운데에 붙어 자란다. 글자는 최종 크기로 먼저 놓이고 모양이 그걸 드러낸다.
-    private func plate(metrics: IslandMetrics, animation: Animation) -> some View {
-        MorphingNotch(target: metrics, animation: animation, instant: model.introDirect) { shown in
+    private func plate(metrics: IslandMetrics, reduceMotion: Bool) -> some View {
+        MorphingNotch(target: metrics, reduceMotion: reduceMotion, instant: model.introDirect) { shown in
             let shape = NotchShape(shoulder: shown.shoulder, radius: shown.radius)
             let depth = min(1, max(0, (shown.height - 70) / 140))
 
@@ -158,77 +158,240 @@ private struct NotchGlow: View {
 }
 
 /// 모양을 목표까지 직접 보간한다. 진행 중에 목표가 바뀌면 지금 보이는 모양에서 다시 출발한다.
+/// 스프링은 시각으로 계산한다. 바탕화면 보기처럼 창이 스냅샷으로 얼면, 그 사이 진행한 만큼은
+/// 보기가 끝나는 순간 한 프레임에 튀어서 보인다. 그래서 그 핫코너를 누르는 동안은 스프링을 멈춘다.
 private struct MorphingNotch<Content: View>: View {
     let target: IslandMetrics
-    let animation: Animation
+    var reduceMotion: Bool
     /// 켤 때 인사처럼 모양을 밖에서 매 프레임 그릴 때. 스프링을 다시 걸지 않는다.
     var instant = false
     @ViewBuilder var content: (IslandMetrics) -> Content
 
-    @State private var base: IslandMetrics?
-    @State private var goal: IslandMetrics?
-    @State private var progress: CGFloat = 1
-    /// 스프링이 그리고 있는 실제 진행. 상태값은 곧바로 1이 되므로 끊김은 여기서 읽는다.
-    @State private var clock = MorphClock()
+    @State private var playback = MorphPlayback()
 
     var body: some View {
-        MorphingFrame(
-            base: base ?? target,
-            goal: goal ?? target,
-            progress: progress,
-            clock: clock,
-            content: content
-        )
-        .onChange(of: target, initial: true) { _, new in
-            guard let base, let goal else {
-                base = new
-                goal = new
-                progress = 1
-                clock.value = 1
-                return
+        content(playback.shown ?? target)
+            .transaction { $0.animation = nil }
+            .onChange(of: target, initial: true) { _, new in
+                playback.retarget(new, reduceMotion: reduceMotion, instant: instant)
             }
-            self.base = base.morphed(to: goal, progress: clock.value)
-            self.goal = new
-            guard let base = self.base, base != new else { return }
-            if instant {
-                self.base = new
-                self.goal = new
-                progress = 1
-                clock.value = 1
-                return
-            }
-            progress = 0
-            clock.value = 0
-            let shrinking = new.height + 4 < base.height || new.width + 8 < base.width
-            withAnimation(shrinking ? IslandMotion.settle : animation) { progress = 1 }
-        }
+            .onDisappear { playback.stop() }
     }
 }
 
 /// 스프링은 진행 값만 움직인다. 폭·높이·어깨를 따로 튀기면 보정된 세로보다 더 작아진다.
-private struct MorphingFrame<Content: View>: View, Animatable {
-    var base: IslandMetrics
-    var goal: IslandMetrics
-    var progress: CGFloat
-    var clock: MorphClock
-    var content: (IslandMetrics) -> Content
+@MainActor
+@Observable
+private final class MorphPlayback {
+    private(set) var shown: IslandMetrics?
+    private var from: IslandMetrics?
+    private var goal: IslandMetrics?
+    private var began: CFTimeInterval?
+    /// 핫코너로 창이 얼어 있는 동안 유지하는 스프링 진행. 벽시계로는 더 가지 않는다.
+    private var heldElapsed: CFTimeInterval?
+    private var curve = MorphCurve.morph
+    private let ticker = MorphTicker()
 
-    var animatableData: CGFloat {
-        get { progress }
-        set {
-            progress = newValue
-            clock.value = newValue
+    init() {
+        ticker.onFrame = { [weak self] in
+            self?.step()
         }
     }
 
-    var body: some View {
-        content(base.morphed(to: goal, progress: progress))
-            .transaction { $0.animation = nil }
+    func retarget(_ target: IslandMetrics, reduceMotion: Bool, instant: Bool) {
+        let origin = visible() ?? target
+        if shown == nil || instant || origin == target {
+            commit(target)
+            return
+        }
+        from = origin
+        goal = target
+        let shrinking = target.height + 4 < origin.height || target.width + 8 < origin.width
+        if shrinking {
+            curve = .settle
+        } else if reduceMotion {
+            curve = .ease(0.18)
+        } else {
+            curve = .morph
+        }
+        heldElapsed = nil
+        began = CACurrentMediaTime()
+        shown = origin
+        ticker.start()
+        if !ticker.isRunning {
+            commit(target)
+        }
+    }
+
+    func stop() {
+        commit(goal ?? shown ?? from)
+    }
+
+    private func step() {
+        guard let from, let goal, began != nil else {
+            ticker.stop()
+            return
+        }
+        let now = CACurrentMediaTime()
+        if ExposeCorners.isHeld {
+            if heldElapsed == nil {
+                heldElapsed = now - (began ?? now)
+            }
+            return
+        }
+        if let heldElapsed {
+            began = now - heldElapsed
+            self.heldElapsed = nil
+        }
+        guard let began else { return }
+        let elapsed = now - began
+        if curve.settled(elapsed) {
+            commit(goal)
+            return
+        }
+        shown = from.morphed(to: goal, progress: CGFloat(curve.value(elapsed)))
+    }
+
+    /// 지금 화면에 있는 모양. 목표가 바뀌면 여기서부터 다시 잇는다.
+    private func visible() -> IslandMetrics? {
+        guard let from, let goal else { return shown }
+        let elapsed = heldElapsed ?? {
+            guard let began else { return 0 }
+            return CACurrentMediaTime() - began
+        }()
+        return from.morphed(to: goal, progress: CGFloat(curve.value(elapsed)))
+    }
+
+    private func commit(_ target: IslandMetrics?) {
+        ticker.stop()
+        began = nil
+        heldElapsed = nil
+        guard let target else { return }
+        from = target
+        goal = target
+        shown = target
     }
 }
 
-private final class MorphClock {
-    var value: CGFloat = 1
+/// 미션 컨트롤, 응용 프로그램 윈도우, 바탕화면 보기는 노치 창을 그 순간 그림으로 얼린다.
+/// 커서가 그 모서리에 있는 동안 스프링을 멈추면, 모서리에서 나온 뒤 이어서 움직인다.
+enum ExposeCorners {
+    private enum Corner: String, CaseIterable {
+        case tl, tr, bl, br
+
+        func point(in frame: CGRect) -> CGPoint {
+            switch self {
+            case .bl: return CGPoint(x: frame.minX, y: frame.minY)
+            case .br: return CGPoint(x: frame.maxX, y: frame.minY)
+            case .tl: return CGPoint(x: frame.minX, y: frame.maxY)
+            case .tr: return CGPoint(x: frame.maxX, y: frame.maxY)
+            }
+        }
+    }
+
+    /// Dock의 `wvous-*-corner`. 2는 미션 컨트롤, 3은 응용 프로그램 윈도우, 4는 바탕화면.
+    private static let exposeActions: Set<Int> = [2, 3, 4]
+    private static var actions: [Corner: Int] = [:]
+    private static var modifiers: [Corner: NSEvent.ModifierFlags] = [:]
+    private static var readAt: CFTimeInterval = 0
+
+    static var isHeld: Bool {
+        refreshIfNeeded()
+        guard !actions.isEmpty else { return false }
+        let flags = NSEvent.modifierFlags.intersection([.shift, .control, .option, .command])
+        let mouse = NSEvent.mouseLocation
+        let reach: CGFloat = 30
+        for screen in NSScreen.screens {
+            let frame = screen.frame
+            for (corner, action) in actions where exposeActions.contains(action) {
+                let required = modifiers[corner, default: []]
+                if !required.isEmpty, !flags.contains(required) { continue }
+                let point = corner.point(in: frame)
+                if abs(mouse.x - point.x) <= reach, abs(mouse.y - point.y) <= reach {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private static func refreshIfNeeded() {
+        let now = CACurrentMediaTime()
+        if now - readAt < 2 { return }
+        readAt = now
+        let domain = UserDefaults.standard.persistentDomain(forName: "com.apple.dock") ?? [:]
+        var actions: [Corner: Int] = [:]
+        var modifiers: [Corner: NSEvent.ModifierFlags] = [:]
+        for corner in Corner.allCases {
+            let action = (domain["wvous-\(corner.rawValue)-corner"] as? NSNumber)?.intValue ?? 0
+            guard action != 0 else { continue }
+            actions[corner] = action
+            let raw = (domain["wvous-\(corner.rawValue)-modifier"] as? NSNumber)?.intValue ?? 0
+            modifiers[corner] = modifierFlags(raw)
+        }
+        self.actions = actions
+        self.modifiers = modifiers
+    }
+
+    /// Dock이 저장하는 수정자 키. `CGEventFlags`의 시프트·컨트롤·옵션·커맨드 비트다.
+    private static func modifierFlags(_ raw: Int) -> NSEvent.ModifierFlags {
+        var flags: NSEvent.ModifierFlags = []
+        if raw & (1 << 17) != 0 { flags.insert(.shift) }
+        if raw & (1 << 18) != 0 { flags.insert(.control) }
+        if raw & (1 << 19) != 0 { flags.insert(.option) }
+        if raw & (1 << 20) != 0 { flags.insert(.command) }
+        return flags
+    }
+}
+
+/// 접힐 때는 끝에 다시 부풀지 않고, 펼칠 때는 한 번 넘친 뒤 앉는다. 값은 SwiftUI 스프링과 같다.
+private enum MorphCurve {
+    case spring(IntroSpring)
+    case ease(Double)
+
+    static let morph = MorphCurve.spring(IntroSpring(response: 0.46, damping: 0.74))
+    static let settle = MorphCurve.spring(IntroSpring(response: 0.46, damping: 1))
+
+    func value(_ time: Double) -> Double {
+        switch self {
+        case .spring(let spring):
+            return spring.step(time)
+        case .ease(let duration):
+            let x = min(1, max(0, time / max(duration, 0.01)))
+            return x < 0.5 ? 2 * x * x : 1 - (-2 * x + 2) * (-2 * x + 2) / 2
+        }
+    }
+
+    func settled(_ time: Double) -> Bool {
+        if time > 1.2 { return true }
+        let now = value(time)
+        let ahead = value(time + 1.0 / 120)
+        return abs(now - 1) < 0.0015 && abs(ahead - now) < 0.00025
+    }
+}
+
+/// 화면 주사율에 맞춰 모양 스프링을 민다. SwiftUI 애니메이션과 따로 돈다.
+private final class MorphTicker: NSObject {
+    var onFrame: (() -> Void)?
+    private var link: CADisplayLink?
+    var isRunning: Bool { link != nil }
+
+    func start() {
+        guard link == nil, let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        let link = screen.displayLink(target: self, selector: #selector(tick(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    func stop() {
+        link?.invalidate()
+        link = nil
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        onFrame?()
+    }
 }
 
 /// 접힌 노치의 양쪽 끝. 에이전트 작업은 왼쪽 아이콘만, 그 외 알림은 오른쪽 아이콘과 개수 배지.
