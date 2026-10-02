@@ -156,7 +156,7 @@ enum ActivityPayload: Equatable {
     case notice(appName: String, title: String, body: String, bundleID: String?)
     /// 아직 꺼진 권한이나 연결. 펼친 목록 맨 위에 Mochinotch가 보낸 알림처럼 둔다. 누르면 처음 설정이 열린다.
     case setup(missing: [String])
-    /// 새 릴리즈를 처음 발견했을 때 한 번. 누르면 릴리즈 페이지가 열린다.
+    /// 새 릴리즈를 처음 발견했을 때 한 번. 누르면 받아서 바꾸고 다시 켠다.
     case update(version: String)
 }
 
@@ -319,7 +319,7 @@ struct IslandActivity: Identifiable, Equatable {
         case .setup(let missing):
             return missing.joined(separator: " · ") + " · 눌러서 켜기"
         case .update:
-            return "눌러서 받기"
+            return "눌러서 업데이트"
         }
     }
 

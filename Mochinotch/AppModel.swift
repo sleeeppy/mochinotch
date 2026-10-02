@@ -68,8 +68,9 @@ final class AppModel {
     private(set) var playsScreenEffect = UserDefaults.standard.object(forKey: AppModel.screenEffectKey) as? Bool ?? true
     /// GitHub 최신 릴리즈가 이 앱보다 새로울 때.
     private(set) var updateAvailable = false
-    /// 최신 릴리즈의 다운로드 페이지. 받기 버튼이 있는 그 페이지다.
-    private var latestReleasePage: URL?
+    /// 새 버전을 받아 바꿔 넣을 준비를 하는 중. 끝나면 앱이 꺼졌다 새 버전으로 켜진다.
+    private(set) var installingUpdate = false
+    private var latestRelease: AppUpdater.Release?
     private var checkedForUpdate = false
 
     private var featuredID: UUID?
@@ -450,9 +451,28 @@ final class AppModel {
         expandNow()
     }
 
+    /// 받아서 바꿔 넣을 수 있으면 바로 하고, 아니면 릴리즈 페이지를 연다.
     func openUpdate() {
+        guard !installingUpdate else { return }
+        guard let release = latestRelease, release.dmg != nil, AppUpdater.canReplace() else {
+            openReleasePage()
+            return
+        }
+        installingUpdate = true
+        Task { @MainActor [weak self] in
+            do {
+                try await AppUpdater.prepare(release)
+                NSApp.terminate(nil)
+            } catch {
+                self?.installingUpdate = false
+                self?.openReleasePage()
+            }
+        }
+    }
+
+    private func openReleasePage() {
         NSApp.activate(ignoringOtherApps: true)
-        let page = latestReleasePage ?? URL(string: "https://github.com/sleeeppy/mochinotch/releases/latest")!
+        let page = latestRelease?.page ?? URL(string: "https://github.com/sleeeppy/mochinotch/releases/latest")!
         NSWorkspace.shared.open(page)
     }
 
@@ -469,10 +489,10 @@ final class AppModel {
         Task { @MainActor [weak self] in
             guard let self else { return }
             switch await Self.githubUpdateAvailable(local: local) {
-            case .newer(let tag, let page):
-                self.latestReleasePage = page
+            case .newer(let release):
+                self.latestRelease = release
                 self.updateAvailable = true
-                self.announceUpdate(tag)
+                self.announceUpdate(release.version)
             case .current:
                 break
             case .failed:
@@ -484,7 +504,7 @@ final class AppModel {
     private static let announcedUpdateKey = "announcedUpdateVersion"
 
     private enum UpdateCheck {
-        case newer(String, URL)
+        case newer(AppUpdater.Release)
         case current
         case failed
     }
@@ -501,7 +521,8 @@ final class AppModel {
         else { return .failed }
         let page = (json["html_url"] as? String).flatMap(URL.init(string:))
             ?? URL(string: "https://github.com/sleeeppy/mochinotch/releases/latest")!
-        return isNewerRelease(tag, than: local) ? .newer(tag, page) : .current
+        guard isNewerRelease(tag, than: local) else { return .current }
+        return .newer(AppUpdater.release(from: json, tag: tag, page: page))
     }
 
     /// 이 버전은 한 번만 알린다. 다음 버전이 나오면 다시 한 번.
