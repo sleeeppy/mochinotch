@@ -371,11 +371,12 @@ private struct UpdateButton: View {
 }
 
 private struct QuitButton: View {
+    @Environment(AppModel.self) private var model
     @State private var hovered = false
 
     var body: some View {
         Button {
-            NSApp.terminate(nil)
+            model.quit()
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "power")

@@ -76,6 +76,8 @@ final class AppModel {
     private var featuredID: UUID?
     private var noticesSeenAt = Date.distantPast
     private var isHovering = false
+    /// 끄는 중에는 노치를 다시 펼치지 않는다.
+    private var isQuitting = false
     private var hoverTask: Task<Void, Never>?
     private var leaveTask: Task<Void, Never>?
     private var dismissTask: Task<Void, Never>?
@@ -462,7 +464,7 @@ final class AppModel {
         Task { @MainActor [weak self] in
             do {
                 try await AppUpdater.prepare(release)
-                NSApp.terminate(nil)
+                self?.quit()
             } catch {
                 self?.installingUpdate = false
                 self?.openReleasePage()
@@ -701,13 +703,38 @@ final class AppModel {
         NSWorkspace.shared.open(url)
     }
 
-    /// 권한 몇 가지는 켠 뒤 다시 켜야 적용된다. 새 앱이 뜨기 전에 이 앱이 먼저 꺼진다.
+    /// 권한 몇 가지는 켠 뒤 다시 켜야 적용된다. 이 앱이 다 꺼진 뒤에 새로 띄운다.
     func relaunch() {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", "sleep 0.8; /usr/bin/open \"$0\"", Bundle.main.bundlePath]
+        process.arguments = [
+            "-c",
+            "while kill -0 \"$1\" 2>/dev/null; do sleep 0.1; done; /usr/bin/open \"$0\"",
+            Bundle.main.bundlePath,
+            String(getpid()),
+        ]
         try? process.run()
-        NSApp.terminate(nil)
+        quit()
+    }
+
+    /// 펼친 노치를 먼저 접고, 다 접힌 뒤에 끈다.
+    func quit() {
+        guard !isQuitting else { return }
+        isQuitting = true
+        hoverTask?.cancel()
+        leaveTask?.cancel()
+        dismissTask?.cancel()
+        isHovering = false
+        let wasOpen = presentation != .idle
+        if wasOpen {
+            setPresentation(.idle)
+        }
+        Task { @MainActor in
+            if wasOpen {
+                try? await Task.sleep(for: .milliseconds(620))
+            }
+            NSApp.terminate(nil)
+        }
     }
 
     /// hook을 넣고, 설정이 바뀐 도구의 앱이 켜져 있으면 다시 켠다.
@@ -1410,6 +1437,7 @@ final class AppModel {
     }
 
     private func setHover(_ hovering: Bool) {
+        guard !isQuitting else { return }
         if hovering {
             leaveTask?.cancel()
             guard !isHovering else { return }
@@ -1443,6 +1471,7 @@ final class AppModel {
     }
 
     private func setPresentation(_ next: IslandPresentation) {
+        if isQuitting, next != .idle { return }
         agentEarTask?.cancel()
         pendingPresentation = nil
         let hasLeft = !agentGroups.isEmpty
