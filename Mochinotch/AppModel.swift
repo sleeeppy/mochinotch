@@ -1533,6 +1533,13 @@ final class AppModel {
                 try? await Task.sleep(for: MochinotchConfig.hoverOut)
                 guard !Task.isCancelled, let self else { return }
                 self.isHovering = false
+                // 바탕화면 보기가 노치를 그 순간 그림으로 얼린다. 그 사이에 접으면
+                // 보기가 끝나는 순간 이미 접힌 모양으로 튄다. 모서리에서 나온 뒤에 접는다.
+                while ExposeCorners.isHeld {
+                    try? await Task.sleep(for: .milliseconds(40))
+                    guard !Task.isCancelled else { return }
+                }
+                guard !self.isHovering else { return }
                 if self.presentation == .expanded, !self.showsSetup {
                     // 받는 중이면 접힌 노치 귀에 진행을 남긴다.
                     if self.installingUpdate, let update = self.activities.first(where: \.isUpdateNotice) {
