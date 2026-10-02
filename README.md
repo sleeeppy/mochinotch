@@ -12,8 +12,6 @@
 
 ---
 
-<h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/features-dark.png"><img src="docs/images/headings/features-light.png" alt="이런 걸 해요" width="116" height="30"></picture></h3>
-
 ### 알림이 노치 옆에 쌓여요
 
 메시지, Slack, 카카오톡 같은 앱의 알림이 오면 노치 오른쪽에 앱 아이콘이 톡 튀어나오고, Dock처럼 알림 배지가 붙습니다. 다른 앱 알림이 오면 한 칸씩 더 늘어나요.
