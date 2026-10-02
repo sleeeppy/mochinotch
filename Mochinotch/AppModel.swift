@@ -77,6 +77,9 @@ final class AppModel {
     }
     private var latestRelease: AppUpdater.Release?
     private var checkedForUpdate = false
+    /// 켜질 때 인사가 끝나기 전에는 업데이트 알림을 띄우지 않는다.
+    private var awaitingLaunchIntro = true
+    private var pendingUpdateVersion: String?
 
     private var featuredID: UUID?
     private var noticesSeenAt = Date.distantPast
@@ -365,6 +368,21 @@ final class AppModel {
             resolveWaiting(tool)
             return
         }
+        if event.kind?.lowercased() == "update" {
+            let version = event.detail?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                ?? event.title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                ?? "9.9.9"
+            present(
+                IslandActivity(
+                    id: UUID(),
+                    payload: .update(version: version),
+                    createdAt: Date(),
+                    keepsHistory: true
+                ),
+                seconds: 6
+            )
+            return
+        }
         let outcome = outcome(for: event)
         let title = event.title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             ?? "\(tool.displayName) \(outcome.shortLabel)"
@@ -556,10 +574,19 @@ final class AppModel {
         return .newer(AppUpdater.release(from: json, tag: tag, page: page))
     }
 
-    /// 이 버전은 한 번만 알린다. 다음 버전이 나오면 다시 한 번.
+    /// 이 버전은 한 번만 알린다. 다음 버전이 나오면 다시 한 번. 켜질 때 인사가 끝나기 전에는 기다린다.
     private func announceUpdate(_ tag: String) {
         let version = Self.versionParts(tag).map(String.init).joined(separator: ".")
         guard !version.isEmpty else { return }
+        if UserDefaults.standard.string(forKey: Self.announcedUpdateKey) == version { return }
+        if awaitingLaunchIntro || introDirect || introTask != nil {
+            pendingUpdateVersion = version
+            return
+        }
+        presentUpdateNotice(version)
+    }
+
+    private func presentUpdateNotice(_ version: String) {
         if UserDefaults.standard.string(forKey: Self.announcedUpdateKey) == version { return }
         UserDefaults.standard.set(version, forKey: Self.announcedUpdateKey)
         present(
@@ -571,6 +598,14 @@ final class AppModel {
             ),
             seconds: 6
         )
+    }
+
+    /// 켜질 때 인사가 끝났거나 건너뛴 뒤에 미뤄 둔 업데이트를 띄운다.
+    private func finishLaunchIntro() {
+        awaitingLaunchIntro = false
+        guard let version = pendingUpdateVersion else { return }
+        pendingUpdateVersion = nil
+        presentUpdateNotice(version)
     }
 
     private static func isNewerRelease(_ remote: String, than local: String) -> Bool {
@@ -1195,15 +1230,19 @@ final class AppModel {
             let hasHistory = self.activities.contains { !$0.isSetupReminder }
             if quietOnly, hasHistory || self.presentation != .idle || self.isHovering {
                 self.presentSetupIfPending()
+                self.finishLaunchIntro()
                 return
             }
-            if self.isHovering { return }
-            self.startIntro(IntroScript.make(study))
+            if self.isHovering {
+                if quietOnly { self.finishLaunchIntro() }
+                return
+            }
+            self.startIntro(IntroScript.make(study), afterLaunch: quietOnly)
         }
     }
 
     /// 안무는 시각만으로 모양을 정한다. 프레임이 늦게 와도 그 시각의 모양을 그려서 밀리지 않는다.
-    private func startIntro(_ script: IntroScript) {
+    private func startIntro(_ script: IntroScript, afterLaunch: Bool = false) {
         activities.removeAll { $0.isIntro }
         presentation = .idle
         let idle = IslandMetrics.resolve(notch: notch, presentation: .idle, rowCount: 0)
@@ -1218,6 +1257,7 @@ final class AppModel {
             if self.isHovering {
                 self.finishIntro(fold: false)
                 self.presentSetupIfPending()
+                if afterLaunch { self.finishLaunchIntro() }
                 return
             }
             let pose = script.pose(t)
@@ -1242,6 +1282,7 @@ final class AppModel {
                 if !self.setupPending, !self.isHovering, self.presentation != .idle {
                     self.setPresentation(.idle)
                 }
+                if afterLaunch { self.finishLaunchIntro() }
             }
         }
     }
@@ -1287,9 +1328,15 @@ final class AppModel {
     }
 
     private func cancelIntro() {
+        let interruptedLaunch = awaitingLaunchIntro && introDirect
         introTask?.cancel()
         finishIntro(fold: false)
         stopIslandGlow()
+        if interruptedLaunch {
+            Task { @MainActor [weak self] in
+                self?.finishLaunchIntro()
+            }
+        }
     }
 
     /// 화면 가장자리 효과 없이, 노치 윤곽만 한 바퀴 돈다. 화면 연출이 켜져 있을 때와 같은 속도로.

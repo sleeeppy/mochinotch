@@ -358,7 +358,7 @@ private struct UpdateButton: View {
             Text(label)
                 .font(.system(size: 10.5, weight: .semibold, design: .rounded))
                 .monospacedDigit()
-                .foregroundStyle(IslandColor.warning)
+                .foregroundStyle(IslandColor.update)
                 .contentTransition(.numericText())
                 .animation(.snappy(duration: 0.25), value: label)
                 .frame(minWidth: 40)
@@ -367,10 +367,10 @@ private struct UpdateButton: View {
                 .background {
                     GeometryReader { proxy in
                         ZStack(alignment: .leading) {
-                            Capsule().fill(IslandColor.warning.opacity(hovered && progress == nil ? 0.28 : 0.16))
+                            Capsule().fill(IslandColor.update.opacity(hovered && progress == nil ? 0.28 : 0.16))
                             if let progress {
                                 Capsule()
-                                    .fill(IslandColor.warning.opacity(0.3))
+                                    .fill(IslandColor.update.opacity(0.3))
                                     .frame(width: max(proxy.size.height, proxy.size.width * min(progress, 1)))
                                     .animation(.easeOut(duration: 0.2), value: progress)
                             }
