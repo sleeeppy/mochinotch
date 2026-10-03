@@ -31,9 +31,7 @@ struct SettingsView: View {
                 ) {
                     IntroDropdown(open: $introMenuOpen)
                 }
-            }
-
-            SettingsCard {
+                SettingsDivider()
                 SwitchRow(
                     title: "화면 가장자리 연출",
                     subtitle: model.playsScreenEffect ? "작업이 끝나면 화면 테두리까지 빛나요" : "노치 테두리만 빛나요",

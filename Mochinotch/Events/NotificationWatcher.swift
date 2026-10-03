@@ -43,6 +43,9 @@ final class NotificationWatcher {
     private var bundleIDsByName: [String: String] = [:]
     private var didLogAccessibility = false
     private let ownBundleID = Bundle.main.bundleIdentifier ?? ""
+    /// 알림 센터 접근성 트리가 자기 자신을 자식으로 돌려줘도 탐색이 끝나게 하는 한도.
+    private static let maxAXDepth = 64
+    private static let maxAXNodes = 2_000
 
     func start() {
         let timer = DispatchSource.makeTimerSource(queue: queue)
@@ -277,10 +280,12 @@ final class NotificationWatcher {
         var windows: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXWindowsAttribute as CFString, &windows) == .success,
               let list = windows as? [AXUIElement] else { return [] }
-        return list.flatMap(notices(in:))
+        var seen = Set<AXVisit>()
+        return list.flatMap { notices(in: $0, depth: 0, seen: &seen) }
     }
 
-    private func notices(in element: AXUIElement) -> [SystemNotice] {
+    private func notices(in element: AXUIElement, depth: Int, seen: inout Set<AXVisit>) -> [SystemNotice] {
+        guard depth < Self.maxAXDepth, seen.count < Self.maxAXNodes, seen.insert(AXVisit(element)).inserted else { return [] }
         var description: CFTypeRef?
         AXUIElementCopyAttributeValue(element, kAXDescriptionAttribute as CFString, &description)
         let described = (description as? String) ?? ""
@@ -299,7 +304,7 @@ final class NotificationWatcher {
         }
         var children: CFTypeRef?
         AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
-        return (children as? [AXUIElement] ?? []).flatMap(notices(in:))
+        return (children as? [AXUIElement] ?? []).flatMap { notices(in: $0, depth: depth + 1, seen: &seen) }
     }
 
     private func elementSubrole(_ element: AXUIElement) -> String {
@@ -341,6 +346,12 @@ final class NotificationWatcher {
     }
 
     private func staticTexts(in element: AXUIElement) -> [String] {
+        var seen = Set<AXVisit>()
+        return staticTexts(in: element, depth: 0, seen: &seen)
+    }
+
+    private func staticTexts(in element: AXUIElement, depth: Int, seen: inout Set<AXVisit>) -> [String] {
+        guard depth < Self.maxAXDepth, seen.count < Self.maxAXNodes, seen.insert(AXVisit(element)).inserted else { return [] }
         var role: CFTypeRef?
         AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
         if (role as? String) == kAXStaticTextRole as String {
@@ -350,7 +361,7 @@ final class NotificationWatcher {
         }
         var children: CFTypeRef?
         AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
-        return (children as? [AXUIElement] ?? []).flatMap(staticTexts(in:))
+        return (children as? [AXUIElement] ?? []).flatMap { staticTexts(in: $0, depth: depth + 1, seen: &seen) }
     }
 
     private func bundleID(forAppName name: String) -> String? {
@@ -617,5 +628,22 @@ final class NotificationWatcher {
                 try? data.write(to: url)
             }
         }
+    }
+}
+
+/// 같은 알림 센터 요소는 `CFEqual`로 같다. 포인터만 다르고 같은 노드를 다시 주면 재귀가 멈추게 한다.
+private struct AXVisit: Hashable {
+    let element: AXUIElement
+
+    init(_ element: AXUIElement) {
+        self.element = element
+    }
+
+    static func == (lhs: AXVisit, rhs: AXVisit) -> Bool {
+        CFEqual(lhs.element, rhs.element)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(CFHash(element))
     }
 }

@@ -77,6 +77,7 @@ final class AppModel {
     }
     private var latestRelease: AppUpdater.Release?
     private var checkedForUpdate = false
+    private var updateCheck: Task<Void, Never>?
     /// 켜질 때 인사가 끝나기 전에는 업데이트 알림을 띄우지 않는다.
     private var awaitingLaunchIntro = true
     private var pendingUpdateVersion: String?
@@ -251,6 +252,11 @@ final class AppModel {
         }
         notifications.start()
         checkForUpdate()
+        Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.checkForUpdate(scheduled: true)
+            }
+        }
         Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.syncOpenConversation()
@@ -530,20 +536,23 @@ final class AppModel {
         NSWorkspace.shared.open(url)
     }
 
-    /// 최신 릴리즈 태그만 본다. 실패하면 다음 설정 열기 때 다시 본다.
-    func checkForUpdate() {
-        guard !checkedForUpdate else { return }
+    /// 최신 릴리즈 태그만 본다. 켜질 때 한 번, 그 뒤엔 한 시간마다.
+    /// 실패하면 다음 설정 열기 때 다시 본다. 같은 버전 알림은 한 번만 뜬다.
+    func checkForUpdate(scheduled: Bool = false) {
+        if !scheduled, checkedForUpdate { return }
+        guard updateCheck == nil else { return }
         checkedForUpdate = true
         let local = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
-        Task { @MainActor [weak self] in
+        updateCheck = Task { @MainActor [weak self] in
             guard let self else { return }
+            defer { self.updateCheck = nil }
             switch await Self.githubUpdateAvailable(local: local) {
             case .newer(let release):
                 self.latestRelease = release
                 self.updateAvailable = true
                 self.announceUpdate(release.version)
             case .current:
-                break
+                self.updateAvailable = false
             case .failed:
                 self.checkedForUpdate = false
             }
