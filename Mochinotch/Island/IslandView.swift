@@ -39,7 +39,7 @@ struct IslandRootView: View {
                         color: model.edgeGlowColor
                     )
 
-                    if model.featured?.isFailure == true && model.presentation != .idle {
+                    if model.featured?.isFailure == true && model.presentation != .idle && model.fileDrag == nil {
                         NotchShape(shoulder: shown.shoulder, radius: shown.radius, closesTop: false)
                             .stroke(IslandColor.danger.opacity(0.85), lineWidth: 1.5)
                             .blur(radius: 0.4)
@@ -578,24 +578,98 @@ private struct IslandFace: View {
         let agents = model.leftIconsHidden ? [] : model.agentGroups
 
         ZStack(alignment: .top) {
-            switch model.presentation {
-            case .idle:
-                if metrics.chrome == .peek, !notices.isEmpty || !agents.isEmpty {
-                    PeekContent(metrics: shape, notices: notices, agents: agents)
-                        .frame(width: shape.width, height: shape.height)
-                        .transition(IslandMotion.popTransition)
-                }
-            case .compact:
-                CompactIslandContent(metrics: metrics, activity: model.featured)
-                    .frame(width: metrics.width, height: metrics.height)
-                    .transition(model.featured?.popsIn == true ? IslandMotion.popTransition : IslandMotion.contentTransition)
-            case .expanded:
-                ExpandedIslandContent(metrics: metrics)
-                    .frame(width: metrics.width, height: metrics.height, alignment: .top)
-                    .transition(IslandMotion.expandedTransition)
+            if let drag = model.fileDrag {
+                // 놓을 자리는 판을 따라 같이 부푼다. 목표 크기로 그리면 점선만 먼저 튀어 나간다.
+                DropZoneContent(metrics: shape, targeted: drag == .over)
+                    .frame(width: shape.width, height: shape.height, alignment: .top)
+                    .transition(IslandMotion.contentTransition)
+            } else {
+                presentationContent(metrics: metrics, notices: notices, agents: agents)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .animation(.easeOut(duration: 0.2), value: model.fileDrag == nil)
+    }
+
+    @ViewBuilder
+    private func presentationContent(metrics: IslandMetrics, notices: [NoticeGroup], agents: [NoticeGroup]) -> some View {
+        switch model.presentation {
+        case .idle:
+            if metrics.chrome == .peek, !notices.isEmpty || !agents.isEmpty {
+                PeekContent(metrics: shape, notices: notices, agents: agents)
+                    .frame(width: shape.width, height: shape.height)
+                    .transition(IslandMotion.popTransition)
+            }
+        case .compact:
+            CompactIslandContent(metrics: metrics, activity: model.featured)
+                .frame(width: metrics.width, height: metrics.height)
+                .transition(model.featured?.popsIn == true ? IslandMotion.popTransition : IslandMotion.contentTransition)
+        case .expanded:
+            ExpandedIslandContent(metrics: metrics)
+                .frame(width: metrics.width, height: metrics.height, alignment: .top)
+                .transition(IslandMotion.expandedTransition)
+        }
+    }
+}
+
+/// 파일을 끌고 노치에 다가오면 보이는 놓을 자리.
+private struct DropZoneContent: View {
+    @Environment(AppModel.self) private var model
+    let metrics: IslandMetrics
+    let targeted: Bool
+
+    private static let icon = NSSharingService(named: .sendViaAirDrop)?.image
+
+    var body: some View {
+        let topInset = model.notch.hasNotch ? model.notch.anchorHeight : 6
+        let tint = targeted ? IslandColor.airDrop : Color.white.opacity(0.28)
+        // 판이 부푸는 동안 매 프레임 크기가 바뀐다. 다 자라기 전에는 음수가 될 수 있다.
+        let boxWidth = max(0, metrics.width - (metrics.shoulder + 8) * 2)
+        let boxHeight = max(0, metrics.height - topInset - 14)
+        VStack(spacing: 0) {
+            Color.clear.frame(height: topInset + 4)
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(IslandColor.airDrop.opacity(targeted ? 0.16 : 0))
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(tint, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                label
+                    .fixedSize()
+            }
+            .frame(width: boxWidth, height: boxHeight)
+        }
+        .animation(.spring(response: 0.34, dampingFraction: 0.82), value: targeted)
+    }
+
+    private var label: some View {
+        VStack(spacing: 6) {
+            if let icon = Self.icon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: 40, height: 40)
+                    .scaleEffect(targeted ? 1.1 : 1)
+            }
+            VStack(spacing: 2) {
+                Text("AirDrop")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(IslandColor.primary)
+                // 같은 자리에서 겹쳐 바래면 두 줄이 포개져 읽히지 않는다. 위로 밀어 올리며 바꾼다.
+                ZStack {
+                    Text(targeted ? "놓으면 보낼 기기를 골라요" : "여기에 끌어다 놓기")
+                        .id(targeted)
+                        .transition(
+                            .asymmetric(
+                                insertion: .offset(y: 8).combined(with: .opacity),
+                                removal: .offset(y: -8).combined(with: .opacity)
+                            )
+                        )
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(IslandColor.secondary)
+                .frame(height: 14)
+                .clipped()
+            }
+        }
     }
 }
 

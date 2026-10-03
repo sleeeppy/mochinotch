@@ -69,6 +69,16 @@ Claude와 Codex가 승인 창이나 질문 카드를 띄우면 노치에 주황�
   <img src="docs/images/update.gif" width="720" alt="목록의 새 업데이트를 눌러 받는 중과 설치가 보이다가 노치가 접히는 모습">
 </p>
 
+<br/>
+
+### 파일을 노치에 놓으면 AirDrop
+
+파일을 끌고 노치 쪽으로 가져가면 노치가 아래로 내려와 놓을 자리를 만들어요. 그 위에 놓으면 노치가 접히고 AirDrop 창이 열려요.
+
+<p align="center">
+  <img src="docs/images/airdrop.gif" width="720" alt="사진을 끌어 노치에 가져가면 AirDrop 놓을 자리가 열리고, 그 위에 놓으면 노치가 접히는 모습">
+</p>
+
 </br>
 
 ---
