@@ -29,8 +29,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.sleeeppy.mochinotch
         PRODUCT_NAME: Mochinotch
-        MARKETING_VERSION: "0.4.2"
-        CURRENT_PROJECT_VERSION: "17"
+        MARKETING_VERSION: "0.4.3"
+        CURRENT_PROJECT_VERSION: "18"
         INFOPLIST_FILE: Mochinotch/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         COMBINE_HIDPI_IMAGES: YES
