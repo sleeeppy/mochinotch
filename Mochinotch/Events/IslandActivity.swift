@@ -6,6 +6,14 @@ enum IslandPresentation: Equatable {
     case expanded
 }
 
+/// 파일을 끌고 노치 근처에 왔을 때. 다른 모양보다 먼저 그린다.
+enum FileDragPhase: Equatable {
+    /// 노치 가까이. 놓을 자리를 보여 준다.
+    case near
+    /// 놓을 자리 위. 여기서 놓으면 AirDrop으로 보낸다.
+    case over
+}
+
 enum AgentTool: String, Equatable {
     case claude
     case cursor

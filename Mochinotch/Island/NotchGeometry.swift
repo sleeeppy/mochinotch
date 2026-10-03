@@ -162,6 +162,21 @@ struct IslandMetrics: Equatable {
         }
     }
 
+    /// 파일을 끌고 노치 가까이 오면 놓을 자리만큼 아래로 커진다. 위에 올라오면 조금 더 부푼다.
+    /// 화면 맨 위까지 끌고 가면 Mission Control이 열리므로, 그보다 한참 아래에서 놓을 수 있게 길게 내린다.
+    static func dropZone(notch: NotchInfo, targeted: Bool) -> IslandMetrics {
+        let header: CGFloat = notch.hasNotch ? max(notch.anchorHeight, 28) : 6
+        let grow: CGFloat = targeted ? 1 : 0
+        return fill(
+            width: 360 + grow * 24 + expandedShoulder * 2,
+            height: header + 112 + grow * 12,
+            radius: 24,
+            shoulder: expandedShoulder,
+            ear: 0,
+            camera: 0
+        )
+    }
+
     /// 노치 밖으로 아이콘 칸만큼 뻗는 폭. 0칸이면 그 방향은 접힌 노치 그대로다.
     private static func peekEar(slots: Int, spacing: CGFloat) -> CGFloat {
         guard slots > 0 else { return 0 }

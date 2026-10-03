@@ -15,6 +15,13 @@ final class IslandPanelController {
     /// 클릭을 받을 화면 영역. `nil`이면 모든 클릭을 아래 창으로 흘려보낸다.
     var interactiveRectProvider: () -> CGRect? = { nil }
     var onHoverChange: (Bool) -> Void = { _ in }
+    /// 다른 앱에서 파일을 끄는 동안 커서 위치. 끝나면 `nil`.
+    var onFileDrag: (CGPoint?) -> Void = { _ in }
+    var canDropFiles: () -> Bool = { false }
+    var onDropFiles: ([URL]) -> Bool = { _ in false }
+    /// 누른 순간의 끌기 보드. 이 값이 바뀌어야 새 끌기가 시작된 것이다.
+    private var dragBaseline = NSPasteboard(name: .drag).changeCount
+    private var fileDragTimer: Timer?
 
     init<Content: View>(rootView: Content) {
         let panel = NSPanel(
@@ -46,16 +53,20 @@ final class IslandPanelController {
 
         self.panel = panel
         self.hosting = hosting
+        hosting.canDrop = { [weak self] in self?.canDropFiles() ?? false }
+        hosting.onDrop = { [weak self] urls in self?.onDropFiles(urls) ?? false }
     }
 
     func start() {
-        let handler: (NSEvent) -> Void = { [weak self] _ in
+        let handler: (NSEvent) -> Void = { [weak self] event in
+            let type = event.type
             Task { @MainActor in
-                self?.trackPointer()
+                self?.handlePointer(type)
             }
         }
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged], handler: handler)
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { event in
+        let events: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .leftMouseDown]
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: events, handler: handler)
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: events) { event in
             handler(event)
             return event
         }
@@ -79,6 +90,7 @@ final class IslandPanelController {
         }
         globalMonitor = nil
         localMonitor = nil
+        endFileDrag()
     }
 
     func place(frame: CGRect) {
@@ -108,6 +120,56 @@ final class IslandPanelController {
         lastInside = inside
         onHoverChange(inside)
     }
+
+    private func handlePointer(_ type: NSEvent.EventType) {
+        switch type {
+        case .leftMouseDown:
+            endFileDrag()
+            dragBaseline = NSPasteboard(name: .drag).changeCount
+        case .leftMouseDragged where fileDragTimer == nil:
+            if isFileDrag() { beginFileDrag() }
+        default:
+            break
+        }
+        trackPointer()
+    }
+
+    private func isFileDrag() -> Bool {
+        let board = NSPasteboard(name: .drag)
+        guard board.changeCount != dragBaseline else { return false }
+        return board.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+    }
+
+    /// 끄는 동안의 이벤트는 끄는 앱 몫이라, 놓는 순간을 놓치지 않게 커서와 버튼을 직접 본다.
+    private func beginFileDrag() {
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.followFileDrag()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        fileDragTimer = timer
+        followFileDrag()
+    }
+
+    private func followFileDrag() {
+        guard NSEvent.pressedMouseButtons & 1 != 0 else {
+            endFileDrag()
+            return
+        }
+        onFileDrag(NSEvent.mouseLocation)
+        updateMouse()
+    }
+
+    private func endFileDrag() {
+        guard let fileDragTimer else { return }
+        fileDragTimer.invalidate()
+        self.fileDragTimer = nil
+        // 같은 끌기 보드로 다시 시작하지 않게 한다.
+        dragBaseline = NSPasteboard(name: .drag).changeCount
+        onFileDrag(nil)
+        updateMouse()
+    }
 }
 
 /// 창 크기를 SwiftUI 콘텐츠가 끌어내리지 않게 하고, 첫 클릭도 받는다.
@@ -118,10 +180,40 @@ final class IslandHostingView: NSHostingView<AnyView> {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    var canDrop: () -> Bool = { false }
+    var onDrop: ([URL]) -> Bool = { _ in false }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
+        registerForDraggedTypes([.fileURL])
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        canDrop() && !fileURLs(sender).isEmpty ? .copy : []
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        canDrop() && !fileURLs(sender).isEmpty ? .copy : []
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        canDrop()
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = fileURLs(sender)
+        guard !urls.isEmpty else { return false }
+        return onDrop(urls)
+    }
+
+    private func fileURLs(_ sender: NSDraggingInfo) -> [URL] {
+        let objects = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        )
+        return objects as? [URL] ?? []
     }
 }
 

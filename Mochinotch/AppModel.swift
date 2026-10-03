@@ -101,6 +101,9 @@ final class AppModel {
     /// 노치에서 떨어져 나온 모찌 방울들.
     private(set) var introBeads: [IntroBead] = []
     private var introGlowing = false
+    /// 파일을 끌고 노치 근처에 와 있을 때.
+    private(set) var fileDrag: FileDragPhase?
+    private var fileDragEndTask: Task<Void, Never>?
     private var clearTask: Task<Void, Never>?
     /// 지우기 직후 높이를 잠깐 유지한다. 글자가 사라진 뒤에 모양이 따라 줄어든다.
     private var frozenRows: Int?
@@ -141,6 +144,7 @@ final class AppModel {
 
     var metrics: IslandMetrics {
         if let introShape { return introShape }
+        if let fileDrag { return IslandMetrics.dropZone(notch: notch, targeted: fileDrag == .over) }
         return IslandMetrics.resolve(
             notch: notch,
             presentation: presentation,
@@ -158,6 +162,8 @@ final class AppModel {
 
     /// 접혀 있을 때는 노치 뒤라 클릭을 받지 않는다. 호버는 전역 모니터가 따로 본다.
     private var interactiveScreenRect: CGRect? {
+        // 놓을 자리 위에서만 끌어 온 파일을 받는다. 나머지 창은 아래 앱이 받아야 한다.
+        if fileDrag != nil { return hoverScreenRect }
         guard presentation != .idle || metrics.chrome == .peek else { return nil }
         return hoverScreenRect
     }
@@ -210,6 +216,15 @@ final class AppModel {
         }
         controller.onHoverChange = { [weak self] inside in
             self?.setHover(inside)
+        }
+        controller.onFileDrag = { [weak self] point in
+            self?.updateFileDrag(at: point)
+        }
+        controller.canDropFiles = { [weak self] in
+            self?.fileDrag != nil
+        }
+        controller.onDropFiles = { [weak self] urls in
+            self?.sendViaAirDrop(urls) ?? false
         }
         controller.start()
         panel = controller
@@ -1521,11 +1536,67 @@ final class AppModel {
         }
     }
 
+    /// `point`가 `nil`이면 끌기가 끝났다.
+    private func updateFileDrag(at point: CGPoint?) {
+        guard let point else {
+            guard fileDrag != nil else { return }
+            // 손을 떼는 순간 접으면, 놓기가 노치에 닿기 전에 창이 클릭을 흘려보낸다.
+            let settle = fileDrag == .over
+            fileDragEndTask?.cancel()
+            fileDragEndTask = Task { [weak self] in
+                if settle { try? await Task.sleep(for: .milliseconds(350)) }
+                guard !Task.isCancelled else { return }
+                self?.setFileDrag(nil)
+            }
+            return
+        }
+        guard !isQuitting, introShape == nil, !showsSetup else {
+            setFileDrag(nil)
+            return
+        }
+        fileDragEndTask?.cancel()
+        let zone = IslandMetrics.dropZone(notch: notch, targeted: true).screenRect(notch: notch)
+        if zone.insetBy(dx: -4, dy: -4).contains(point) {
+            setFileDrag(.over)
+        } else if zone.insetBy(dx: -180, dy: -220).contains(point) {
+            setFileDrag(.near)
+        } else {
+            setFileDrag(nil)
+        }
+    }
+
+    private func setFileDrag(_ phase: FileDragPhase?) {
+        guard fileDrag != phase else { return }
+        if fileDrag == nil {
+            hoverTask?.cancel()
+        }
+        fileDrag = phase
+        panel?.updateMouse()
+    }
+
+    private func sendViaAirDrop(_ urls: [URL]) -> Bool {
+        fileDragEndTask?.cancel()
+        setFileDrag(nil)
+        let files = urls.filter(\.isFileURL)
+        guard !files.isEmpty,
+              let service = NSSharingService(named: .sendViaAirDrop),
+              service.canPerform(withItems: files)
+        else { return false }
+        // AirDrop 창을 띄우는 동안 화면이 멈춘다. 그 사이에 접히면 접힘이 건너뛰어지니, 다 접은 뒤에 연다.
+        Task {
+            try? await Task.sleep(for: .milliseconds(450))
+            NSApp.activate(ignoringOtherApps: true)
+            service.perform(withItems: files)
+        }
+        return true
+    }
+
     private func setHover(_ hovering: Bool) {
         guard !isQuitting else { return }
         if hovering {
             leaveTask?.cancel()
-            guard !isHovering else { return }
+            // 파일을 끌고 지나가다 목록이 펼쳐지면 놓을 자리를 가린다.
+            guard !isHovering, fileDrag == nil else { return }
             isHovering = true
             hoverTask = Task { [weak self] in
                 try? await Task.sleep(for: MochinotchConfig.hoverIn)
