@@ -97,26 +97,34 @@ private struct ShelfTuck: View {
         let reach = visible ? (open ? ShelfLayout.openPeek : ShelfLayout.peek) : -4
         let spread: CGFloat = open ? 2.6 : 1
         let card = ShelfLayout.card
+        let tilt = open ? 1.6 : 1
         // 배지는 보이는 아랫단에 걸치고, 벌리면 사진 옆 가운데로 내려온다.
-        let badgeY = open ? card / 2 - 6 : card - reach / 2 - 6
-        let left = items.count > 1 ? -Self.fan[1].x * spread : 0
-        let right = items.count > 2 ? Self.fan[2].x * spread : 0
+        let badgeY = open ? card / 2 - ShelfBadge.size / 2 : card - reach / 2 - 6
+        // 기울어진 사진은 각도만큼 옆으로 넓어진다. 양쪽 배지가 같은 틈을 두도록 바깥 사진의 실제 끝에서 잰다.
+        let leftEdge = items.count > 1
+            ? -Self.fan[1].x * spread + Self.halfWidth(card, degrees: Self.fan[1].angle * tilt)
+            : Self.halfWidth(card, degrees: Self.fan[0].angle * tilt)
+        let rightEdge = items.count > 2
+            ? Self.fan[2].x * spread + Self.halfWidth(card, degrees: Self.fan[2].angle * tilt)
+            : Self.halfWidth(card, degrees: Self.fan[0].angle * tilt)
+        let gap: CGFloat = open ? 5 : 0
 
         ZStack(alignment: .top) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 let slot = min(items.count - 1 - index, Self.fan.count - 1)
                 ShelfCard(item: item, grabbed: model.shelfGrabsAll)
-                    .rotationEffect(.degrees(Self.fan[slot].angle * (open ? 1.6 : 1)))
+                    .rotationEffect(.degrees(Self.fan[slot].angle * tilt))
                     .offset(x: Self.fan[slot].x * spread)
                     .gesture(drag([item.id]))
             }
             if model.shelf.count > 1 {
                 ShelfBadge(text: "\(model.shelf.count)")
-                    .offset(x: card / 2 + right + (open ? 10 : 2), y: badgeY)
+                    // 접혀 있을 때는 사진 끝에 반쯤 걸친다.
+                    .offset(x: open ? rightEdge + gap + ShelfBadge.size / 2 : rightEdge, y: badgeY)
                     .gesture(drag(model.shelf.map(\.id)))
             }
             ShelfClearButton()
-                .offset(x: -(card / 2 + left + 10), y: badgeY)
+                .offset(x: -(leftEdge + gap + ShelfBadge.size / 2), y: badgeY)
             .opacity(open ? 1 : 0)
             .allowsHitTesting(open)
         }
@@ -145,6 +153,11 @@ private struct ShelfTuck: View {
         .opacity(visible ? 1 : 0)
         .animation(.spring(response: 0.34, dampingFraction: 0.66), value: open)
         .animation(.spring(response: 0.42, dampingFraction: 0.72), value: visible)
+    }
+
+    private static func halfWidth(_ side: CGFloat, degrees: Double) -> CGFloat {
+        let radians = abs(degrees) * .pi / 180
+        return side * (cos(radians) + sin(radians)) / 2
     }
 
     private func drag(_ ids: [ShelfItem.ID]) -> some Gesture {
@@ -219,6 +232,7 @@ private struct ShelfCard: View {
 }
 
 private struct ShelfBadge: View {
+    static let size: CGFloat = 16
     var text: String?
     var systemImage: String?
     var fill: Color = IslandColor.plate
@@ -229,16 +243,20 @@ private struct ShelfBadge: View {
                 Image(systemName: systemImage)
                     .font(.system(size: 7.5, weight: .heavy))
             } else if let text {
+                // 글자 상자 가운데에 놓으면 숫자는 위·왼쪽으로 치우친다. 잰 만큼 되돌린다.
                 Text(text)
                     .font(.system(size: 9.5, weight: .bold, design: .rounded))
                     .monospacedDigit()
+                    .offset(x: 0.35, y: 0.45)
             }
         }
         .foregroundStyle(.white)
-        .frame(minWidth: 16, minHeight: 16)
+        .frame(minWidth: Self.size, minHeight: Self.size)
         .padding(.horizontal, text.map { $0.count > 1 ? 3 : 0 } ?? 0)
         .background(Capsule().fill(fill))
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+        // 픽셀 사이에 걸리면 글자만 픽셀에 붙고 원은 그대로라 어긋난다. 한 장으로 그려서 같이 움직인다.
+        .drawingGroup()
         .contentShape(Capsule())
     }
 }
