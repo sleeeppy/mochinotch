@@ -4,14 +4,14 @@ import SwiftUI
 /// 펼친 노치 안의 설정. 노치 패널은 키 창이 되지 않아 시스템 스위치가 늘 비활성 회색으로 그려진다. 컨트롤은 직접 그린다.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
-    @State private var introMenuOpen = false
+    @State private var openMenu: SettingsMenu?
 
     var body: some View {
         VStack(spacing: 10) {
             SettingsCard {
                 SwitchRow(
-                    title: "로그인할 때 열기",
-                    subtitle: "맥을 켜면 노치가 바로 깨어나요",
+                    title: model.text(.launchTitle),
+                    subtitle: model.text(.launchSubtitle),
                     isOn: model.launchAtLogin
                 ) {
                     model.setLaunchAtLogin(!model.launchAtLogin)
@@ -26,25 +26,46 @@ struct SettingsView: View {
                 }
                 SettingsDivider()
                 SettingsRow(
-                    title: "인트로",
-                    subtitle: model.pendingIntroPreview == nil ? "앱을 켤 때 노치 인사" : "노치에서 벗어나면 보여 줘요"
+                    title: model.text(.introTitle),
+                    subtitle: model.pendingIntroPreview == nil ? model.text(.introIdle) : model.text(.introPreview)
                 ) {
-                    IntroDropdown(open: $introMenuOpen)
+                    MenuDropdown(title: model.introStudy.title(in: model.language), open: openMenu == .intro) {
+                        toggle(.intro)
+                    }
+                    .anchorPreference(key: IntroAnchorKey.self, value: .bounds) { $0 }
                 }
                 SettingsDivider()
                 SwitchRow(
-                    title: "화면 가장자리 연출",
-                    subtitle: model.playsScreenEffect ? "작업이 끝나면 화면 테두리까지 빛나요" : "노치 테두리만 빛나요",
+                    title: model.text(.effectTitle),
+                    subtitle: model.playsScreenEffect ? model.text(.effectOn) : model.text(.effectOff),
                     isOn: model.playsScreenEffect
                 ) {
                     model.setPlaysScreenEffect(!model.playsScreenEffect)
                 }
                 SettingsDivider()
+                SwitchRow(
+                    title: model.text(.shelfSideTitle),
+                    subtitle: model.shelfOnLeft ? model.text(.shelfSideOn) : model.text(.shelfSideOff),
+                    isOn: model.shelfOnLeft
+                ) {
+                    model.setShelfOnLeft(!model.shelfOnLeft)
+                }
+                SettingsDivider()
+                SettingsRow(
+                    title: model.text(.languageTitle),
+                    subtitle: model.text(.languageSubtitle)
+                ) {
+                    MenuDropdown(title: model.language.nativeName, open: openMenu == .language) {
+                        toggle(.language)
+                    }
+                    .anchorPreference(key: LanguageAnchorKey.self, value: .bounds) { $0 }
+                }
+                SettingsDivider()
                 ActionRow(
-                    title: "권한 · AI 연결",
+                    title: model.text(.permissionsTitle),
                     subtitle: model.setupStatus.remaining == 0
-                        ? "모두 준비됐어요"
-                        : "\(model.setupStatus.remaining)개가 아직 꺼져 있어요",
+                        ? model.text(.permissionsReady)
+                        : model.text(.permissionsLeft, model.setupStatus.remaining),
                     highlighted: model.setupStatus.remaining > 0
                 ) {
                     model.openSetup()
@@ -67,10 +88,12 @@ struct SettingsView: View {
                 Button {
                     model.openGuide()
                 } label: {
-                    Text("사용방법")
-                        .font(.system(size: 10.5, weight: .medium, design: .rounded))
-                        .underline()
-                        .foregroundStyle(Color.white.opacity(0.5))
+                    LanguageCrossfade(model.text(.guide)) { value in
+                        Text(value)
+                            .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                            .underline()
+                            .foregroundStyle(Color.white.opacity(0.5))
+                    }
                 }
                 .buttonStyle(.plain)
                 Spacer()
@@ -92,36 +115,110 @@ struct SettingsView: View {
             model.setSettingsHeight(height)
         }
         .overlayPreferenceValue(IntroAnchorKey.self) { anchor in
-            GeometryReader { proxy in
-                if introMenuOpen, let anchor {
-                    let button = proxy[anchor]
-                    ZStack(alignment: .topLeading) {
-                        Color.black.opacity(0.001)
-                            .onTapGesture { closeMenu() }
-                        IntroMenu { closeMenu() }
-                            .frame(width: IntroMenu.width)
-                            .offset(x: button.maxX - IntroMenu.width, y: button.maxY + 6)
-                            .transition(
-                                .scale(scale: 0.9, anchor: .topTrailing)
-                                    .combined(with: .opacity)
-                            )
-                    }
-                }
-            }
-            .allowsHitTesting(introMenuOpen)
+            menuLayer(.intro, anchor: anchor, width: IntroMenu.width)
+        }
+        .overlayPreferenceValue(LanguageAnchorKey.self) { anchor in
+            menuLayer(.language, anchor: anchor, width: LanguageMenu.width, upward: true)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
+    private func toggle(_ menu: SettingsMenu) {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+            openMenu = openMenu == menu ? nil : menu
+        }
+    }
+
     private func closeMenu() {
         withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-            introMenuOpen = false
+            openMenu = nil
+        }
+    }
+
+    /// 목록만 덮는다. 설정 화면 전체를 다시 넣으면 같은 화면이 끝없이 겹쳐 앱이 꺼진다.
+    /// `upward`면 버튼 위로 연다. 언어 목록은 아래에 두면 노치 바닥에서 잘린다.
+    private func menuLayer(_ menu: SettingsMenu, anchor: Anchor<CGRect>?, width: CGFloat, upward: Bool = false) -> some View {
+        GeometryReader { proxy in
+            if openMenu == menu, let anchor {
+                let button = proxy[anchor]
+                let y = upward ? button.minY - menuHeight(menu) - 6 : button.maxY + 6
+                ZStack(alignment: .topLeading) {
+                    Color.black.opacity(0.001)
+                        .onTapGesture { closeMenu() }
+                    Group {
+                        switch menu {
+                        case .intro: IntroMenu { closeMenu() }
+                        case .language: LanguageMenu { closeMenu() }
+                        }
+                    }
+                    .frame(width: width)
+                    .offset(x: button.maxX - width, y: y)
+                    .transition(
+                        .scale(scale: 0.9, anchor: upward ? .bottomTrailing : .topTrailing)
+                            .combined(with: .opacity)
+                    )
+                }
+            }
+        }
+        .allowsHitTesting(openMenu == menu)
+    }
+
+    private func menuHeight(_ menu: SettingsMenu) -> CGFloat {
+        switch menu {
+        case .intro: return IntroMenu.height
+        case .language: return LanguageMenu.height
         }
     }
 }
 
+private enum SettingsMenu {
+    case intro
+    case language
+}
+
 enum SettingsLayout {
     static let horizontal: CGFloat = 14
+}
+
+/// 이전 글자와 새 글자를 겹쳐 두고 투명도만 바꾼다. 자리는 움직이지 않는다.
+private struct LanguageCrossfade<Label: View>: View {
+    var text: String
+    @ViewBuilder var label: (String) -> Label
+    @State private var front: String
+    @State private var back: String
+    @State private var showFront = true
+
+    init(_ text: String, @ViewBuilder label: @escaping (String) -> Label) {
+        self.text = text
+        self.label = label
+        _front = State(initialValue: text)
+        _back = State(initialValue: text)
+    }
+
+    var body: some View {
+        // 크기는 지금 글자만 잡는다. 숨은 이전 글자까지 포함하면 업데이트 버튼이 벌어지고 아이콘이 떨어진다.
+        label(text)
+            .opacity(0)
+            .overlay(alignment: .leading) {
+                ZStack(alignment: .leading) {
+                    label(front).opacity(showFront ? 1 : 0)
+                    label(back).opacity(showFront ? 0 : 1)
+                }
+                .fixedSize()
+            }
+            .animation(.easeInOut(duration: 0.2), value: showFront)
+            .animation(.easeInOut(duration: 0.2), value: text)
+        .onChange(of: text) { _, new in
+            let visible = showFront ? front : back
+            guard new != visible else { return }
+            if showFront {
+                back = new
+            } else {
+                front = new
+            }
+            showFront.toggle()
+        }
+    }
 }
 
 struct SettingsHeightKey: PreferenceKey {
@@ -132,6 +229,13 @@ struct SettingsHeightKey: PreferenceKey {
 }
 
 private struct IntroAnchorKey: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = value ?? nextValue()
+    }
+}
+
+private struct LanguageAnchorKey: PreferenceKey {
     static let defaultValue: Anchor<CGRect>? = nil
     static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
         value = value ?? nextValue()
@@ -171,15 +275,19 @@ struct SettingsRow<Trailing: View>: View {
     var body: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(IslandColor.primary)
+                LanguageCrossfade(title) { value in
+                    Text(value)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(IslandColor.primary)
+                        .lineLimit(1)
+                }
                 if let subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(IslandColor.secondary)
-                        .lineLimit(2)
-                        .contentTransition(.opacity)
+                    LanguageCrossfade(subtitle) { value in
+                        Text(value)
+                            .font(.system(size: 11))
+                            .foregroundStyle(IslandColor.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
             Spacer(minLength: 8)
@@ -215,6 +323,7 @@ private struct SwitchRow: View {
 }
 
 private struct ActionRow: View {
+    @Environment(AppModel.self) private var model
     var title: String
     var subtitle: String
     var highlighted = true
@@ -225,8 +334,10 @@ private struct ActionRow: View {
         let tint = highlighted ? IslandColor.warning : IslandColor.secondary
         Button(action: action) {
             SettingsRow(title: title, subtitle: subtitle) {
-                Text("열기")
-                    .font(.system(size: 11.5, weight: .semibold))
+                LanguageCrossfade(model.text(.open)) { value in
+                    Text(value)
+                        .font(.system(size: 11.5, weight: .semibold))
+                }
                     .foregroundStyle(tint)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
@@ -259,21 +370,20 @@ private struct IslandSwitch: View {
 }
 
 /// 누르면 설정 화면 위에 목록이 뜬다. 시스템 메뉴는 밝은 화면 모드에서 검은 판 위에 하얗게 떠서 쓰지 않는다.
-private struct IntroDropdown: View {
-    @Environment(AppModel.self) private var model
-    @Binding var open: Bool
+private struct MenuDropdown: View {
+    var title: String
+    var open: Bool
+    var action: () -> Void
     @State private var hovered = false
 
     var body: some View {
-        Button {
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                open.toggle()
-            }
-        } label: {
+        Button(action: action) {
             HStack(spacing: 5) {
-                Text(model.introStudy.title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(IslandColor.primary)
+                LanguageCrossfade(title) { value in
+                    Text(value)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(IslandColor.primary)
+                }
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 8.5, weight: .bold))
                     .foregroundStyle(IslandColor.secondary)
@@ -285,7 +395,6 @@ private struct IntroDropdown: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .anchorPreference(key: IntroAnchorKey.self, value: .bounds) { $0 }
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.15)) { hovered = hovering }
         }
@@ -294,13 +403,15 @@ private struct IntroDropdown: View {
 
 private struct IntroMenu: View {
     static let width: CGFloat = 132
+    /// 여백 8, 줄 2개, 줄 사이 2.
+    static let height: CGFloat = 8 + 28 * 2 + 2
     @Environment(AppModel.self) private var model
     var onPick: () -> Void
 
     var body: some View {
         VStack(spacing: 2) {
             ForEach(IntroStudy.allCases, id: \.self) { study in
-                IntroMenuItem(study: study, selected: model.introStudy == study) {
+                MenuPick(title: study.title(in: model.language), selected: model.introStudy == study) {
                     model.setIntro(study)
                     onPick()
                 }
@@ -319,8 +430,37 @@ private struct IntroMenu: View {
     }
 }
 
-private struct IntroMenuItem: View {
-    var study: IntroStudy
+private struct LanguageMenu: View {
+    static let width: CGFloat = 132
+    /// 여백 8, 줄 4개, 줄 사이 2가 세 번.
+    static let height: CGFloat = 8 + 28 * 4 + 2 * 3
+    @Environment(AppModel.self) private var model
+    var onPick: () -> Void
+
+    var body: some View {
+        VStack(spacing: 2) {
+            ForEach(AppLanguage.allCases) { language in
+                MenuPick(title: language.nativeName, selected: model.language == language) {
+                    model.setLanguage(language)
+                    onPick()
+                }
+            }
+        }
+        .padding(4)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(white: 0.15))
+                .shadow(color: .black.opacity(0.5), radius: 12, y: 6)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+        )
+    }
+}
+
+private struct MenuPick: View {
+    var title: String
     var selected: Bool
     var action: () -> Void
     @State private var hovered = false
@@ -331,7 +471,7 @@ private struct IntroMenuItem: View {
                 Image(systemName: "checkmark")
                     .font(.system(size: 9.5, weight: .bold))
                     .opacity(selected ? 1 : 0)
-                Text(study.title)
+                Text(title)
                     .font(.system(size: 12.5, weight: .medium))
                 Spacer(minLength: 0)
             }
@@ -351,18 +491,29 @@ private struct IntroMenuItem: View {
 
 /// 받는 동안은 캡슐이 진행만큼 차오른다.
 private struct UpdateButton: View {
+    @Environment(AppModel.self) private var model
     var progress: Double?
     var action: () -> Void
     @State private var hovered = false
 
     var body: some View {
         Button(action: action) {
-            Text(label)
-                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(IslandColor.update)
-                .contentTransition(.numericText())
-                .animation(.snappy(duration: 0.25), value: label)
+            Group {
+                if progress == nil {
+                    LanguageCrossfade(label) { value in
+                        Text(value)
+                            .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                            .foregroundStyle(IslandColor.update)
+                    }
+                } else {
+                    Text(label)
+                        .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(IslandColor.update)
+                        .contentTransition(.numericText())
+                        .animation(.snappy(duration: 0.25), value: label)
+                }
+            }
                 .frame(minWidth: 40)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
@@ -388,13 +539,14 @@ private struct UpdateButton: View {
     }
 
     private var label: String {
-        guard let progress else { return "업데이트" }
-        return progress < 1 ? "\(Int(progress * 100))%" : "설치 중"
+        guard let progress else { return model.text(.update) }
+        return progress < 1 ? "\(Int(progress * 100))%" : model.text(.installing)
     }
 }
 
 /// 새 버전이 없을 때 그 자리에 있는 확인 버튼. 보는 동안 화살표가 돌고, 결과를 잠깐 보여 주고 돌아온다.
 private struct CheckUpdateButton: View {
+    @Environment(AppModel.self) private var model
     var status: AppModel.UpdateCheckStatus?
     var action: () -> Void
     @State private var hovered = false
@@ -403,10 +555,11 @@ private struct CheckUpdateButton: View {
         let lit = hovered && status == nil
         Button(action: action) {
             HStack(spacing: 4) {
-                Text(label)
-                    .font(.system(size: 10.5, weight: .medium))
-                    .contentTransition(.interpolate)
-                    .offset(x: 0.5, y: 0.5)
+                LanguageCrossfade(label) { value in
+                    Text(value)
+                        .font(.system(size: 10.5, weight: .medium))
+                        .offset(x: 0.5, y: 0.5)
+                }
                 icon
                     .font(.system(size: 9, weight: .semibold))
                     .frame(width: 11, height: 11)
@@ -451,10 +604,10 @@ private struct CheckUpdateButton: View {
 
     private var label: String {
         switch status {
-        case nil: "업데이트"
-        case .checking: "확인 중"
-        case .current: "최신 버전"
-        case .failed: "확인 실패"
+        case nil: model.text(.update)
+        case .checking: model.text(.checking)
+        case .current: model.text(.latest)
+        case .failed: model.text(.checkFailed)
         }
     }
 }
@@ -478,8 +631,10 @@ private struct QuitButton: View {
             HStack(spacing: 4) {
                 Image(systemName: "power")
                     .font(.system(size: 9.5, weight: .bold))
-                Text("종료")
-                    .font(.system(size: 11.5, weight: .semibold))
+                LanguageCrossfade(model.text(.quit)) { value in
+                    Text(value)
+                        .font(.system(size: 11.5, weight: .semibold))
+                }
             }
             .foregroundStyle(IslandColor.danger)
             .padding(.horizontal, 10)

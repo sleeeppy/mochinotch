@@ -19,7 +19,7 @@ enum FileDragPhase: Equatable {
     }
 }
 
-enum FileDropTarget: Equatable {
+enum FileDropTarget: Equatable, Hashable {
     case airDrop
     case shelf
 }
@@ -145,21 +145,21 @@ enum AgentOutcome: Equatable {
     case needsInput
     case cancelled
 
-    var shortLabel: String {
+    func shortLabel(in language: AppLanguage) -> String {
         switch self {
-        case .completed: return "완료"
-        case .failed: return "실패"
-        case .needsInput: return "확인"
-        case .cancelled: return "중단"
+        case .completed: return L10n.text(.outcomeDone, language)
+        case .failed: return L10n.text(.outcomeFailed, language)
+        case .needsInput: return L10n.text(.outcomeConfirm, language)
+        case .cancelled: return L10n.text(.outcomeStopped, language)
         }
     }
 
-    var detailLabel: String {
+    func detailLabel(in language: AppLanguage) -> String {
         switch self {
-        case .completed: return "작업 완료"
-        case .failed: return "작업 실패"
-        case .needsInput: return "확인 필요"
-        case .cancelled: return "작업 중단"
+        case .completed: return L10n.text(.taskDone, language)
+        case .failed: return L10n.text(.taskFailed, language)
+        case .needsInput: return L10n.text(.taskConfirm, language)
+        case .cancelled: return L10n.text(.taskStopped, language)
         }
     }
 
@@ -266,6 +266,7 @@ struct IslandActivity: Identifiable, Equatable {
         return 18
     }
 
+    /// 묶음 키와 포커스 판별에 쓰는 이름. 언어가 바뀌어도 그대로다.
     var leadingText: String {
         switch payload {
         case .hint(let title, _):
@@ -287,28 +288,49 @@ struct IslandActivity: Identifiable, Equatable {
         }
     }
 
-    var trailingText: String {
+    func leadingLabel(in language: AppLanguage) -> String {
+        switch payload {
+        case .hint(let title, _):
+            return title
+        case .power(let phase, _):
+            switch phase {
+            case .plugged: return L10n.text(.charge, language)
+            case .unplugged: return L10n.text(.unplug, language)
+            case .full: return L10n.text(.full, language)
+            }
+        case .agent(let tool, _, _, _, _):
+            return tool == .custom ? L10n.text(.task, language) : tool.displayName
+        case .notice(let appName, _, _, _):
+            return appName
+        case .setup:
+            return "もちノッチ"
+        case .update:
+            return L10n.text(.newUpdate, language)
+        }
+    }
+
+    func trailingLabel(in language: AppLanguage) -> String {
         switch payload {
         case .hint, .setup, .update:
             return ""
         case .power(_, let percent):
             return "\(percent)%"
         case .agent(_, let outcome, _, _, _):
-            return outcome.shortLabel
+            return outcome.shortLabel(in: language)
         case .notice:
-            return "알림"
+            return L10n.text(.notice, language)
         }
     }
 
-    var expandedTitle: String {
+    func expandedTitle(in language: AppLanguage) -> String {
         switch payload {
         case .hint(let title, _):
             return title
         case .power(let phase, let percent):
             switch phase {
-            case .plugged: return "충전 중 · \(percent)%"
-            case .unplugged: return "충전기 분리 · \(percent)%"
-            case .full: return "완충 · \(percent)%"
+            case .plugged: return L10n.text(.charging, language, percent)
+            case .unplugged: return L10n.text(.unplugged, language, percent)
+            case .full: return L10n.text(.chargedFull, language, percent)
             }
         case .agent(let tool, _, let title, _, _):
             // 알려진 도구는 앱 이름만. 결과는 아래 줄과 색으로 보인다.
@@ -317,45 +339,53 @@ struct IslandActivity: Identifiable, Equatable {
         case .notice(_, let title, _, _):
             return title
         case .setup(let missing):
-            return "설정할 게 \(missing.count)개 남았어요"
+            return L10n.text(.setupLeft, language, missing.count)
         case .update(let version):
-            return "v\(version)이 나왔어요"
+            return L10n.text(.updateOut, language, version)
         }
     }
 
-    var expandedDetail: String {
+    func expandedDetail(in language: AppLanguage) -> String {
         switch payload {
         case .hint(_, let detail):
-            return detail
+            return isIntro ? L10n.text(.introHint, language) : detail
         case .power(let phase, _):
             switch phase {
-            case .plugged: return "전원이 연결됐어요"
-            case .unplugged: return "배터리로 전환됐어요"
-            case .full: return "배터리가 가득 찼어요"
+            case .plugged: return L10n.text(.powerOn, language)
+            case .unplugged: return L10n.text(.powerBattery, language)
+            case .full: return L10n.text(.batteryFull, language)
             }
         case .agent(_, let outcome, _, let detail, _):
-            if detail.isEmpty {
-                return outcome.detailLabel
-            }
-            if outcome == .completed {
-                return detail
-            }
-            return "\(outcome.detailLabel) · \(detail)"
+            let label = outcome.detailLabel(in: language)
+            if detail.isEmpty { return label }
+            if outcome == .completed { return detail }
+            return "\(label) · \(detail)"
         case .notice(let appName, _, let body, _):
             return body.isEmpty ? appName : body
         case .setup(let missing):
-            return missing.joined(separator: " · ") + " · 눌러서 켜기"
+            let names = missing.map { Self.setupName($0, language) }.joined(separator: " · ")
+            return "\(names) · \(L10n.text(.setupTap, language))"
         case .update:
-            return "눌러서 업데이트"
+            return L10n.text(.tapUpdate, language)
+        }
+    }
+
+    private static func setupName(_ key: String, _ language: AppLanguage) -> String {
+        switch key {
+        case "notifications": return L10n.text(.permNotifications, language)
+        case "accessibility": return L10n.text(.permAccessibility, language)
+        case "screen": return L10n.text(.permScreen, language)
+        case "agents": return L10n.text(.agentsTitle, language)
+        default: return key
         }
     }
 
     /// 완료가 아닌 작업만. 성공은 기본값이라 매번 뱃지를 달지 않는다.
-    var expandedBadge: (label: String, color: Color)? {
-        if isSetupReminder { return ("설정", IslandColor.warning) }
-        if isUpdateNotice { return ("업데이트", IslandColor.update) }
+    func expandedBadge(in language: AppLanguage) -> (label: String, color: Color)? {
+        if isSetupReminder { return (L10n.text(.setupBadge, language), IslandColor.warning) }
+        if isUpdateNotice { return (L10n.text(.updateBadge, language), IslandColor.update) }
         guard case .agent(_, let outcome, _, _, _) = payload, outcome != .completed else { return nil }
-        return (outcome.shortLabel, outcome.tint)
+        return (outcome.shortLabel(in: language), outcome.tint)
     }
 
     var symbol: String {
