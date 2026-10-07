@@ -76,8 +76,11 @@ final class AppModel {
         guard let updateProgress else { return nil }
         return updateProgress < 1 ? "받는 중 · \(Int(updateProgress * 100))%" : "설치 준비 중"
     }
+    /// 설정에서 직접 누른 업데이트 확인의 결과. 잠깐 보여 주고 지운다.
+    private(set) var updateCheckStatus: UpdateCheckStatus?
+    private var updateCheckStatusReset: Task<Void, Never>?
     private var latestRelease: AppUpdater.Release?
-    private var checkedForUpdate = false
+    private var lastUpdateCheck: Date?
     private var updateCheck: Task<Void, Never>?
     /// 켜질 때 인사가 끝나기 전에는 업데이트 알림을 띄우지 않는다.
     private var awaitingLaunchIntro = true
@@ -109,6 +112,17 @@ final class AppModel {
     private(set) var shelf: [ShelfItem] = []
     /// 맡긴 파일 위에 마우스가 있어 부채꼴로 벌어진 상태.
     private(set) var shelfOpen = false
+    /// 벌어진 채로 ⌘를 누르고 있으면 어느 사진을 끌어도 전부 꺼낸다.
+    private(set) var shelfGrabsAll = false
+    private var shelfModifierTimer: Timer?
+    var shelfFull: Bool { shelf.count >= ShelfLayout.maxCards }
+    /// 끌고 온 파일 중 맡기기에 새로 들어갈 개수. 끌기가 시작될 때 센다.
+    private(set) var incomingFileCount = 0
+    var shelfOverflowing: Bool { incomingFileCount > ShelfLayout.maxCards - shelf.count }
+    /// 세 개를 넘겨 다 받지 못했을 때. 맡긴 사진이 고개를 젓고 아래에 안내가 잠깐 뜬다.
+    private(set) var shelfRefusalToken = 0
+    private(set) var shelfRefusalShowing = false
+    private var shelfRefusalTask: Task<Void, Never>?
     private var clearTask: Task<Void, Never>?
     /// 지우기 직후 높이를 잠깐 유지한다. 글자가 사라진 뒤에 모양이 따라 줄어든다.
     private var frozenRows: Int?
@@ -241,7 +255,8 @@ final class AppModel {
             self?.updateFileDrag(at: point)
         }
         controller.canDropFiles = { [weak self] in
-            self?.fileDrag != nil
+            guard let self, let fileDrag = self.fileDrag else { return false }
+            return fileDrag.target != .shelf || !self.shelfFull
         }
         controller.onDropFiles = { [weak self] urls in
             self?.dropFiles(urls) ?? false
@@ -296,6 +311,17 @@ final class AppModel {
         Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.checkForUpdate(scheduled: true)
+            }
+        }
+        // 잠자는 동안은 한 시간 시계도 멈춘다. 뚜껑을 덮었다 여는 노트북은 깨어날 때 본다. 망이 붙을 틈을 둔다.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(8))
+                self?.checkForUpdate()
             }
         }
         Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
@@ -577,17 +603,19 @@ final class AppModel {
         NSWorkspace.shared.open(url)
     }
 
-    /// 최신 릴리즈 태그만 본다. 켜질 때 한 번, 그 뒤엔 한 시간마다.
+    /// 최신 릴리즈 태그만 본다. 켜질 때, 한 시간마다, 깨어날 때. 설정을 열 때는 10분이 지났으면 다시 본다.
     /// 실패하면 다음 설정 열기 때 다시 본다. 같은 버전 알림은 한 번만 뜬다.
     func checkForUpdate(scheduled: Bool = false) {
-        if !scheduled, checkedForUpdate { return }
+        if !scheduled, let lastUpdateCheck, Date().timeIntervalSince(lastUpdateCheck) < 10 * 60 { return }
         guard updateCheck == nil else { return }
-        checkedForUpdate = true
+        lastUpdateCheck = Date()
         let local = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
         updateCheck = Task { @MainActor [weak self] in
             guard let self else { return }
             defer { self.updateCheck = nil }
-            switch await Self.githubUpdateAvailable(local: local) {
+            let started = Date()
+            let result = await Self.githubUpdateAvailable(local: local)
+            switch result {
             case .newer(let release):
                 self.latestRelease = release
                 self.updateAvailable = true
@@ -595,9 +623,45 @@ final class AppModel {
             case .current:
                 self.updateAvailable = false
             case .failed:
-                self.checkedForUpdate = false
+                self.lastUpdateCheck = nil
+            }
+            guard self.updateCheckStatus == .checking else { return }
+            // 바로 답이 오면 "확인 중"이 깜빡이고 지나가서 눌린 줄 모른다.
+            let shown = Date().timeIntervalSince(started)
+            if shown < 0.6 {
+                try? await Task.sleep(for: .seconds(0.6 - shown))
+            }
+            switch result {
+            case .newer: self.showUpdateCheckStatus(nil)
+            case .current: self.showUpdateCheckStatus(.current)
+            case .failed: self.showUpdateCheckStatus(.failed)
             }
         }
+    }
+
+    /// 설정의 "업데이트 확인". 시간 간격과 상관없이 바로 본다.
+    func checkForUpdateNow() {
+        guard !installingUpdate, updateCheckStatus != .checking else { return }
+        updateCheckStatusReset?.cancel()
+        updateCheckStatus = .checking
+        checkForUpdate(scheduled: true)
+    }
+
+    private func showUpdateCheckStatus(_ status: UpdateCheckStatus?) {
+        updateCheckStatus = status
+        guard status != nil else { return }
+        updateCheckStatusReset?.cancel()
+        updateCheckStatusReset = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2.4))
+            guard !Task.isCancelled else { return }
+            self?.updateCheckStatus = nil
+        }
+    }
+
+    enum UpdateCheckStatus: Equatable {
+        case checking
+        case current
+        case failed
     }
 
     private static let announcedUpdateKey = "announcedUpdateVersion"
@@ -610,7 +674,7 @@ final class AppModel {
 
     private static func githubUpdateAvailable(local: String) async -> UpdateCheck {
         guard let url = URL(string: "https://api.github.com/repos/sleeeppy/mochinotch/releases/latest") else { return .failed }
-        var request = URLRequest(url: url, timeoutInterval: 5)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 5)
         request.setValue("Mochinotch", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         guard let (data, response) = try? await URLSession.shared.data(for: request),
@@ -1279,11 +1343,13 @@ final class AppModel {
             guard let self, !Task.isCancelled else { return }
             let hasHistory = self.activities.contains { !$0.isSetupReminder }
             if quietOnly, hasHistory || self.presentation != .idle || self.isHovering {
+                self.introTask = nil
                 self.presentSetupIfPending()
                 self.finishLaunchIntro()
                 return
             }
             if self.isHovering {
+                self.introTask = nil
                 if quietOnly { self.finishLaunchIntro() }
                 return
             }
@@ -1375,10 +1441,20 @@ final class AppModel {
         if fold {
             setPresentation(.idle)
         }
+        // 설정에서 인트로를 미리 보는 사이에 찾은 업데이트도 끝나면 띄운다.
+        if !awaitingLaunchIntro, pendingUpdateVersion != nil {
+            Task { @MainActor [weak self] in
+                guard let self, self.introTask == nil, !self.introDirect,
+                      let version = self.pendingUpdateVersion else { return }
+                self.pendingUpdateVersion = nil
+                self.presentUpdateNotice(version)
+            }
+        }
     }
 
     private func cancelIntro() {
-        let interruptedLaunch = awaitingLaunchIntro && introDirect
+        // 켜고 인사가 시작되기 전 잠깐 사이에 알림이 와도 끊긴 것이다. 놓치면 업데이트 알림이 계속 미뤄진다.
+        let interruptedLaunch = awaitingLaunchIntro && (introDirect || introTask != nil)
         introTask?.cancel()
         finishIntro(fold: false)
         stopIslandGlow()
@@ -1566,6 +1642,10 @@ final class AppModel {
     private func updateFileDrag(at point: CGPoint?) {
         guard let point else {
             guard fileDrag != nil else { return }
+            // 꽉 찬 맡기기에는 놓기 자체가 오지 않는다. 그 위에서 손을 뗐으면 못 받은 것이다.
+            if fileDrag?.target == .shelf, shelfFull {
+                refuseShelf()
+            }
             // 손을 떼는 순간 접으면, 놓기가 노치에 닿기 전에 창이 클릭을 흘려보낸다.
             let settle = fileDrag?.target != nil
             fileDragEndTask?.cancel()
@@ -1595,6 +1675,11 @@ final class AppModel {
         guard fileDrag != phase else { return }
         if fileDrag == nil {
             hoverTask?.cancel()
+            let urls = NSPasteboard(name: .drag).readObjects(
+                forClasses: [NSURL.self],
+                options: [.urlReadingFileURLsOnly: true]
+            ) as? [URL] ?? []
+            incomingFileCount = urls.filter { url in !shelf.contains { $0.url == url } }.count
         }
         fileDrag = phase
         panel?.updateMouse()
@@ -1613,15 +1698,40 @@ final class AppModel {
         }
     }
 
+    /// 세 개까지만 맡는다. 넘치게 놓으면 앞에서부터 들어갈 만큼만 받고, 꽉 차 있으면 받지 않아 제자리로 돌아간다.
     private func addToShelf(_ files: [URL]) -> Bool {
         let fresh = files.filter { url in !shelf.contains { $0.url == url } }
-        let items = fresh.map { ShelfItem(url: $0) }
+        guard !fresh.isEmpty else { return true }
+        let room = ShelfLayout.maxCards - shelf.count
+        if fresh.count > room {
+            refuseShelf()
+        }
+        guard room > 0 else { return false }
+        let items = fresh.prefix(room).map { ShelfItem(url: $0) }
         withAnimation(.spring(response: 0.42, dampingFraction: 0.62)) {
             shelf.append(contentsOf: items)
         }
         items.forEach(loadThumbnail)
         panel?.updateMouse()
         return true
+    }
+
+    /// 놓을 자리가 접히고 맡긴 사진이 다시 나온 뒤에 고개를 젓는다.
+    private func refuseShelf() {
+        shelfRefusalTask?.cancel()
+        shelfRefusalTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(450))
+            guard let self, !Task.isCancelled else { return }
+            self.shelfRefusalToken += 1
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+                self.shelfRefusalShowing = true
+            }
+            try? await Task.sleep(for: .seconds(2.4))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.25)) {
+                self.shelfRefusalShowing = false
+            }
+        }
     }
 
     private func loadThumbnail(for item: ShelfItem) {
@@ -1640,8 +1750,9 @@ final class AppModel {
         }
     }
 
-    /// 맡긴 파일을 노치 밖으로 끌어낸다. 다른 앱이 받으면 노치에서 뺀다.
+    /// 맡긴 파일을 노치 밖으로 끌어낸다. 다른 앱이 받으면 노치에서 뺀다. ⌘를 누르고 끌면 전부 꺼낸다.
     func dragFromShelf(_ ids: [ShelfItem.ID]) {
+        let ids = NSEvent.modifierFlags.contains(.command) ? shelf.map(\.id) : ids
         let items = shelf.filter { ids.contains($0.id) }
         guard !items.isEmpty else { return }
         panel?.dragOut(items.map(\.url), images: items.map(\.thumbnail)) { [weak self] delivered in
@@ -1669,6 +1780,29 @@ final class AppModel {
         }
         withAnimation(.spring(response: 0.34, dampingFraction: 0.66)) {
             shelfOpen = open
+        }
+        // ⌘만 누르고 떼는 건 마우스 이벤트로 오지 않는다. 벌어져 있는 동안만 들여다본다.
+        shelfModifierTimer?.invalidate()
+        shelfModifierTimer = nil
+        if open {
+            let timer = Timer(timeInterval: 0.06, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.syncShelfGrabsAll() }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            shelfModifierTimer = timer
+        }
+        syncShelfGrabsAll()
+    }
+
+    private func syncShelfGrabsAll() {
+        if !shelfOpen {
+            shelfModifierTimer?.invalidate()
+            shelfModifierTimer = nil
+        }
+        let grabsAll = shelfOpen && shelf.count > 1 && NSEvent.modifierFlags.contains(.command)
+        guard shelfGrabsAll != grabsAll else { return }
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.7)) {
+            shelfGrabsAll = grabsAll
         }
     }
 

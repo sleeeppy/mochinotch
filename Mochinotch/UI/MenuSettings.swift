@@ -59,6 +59,10 @@ struct SettingsView: View {
                     UpdateButton(progress: model.updateProgress) {
                         model.openUpdate()
                     }
+                } else {
+                    CheckUpdateButton(status: model.updateCheckStatus) {
+                        model.checkForUpdateNow()
+                    }
                 }
                 Button {
                     model.openGuide()
@@ -386,6 +390,80 @@ private struct UpdateButton: View {
     private var label: String {
         guard let progress else { return "업데이트" }
         return progress < 1 ? "\(Int(progress * 100))%" : "설치 중"
+    }
+}
+
+/// 새 버전이 없을 때 그 자리에 있는 확인 버튼. 보는 동안 화살표가 돌고, 결과를 잠깐 보여 주고 돌아온다.
+private struct CheckUpdateButton: View {
+    var status: AppModel.UpdateCheckStatus?
+    var action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        let lit = hovered && status == nil
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(label)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .contentTransition(.interpolate)
+                    .offset(x: 0.5, y: 0.5)
+                icon
+                    .font(.system(size: 9, weight: .semibold))
+                    .frame(width: 11, height: 11)
+            }
+            .foregroundStyle(Color.white.opacity(lit ? 0.8 : 0.68))
+            // 둥근 아이콘은 글자보다 가장자리가 비어 보여서 오른쪽을 덜 띄운다.
+            .padding(.leading, 9)
+            .padding(.trailing, 7.5)
+            .padding(.vertical, 3.5)
+            .background(Capsule().fill(Color.white.opacity(lit ? 0.11 : 0.075)))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.05), lineWidth: 0.5))
+            .animation(.spring(response: 0.32, dampingFraction: 0.8), value: status)
+        }
+        .buttonStyle(PressableButtonStyle())
+        .disabled(status != nil)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.15)) { hovered = hovering }
+        }
+    }
+
+    private var icon: some View {
+        ZStack {
+            switch status {
+            case .checking:
+                TimelineView(.animation) { context in
+                    Image(systemName: "arrow.counterclockwise")
+                        .rotationEffect(.degrees(-(context.date.timeIntervalSinceReferenceDate * 400).truncatingRemainder(dividingBy: 360)))
+                }
+                .transition(.opacity)
+            case .current:
+                Image(systemName: "checkmark")
+                    .transition(.scale(scale: 0.5).combined(with: .opacity))
+            case .failed:
+                Image(systemName: "exclamationmark")
+                    .transition(.scale(scale: 0.5).combined(with: .opacity))
+            case nil:
+                Image(systemName: "arrow.counterclockwise")
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    private var label: String {
+        switch status {
+        case nil: "업데이트"
+        case .checking: "확인 중"
+        case .current: "최신 버전"
+        case .failed: "확인 실패"
+        }
+    }
+}
+
+private struct PressableButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .animation(.spring(response: 0.22, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }
 

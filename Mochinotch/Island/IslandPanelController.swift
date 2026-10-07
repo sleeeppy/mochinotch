@@ -274,6 +274,9 @@ private final class FileDragSource: NSObject, NSDraggingSource {
         context == .outsideApplication ? .copy : []
     }
 
+    /// ⌘를 누른 채 꺼내면 시스템이 이동으로 바꿔 복사만 받는 놓기가 막힌다.
+    func ignoreModifierKeys(for session: NSDraggingSession) -> Bool { true }
+
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
         ended?(operation != [])
         ended = nil

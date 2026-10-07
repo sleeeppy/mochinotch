@@ -105,7 +105,7 @@ private struct ShelfTuck: View {
         ZStack(alignment: .top) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 let slot = min(items.count - 1 - index, Self.fan.count - 1)
-                ShelfCard(item: item)
+                ShelfCard(item: item, grabbed: model.shelfGrabsAll)
                     .rotationEffect(.degrees(Self.fan[slot].angle * (open ? 1.6 : 1)))
                     .offset(x: Self.fan[slot].x * spread)
                     .gesture(drag([item.id]))
@@ -115,17 +115,31 @@ private struct ShelfTuck: View {
                     .offset(x: card / 2 + right + (open ? 10 : 2), y: badgeY)
                     .gesture(drag(model.shelf.map(\.id)))
             }
-            Button {
-                model.clearShelf()
-            } label: {
-                ShelfBadge(systemImage: "xmark")
-            }
-            .buttonStyle(.plain)
-            .offset(x: -(card / 2 + left + 10), y: badgeY)
+            ShelfClearButton()
+                .offset(x: -(card / 2 + left + 10), y: badgeY)
             .opacity(open ? 1 : 0)
             .allowsHitTesting(open)
         }
+        .keyframeAnimator(initialValue: Shake(), trigger: model.shelfRefusalToken) { content, value in
+            content.offset(x: value.x)
+        } keyframes: { _ in
+            KeyframeTrack(\.x) {
+                CubicKeyframe(6.0, duration: 0.07)
+                CubicKeyframe(-5.0, duration: 0.08)
+                CubicKeyframe(3.5, duration: 0.07)
+                CubicKeyframe(-2.0, duration: 0.07)
+                CubicKeyframe(0.0, duration: 0.1)
+            }
+        }
         .frame(width: ShelfLayout.card, height: ShelfLayout.card)
+        .overlay(alignment: .bottom) {
+            if visible && model.shelfRefusalShowing {
+                ShelfLimitToast()
+                    .fixedSize()
+                    .offset(y: 30)
+                    .transition(.offset(y: -6).combined(with: .opacity))
+            }
+        }
         .padding(.top, model.metrics.height - ShelfLayout.card + reach)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .opacity(visible ? 1 : 0)
@@ -140,8 +154,46 @@ private struct ShelfTuck: View {
     }
 }
 
+/// 맡긴 파일을 한 번에 비운다. 올리면 빨갛게 바뀌어 지운다는 걸 먼저 알린다.
+private struct ShelfClearButton: View {
+    @Environment(AppModel.self) private var model
+    @State private var hovered = false
+
+    var body: some View {
+        Button {
+            model.clearShelf()
+        } label: {
+            ShelfBadge(systemImage: "xmark", fill: hovered ? IslandColor.danger : IslandColor.plate)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.15)) { hovered = hovering }
+        }
+    }
+}
+
+private struct ShelfLimitToast: View {
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(IslandColor.warning)
+            Text("최대 \(ShelfLayout.maxCards)개까지만 맡길 수 있어요")
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(IslandColor.primary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(IslandColor.plate))
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.3), radius: 6, y: 2)
+    }
+}
+
 private struct ShelfCard: View {
     let item: ShelfItem
+    /// ⌘를 눌러 같이 끌려 나갈 사진은 테두리가 맡기기 색으로 바뀐다.
+    var grabbed = false
 
     var body: some View {
         let inner = ShelfLayout.card - 4
@@ -159,8 +211,9 @@ private struct ShelfCard: View {
         .frame(width: inner, height: inner)
         .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
         .padding(2)
-        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(.white))
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(grabbed ? IslandColor.shelf : .white))
         .shadow(color: .black.opacity(0.28), radius: 2.5, y: 1)
+        .scaleEffect(grabbed ? 1.06 : 1)
         .contentShape(Rectangle())
     }
 }
@@ -168,6 +221,7 @@ private struct ShelfCard: View {
 private struct ShelfBadge: View {
     var text: String?
     var systemImage: String?
+    var fill: Color = IslandColor.plate
 
     var body: some View {
         Group {
@@ -183,7 +237,7 @@ private struct ShelfBadge: View {
         .foregroundStyle(.white)
         .frame(minWidth: 16, minHeight: 16)
         .padding(.horizontal, text.map { $0.count > 1 ? 3 : 0 } ?? 0)
-        .background(Capsule().fill(IslandColor.plate))
+        .background(Capsule().fill(fill))
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
         .contentShape(Capsule())
     }
@@ -728,6 +782,7 @@ private struct DropZoneContent: View {
     @Environment(AppModel.self) private var model
     let metrics: IslandMetrics
     let target: FileDropTarget?
+    @State private var refusals = 0
 
     private static let airDropIcon = NSSharingService(named: .sendViaAirDrop)?.image
 
@@ -746,47 +801,100 @@ private struct DropZoneContent: View {
                     }
                 }
                 .frame(width: half, height: boxHeight)
-                slot(.shelf, title: "맡기기", idle: "노치에 잠깐 넣어 둬요", armed: "놓으면 노치에 맡겨요") {
+                slot(
+                    .shelf,
+                    title: "맡기기",
+                    count: model.shelf.isEmpty || model.shelfFull ? nil : "\(model.shelf.count)/\(ShelfLayout.maxCards)",
+                    idle: shelfIdle,
+                    armed: shelfArmed,
+                    blocked: model.shelfFull,
+                    warns: model.shelfFull || model.shelfOverflowing
+                ) {
                     ZStack {
-                        Circle().fill(IslandColor.shelf)
-                        Image(systemName: "tray.and.arrow.down.fill")
+                        Circle().fill(model.shelfFull ? IslandColor.warning : IslandColor.shelf)
+                        Image(systemName: model.shelfFull ? "tray.full.fill" : "tray.and.arrow.down.fill")
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(.white)
+                            .contentTransition(.symbolEffect(.replace))
+                    }
+                }
+                .keyframeAnimator(initialValue: Shake(), trigger: refusals) { content, value in
+                    content.offset(x: value.x)
+                } keyframes: { _ in
+                    KeyframeTrack(\.x) {
+                        CubicKeyframe(7.0, duration: 0.07)
+                        CubicKeyframe(-6.0, duration: 0.08)
+                        CubicKeyframe(4.0, duration: 0.07)
+                        CubicKeyframe(-2.0, duration: 0.07)
+                        CubicKeyframe(0.0, duration: 0.1)
                     }
                 }
                 .frame(width: half, height: boxHeight)
             }
         }
         .animation(.spring(response: 0.34, dampingFraction: 0.82), value: target)
+        .onChange(of: target) { _, target in
+            // 꽉 찬 칸에 들어서는 순간 고개를 젓고 트랙패드로도 한 번 툭 알린다.
+            guard target == .shelf, model.shelfFull else { return }
+            refusals += 1
+            NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
+        }
     }
 
+    private var shelfIdle: String {
+        let room = ShelfLayout.maxCards - model.shelf.count
+        if model.shelf.isEmpty { return "노치에 잠깐 넣어 둬요" }
+        return room > 0 ? "\(room)개 더 맡길 수 있어요" : "꽉 찼어요 (\(model.shelf.count)/\(ShelfLayout.maxCards))"
+    }
+
+    private var shelfArmed: String {
+        let room = ShelfLayout.maxCards - model.shelf.count
+        if room <= 0 { return "최대 \(ShelfLayout.maxCards)개까지만 맡길 수 있어요" }
+        if model.shelfOverflowing { return "\(room)개만 들어가요 · 최대 \(ShelfLayout.maxCards)개" }
+        return "놓으면 노치에 맡겨요"
+    }
+
+    /// `blocked`면 놓아도 받지 않는다. `warns`면 위에 올렸을 때 다 받지 못한다고 주황으로 알린다.
     private func slot(
         _ slot: FileDropTarget,
         title: String,
+        count: String? = nil,
         idle: String,
         armed: String,
+        blocked: Bool = false,
+        warns: Bool = false,
         @ViewBuilder icon: () -> some View
     ) -> some View {
-        let active = target == slot
-        let dimmed = target != nil && !active
-        let tint = slot == .airDrop ? IslandColor.airDrop : IslandColor.shelf
+        let hovered = target == slot
+        let warning = hovered && warns
+        let active = hovered && !blocked
+        let lit = active || warning
+        let dimmed = target != nil && !hovered
+        let tint = warning ? IslandColor.warning : slot == .airDrop ? IslandColor.airDrop : IslandColor.shelf
         return ZStack {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(tint.opacity(active ? 0.16 : 0))
+                .fill(tint.opacity(lit ? 0.16 : 0))
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(active ? tint : Color.white.opacity(0.28), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                .strokeBorder(lit ? tint : Color.white.opacity(0.28), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
             VStack(spacing: 6) {
                 icon()
                     .frame(width: 36, height: 36)
-                    .scaleEffect(active ? 1.1 : 1)
+                    .scaleEffect(active && !warning ? 1.1 : 1)
                 VStack(spacing: 2) {
-                    Text(title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(IslandColor.primary)
+                    HStack(spacing: 4) {
+                        Text(title)
+                            .foregroundStyle(IslandColor.primary)
+                        if let count {
+                            Text(count)
+                                .monospacedDigit()
+                                .foregroundStyle(warning ? IslandColor.warning : IslandColor.secondary)
+                        }
+                    }
+                    .font(.system(size: 13, weight: .semibold))
                     // 같은 자리에서 겹쳐 바래면 두 줄이 포개져 읽히지 않는다. 위로 밀어 올리며 바꾼다.
                     ZStack {
-                        Text(active ? armed : idle)
-                            .id(active)
+                        Text(hovered ? armed : idle)
+                            .id(hovered)
                             .transition(
                                 .asymmetric(
                                     insertion: .offset(y: 8).combined(with: .opacity),
@@ -794,8 +902,8 @@ private struct DropZoneContent: View {
                                 )
                             )
                     }
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(IslandColor.secondary)
+                    .font(.system(size: 10.5, weight: warning ? .semibold : .medium))
+                    .foregroundStyle(warning ? IslandColor.warning : IslandColor.secondary)
                     .frame(height: 14)
                     .clipped()
                 }
