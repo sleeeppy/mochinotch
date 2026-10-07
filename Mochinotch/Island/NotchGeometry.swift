@@ -58,6 +58,18 @@ enum NotchGeometry {
     }
 }
 
+/// 노치 아래로 삐져나온 맡긴 파일. 사진 위쪽은 노치 뒤에 숨고 아랫단만 보인다.
+enum ShelfLayout {
+    static let card: CGFloat = 40
+    /// 평소에 노치 아래로 나온 길이.
+    static let peek: CGFloat = 11
+    /// 마우스를 올려 벌렸을 때 나온 길이.
+    static let openPeek: CGFloat = 38
+    static let restWidth: CGFloat = 104
+    static let openWidth: CGFloat = 200
+    static let maxCards = 3
+}
+
 enum IslandChrome: Equatable {
     case fill
     /// 접힌 노치가 오른쪽으로만 조금 늘어나 알림 앱 아이콘을 보여 준다.

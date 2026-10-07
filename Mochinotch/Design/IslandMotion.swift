@@ -309,6 +309,7 @@ enum IslandColor {
     /// 업데이트 알림. 경고보다 조금 더 주황이다.
     static let update = Color(red: 1.0, green: 0.52, blue: 0.22)
     static let airDrop = Color(red: 0.04, green: 0.52, blue: 1.0)
+    static let shelf = Color(red: 0.98, green: 0.55, blue: 0.67)
     static let claude = Color(red: 0.855, green: 0.467, blue: 0.341)
     static let cursor = Color(red: 0.486, green: 0.361, blue: 0.988)
     static let codex = Color(red: 0.133, green: 0.773, blue: 0.369)

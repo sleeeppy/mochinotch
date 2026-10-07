@@ -8,7 +8,11 @@ struct IslandRootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        plate(metrics: model.metrics, reduceMotion: reduceMotion)
+        // 맡긴 파일은 판 뒤에 깔아서 사진 위쪽이 노치에 물린 것처럼 보이게 한다.
+        ZStack(alignment: .top) {
+            ShelfTuck()
+            plate(metrics: model.metrics, reduceMotion: reduceMotion)
+        }
     }
 
     /// 창은 고정이고, 모양은 그 안 위 가운데에 붙어 자란다. 글자는 최종 크기로 먼저 놓이고 모양이 그걸 드러낸다.
@@ -75,6 +79,113 @@ struct IslandRootView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+/// 노치 아래로 삐져나온 맡긴 파일. 마우스를 올리면 더 내려와 부채꼴로 벌어지고, 사진마다 끌어낼 수 있다.
+private struct ShelfTuck: View {
+    @Environment(AppModel.self) private var model
+
+    /// 맨 앞 사진부터. 뒤로 갈수록 좌우로 어긋나 겹친다.
+    private static let fan: [(x: CGFloat, angle: Double)] = [(0, -3), (-9, -10), (9, 8)]
+
+    var body: some View {
+        let visible = model.shelfVisible
+        let open = visible && model.shelfOpen
+        let items = Array(model.shelf.suffix(ShelfLayout.maxCards))
+        // 숨을 때는 노치 안으로 쏙 들어가고, 나타날 때 아래로 빠져나온다.
+        let reach = visible ? (open ? ShelfLayout.openPeek : ShelfLayout.peek) : -4
+        let spread: CGFloat = open ? 2.6 : 1
+        let card = ShelfLayout.card
+        // 배지는 보이는 아랫단에 걸치고, 벌리면 사진 옆 가운데로 내려온다.
+        let badgeY = open ? card / 2 - 6 : card - reach / 2 - 6
+        let left = items.count > 1 ? -Self.fan[1].x * spread : 0
+        let right = items.count > 2 ? Self.fan[2].x * spread : 0
+
+        ZStack(alignment: .top) {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                let slot = min(items.count - 1 - index, Self.fan.count - 1)
+                ShelfCard(item: item)
+                    .rotationEffect(.degrees(Self.fan[slot].angle * (open ? 1.6 : 1)))
+                    .offset(x: Self.fan[slot].x * spread)
+                    .gesture(drag([item.id]))
+            }
+            if model.shelf.count > 1 {
+                ShelfBadge(text: "\(model.shelf.count)")
+                    .offset(x: card / 2 + right + (open ? 10 : 2), y: badgeY)
+                    .gesture(drag(model.shelf.map(\.id)))
+            }
+            Button {
+                model.clearShelf()
+            } label: {
+                ShelfBadge(systemImage: "xmark")
+            }
+            .buttonStyle(.plain)
+            .offset(x: -(card / 2 + left + 10), y: badgeY)
+            .opacity(open ? 1 : 0)
+            .allowsHitTesting(open)
+        }
+        .frame(width: ShelfLayout.card, height: ShelfLayout.card)
+        .padding(.top, model.metrics.height - ShelfLayout.card + reach)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .opacity(visible ? 1 : 0)
+        .animation(.spring(response: 0.34, dampingFraction: 0.66), value: open)
+        .animation(.spring(response: 0.42, dampingFraction: 0.72), value: visible)
+    }
+
+    private func drag(_ ids: [ShelfItem.ID]) -> some Gesture {
+        DragGesture(minimumDistance: 3).onChanged { _ in
+            model.dragFromShelf(ids)
+        }
+    }
+}
+
+private struct ShelfCard: View {
+    let item: ShelfItem
+
+    var body: some View {
+        let inner = ShelfLayout.card - 4
+        Group {
+            if let thumbnail = item.thumbnail {
+                Image(nsImage: thumbnail)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: item.url.path))
+                    .resizable()
+                    .padding(3)
+            }
+        }
+        .frame(width: inner, height: inner)
+        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(.white))
+        .shadow(color: .black.opacity(0.28), radius: 2.5, y: 1)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct ShelfBadge: View {
+    var text: String?
+    var systemImage: String?
+
+    var body: some View {
+        Group {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 7.5, weight: .heavy))
+            } else if let text {
+                Text(text)
+                    .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+            }
+        }
+        .foregroundStyle(.white)
+        .frame(minWidth: 16, minHeight: 16)
+        .padding(.horizontal, text.map { $0.count > 1 ? 3 : 0 } ?? 0)
+        .background(Capsule().fill(IslandColor.plate))
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+        .contentShape(Capsule())
     }
 }
 
@@ -580,7 +691,7 @@ private struct IslandFace: View {
         ZStack(alignment: .top) {
             if let drag = model.fileDrag {
                 // 놓을 자리는 판을 따라 같이 부푼다. 목표 크기로 그리면 점선만 먼저 튀어 나간다.
-                DropZoneContent(metrics: shape, targeted: drag == .over)
+                DropZoneContent(metrics: shape, target: drag.target)
                     .frame(width: shape.width, height: shape.height, alignment: .top)
                     .transition(IslandMotion.contentTransition)
             } else {
@@ -612,64 +723,86 @@ private struct IslandFace: View {
     }
 }
 
-/// 파일을 끌고 노치에 다가오면 보이는 놓을 자리.
+/// 파일을 끌고 노치에 다가오면 보이는 놓을 자리. 왼쪽은 AirDrop, 오른쪽은 맡기기.
 private struct DropZoneContent: View {
     @Environment(AppModel.self) private var model
     let metrics: IslandMetrics
-    let targeted: Bool
+    let target: FileDropTarget?
 
-    private static let icon = NSSharingService(named: .sendViaAirDrop)?.image
+    private static let airDropIcon = NSSharingService(named: .sendViaAirDrop)?.image
 
     var body: some View {
         let topInset = model.notch.hasNotch ? model.notch.anchorHeight : 6
-        let tint = targeted ? IslandColor.airDrop : Color.white.opacity(0.28)
         // 판이 부푸는 동안 매 프레임 크기가 바뀐다. 다 자라기 전에는 음수가 될 수 있다.
         let boxWidth = max(0, metrics.width - (metrics.shoulder + 8) * 2)
         let boxHeight = max(0, metrics.height - topInset - 14)
+        let half = max(0, (boxWidth - 8) / 2)
         VStack(spacing: 0) {
             Color.clear.frame(height: topInset + 4)
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(IslandColor.airDrop.opacity(targeted ? 0.16 : 0))
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(tint, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
-                label
-                    .fixedSize()
+            HStack(spacing: 8) {
+                slot(.airDrop, title: "AirDrop", idle: "여기에 놓으면 보내요", armed: "놓으면 기기를 골라요") {
+                    if let icon = Self.airDropIcon {
+                        Image(nsImage: icon).resizable()
+                    }
+                }
+                .frame(width: half, height: boxHeight)
+                slot(.shelf, title: "맡기기", idle: "노치에 잠깐 넣어 둬요", armed: "놓으면 노치에 맡겨요") {
+                    ZStack {
+                        Circle().fill(IslandColor.shelf)
+                        Image(systemName: "tray.and.arrow.down.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                .frame(width: half, height: boxHeight)
             }
-            .frame(width: boxWidth, height: boxHeight)
         }
-        .animation(.spring(response: 0.34, dampingFraction: 0.82), value: targeted)
+        .animation(.spring(response: 0.34, dampingFraction: 0.82), value: target)
     }
 
-    private var label: some View {
-        VStack(spacing: 6) {
-            if let icon = Self.icon {
-                Image(nsImage: icon)
-                    .resizable()
-                    .frame(width: 40, height: 40)
-                    .scaleEffect(targeted ? 1.1 : 1)
-            }
-            VStack(spacing: 2) {
-                Text("AirDrop")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(IslandColor.primary)
-                // 같은 자리에서 겹쳐 바래면 두 줄이 포개져 읽히지 않는다. 위로 밀어 올리며 바꾼다.
-                ZStack {
-                    Text(targeted ? "놓으면 보낼 기기를 골라요" : "여기에 끌어다 놓기")
-                        .id(targeted)
-                        .transition(
-                            .asymmetric(
-                                insertion: .offset(y: 8).combined(with: .opacity),
-                                removal: .offset(y: -8).combined(with: .opacity)
+    private func slot(
+        _ slot: FileDropTarget,
+        title: String,
+        idle: String,
+        armed: String,
+        @ViewBuilder icon: () -> some View
+    ) -> some View {
+        let active = target == slot
+        let dimmed = target != nil && !active
+        let tint = slot == .airDrop ? IslandColor.airDrop : IslandColor.shelf
+        return ZStack {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(tint.opacity(active ? 0.16 : 0))
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(active ? tint : Color.white.opacity(0.28), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+            VStack(spacing: 6) {
+                icon()
+                    .frame(width: 36, height: 36)
+                    .scaleEffect(active ? 1.1 : 1)
+                VStack(spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(IslandColor.primary)
+                    // 같은 자리에서 겹쳐 바래면 두 줄이 포개져 읽히지 않는다. 위로 밀어 올리며 바꾼다.
+                    ZStack {
+                        Text(active ? armed : idle)
+                            .id(active)
+                            .transition(
+                                .asymmetric(
+                                    insertion: .offset(y: 8).combined(with: .opacity),
+                                    removal: .offset(y: -8).combined(with: .opacity)
+                                )
                             )
-                        )
+                    }
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(IslandColor.secondary)
+                    .frame(height: 14)
+                    .clipped()
                 }
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(IslandColor.secondary)
-                .frame(height: 14)
-                .clipped()
             }
+            .fixedSize()
         }
+        .opacity(dimmed ? 0.55 : 1)
     }
 }
 

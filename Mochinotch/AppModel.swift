@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import Observation
 import QuartzCore
+import QuickLookThumbnailing
 import ServiceManagement
 import SwiftUI
 
@@ -104,6 +105,10 @@ final class AppModel {
     /// 파일을 끌고 노치 근처에 와 있을 때.
     private(set) var fileDrag: FileDragPhase?
     private var fileDragEndTask: Task<Void, Never>?
+    /// 노치에 맡겨 둔 파일. 노치 아래로 사진 끝이 삐져나와 보인다.
+    private(set) var shelf: [ShelfItem] = []
+    /// 맡긴 파일 위에 마우스가 있어 부채꼴로 벌어진 상태.
+    private(set) var shelfOpen = false
     private var clearTask: Task<Void, Never>?
     /// 지우기 직후 높이를 잠깐 유지한다. 글자가 사라진 뒤에 모양이 따라 줄어든다.
     private var frozenRows: Int?
@@ -144,7 +149,7 @@ final class AppModel {
 
     var metrics: IslandMetrics {
         if let introShape { return introShape }
-        if let fileDrag { return IslandMetrics.dropZone(notch: notch, targeted: fileDrag == .over) }
+        if let fileDrag { return IslandMetrics.dropZone(notch: notch, targeted: fileDrag.target != nil) }
         return IslandMetrics.resolve(
             notch: notch,
             presentation: presentation,
@@ -164,8 +169,23 @@ final class AppModel {
     private var interactiveScreenRect: CGRect? {
         // 놓을 자리 위에서만 끌어 온 파일을 받는다. 나머지 창은 아래 앱이 받아야 한다.
         if fileDrag != nil { return hoverScreenRect }
-        guard presentation != .idle || metrics.chrome == .peek else { return nil }
-        return hoverScreenRect
+        let shelfRect = shelfScreenRect
+        guard presentation != .idle || metrics.chrome == .peek else { return shelfRect }
+        return shelfRect.map { $0.union(hoverScreenRect) } ?? hoverScreenRect
+    }
+
+    /// 펼친 판이나 놓을 자리가 덮을 때는 맡긴 파일을 숨긴다.
+    var shelfVisible: Bool {
+        !shelf.isEmpty && fileDrag == nil && presentation != .expanded && introShape == nil && !isQuitting
+    }
+
+    /// 노치 아래로 삐져나온 사진 자리. 이 위에서는 목록을 펼치지 않고 사진만 벌린다.
+    var shelfScreenRect: CGRect? {
+        guard shelfVisible else { return nil }
+        let reach = shelfOpen ? ShelfLayout.openPeek : ShelfLayout.peek
+        let width = shelfOpen ? ShelfLayout.openWidth : ShelfLayout.restWidth
+        let bottom = notch.screenFrame.maxY - metrics.height
+        return CGRect(x: notch.centerX - width / 2, y: bottom - reach - 6, width: width, height: reach + 6)
     }
 
     /// 일반 알림. 노치 오른쪽에 개수 배지와 함께 붙는다.
@@ -224,7 +244,13 @@ final class AppModel {
             self?.fileDrag != nil
         }
         controller.onDropFiles = { [weak self] urls in
-            self?.sendViaAirDrop(urls) ?? false
+            self?.dropFiles(urls) ?? false
+        }
+        controller.shelfRectProvider = { [weak self] in
+            self?.shelfScreenRect
+        }
+        controller.onShelfHover = { [weak self] inside in
+            self?.setShelfOpen(inside)
         }
         controller.start()
         panel = controller
@@ -1541,7 +1567,7 @@ final class AppModel {
         guard let point else {
             guard fileDrag != nil else { return }
             // 손을 떼는 순간 접으면, 놓기가 노치에 닿기 전에 창이 클릭을 흘려보낸다.
-            let settle = fileDrag == .over
+            let settle = fileDrag?.target != nil
             fileDragEndTask?.cancel()
             fileDragEndTask = Task { [weak self] in
                 if settle { try? await Task.sleep(for: .milliseconds(350)) }
@@ -1557,7 +1583,7 @@ final class AppModel {
         fileDragEndTask?.cancel()
         let zone = IslandMetrics.dropZone(notch: notch, targeted: true).screenRect(notch: notch)
         if zone.insetBy(dx: -4, dy: -4).contains(point) {
-            setFileDrag(.over)
+            setFileDrag(.over(point.x < notch.centerX ? .airDrop : .shelf))
         } else if zone.insetBy(dx: -180, dy: -220).contains(point) {
             setFileDrag(.near)
         } else {
@@ -1574,14 +1600,82 @@ final class AppModel {
         panel?.updateMouse()
     }
 
-    private func sendViaAirDrop(_ urls: [URL]) -> Bool {
+    private func dropFiles(_ urls: [URL]) -> Bool {
+        let target = fileDrag?.target
         fileDragEndTask?.cancel()
         setFileDrag(nil)
         let files = urls.filter(\.isFileURL)
-        guard !files.isEmpty,
-              let service = NSSharingService(named: .sendViaAirDrop),
-              service.canPerform(withItems: files)
-        else { return false }
+        guard !files.isEmpty else { return false }
+        switch target {
+        case .airDrop: return sendViaAirDrop(files)
+        case .shelf: return addToShelf(files)
+        case nil: return false
+        }
+    }
+
+    private func addToShelf(_ files: [URL]) -> Bool {
+        let fresh = files.filter { url in !shelf.contains { $0.url == url } }
+        let items = fresh.map { ShelfItem(url: $0) }
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.62)) {
+            shelf.append(contentsOf: items)
+        }
+        items.forEach(loadThumbnail)
+        panel?.updateMouse()
+        return true
+    }
+
+    private func loadThumbnail(for item: ShelfItem) {
+        let request = QLThumbnailGenerator.Request(
+            fileAt: item.url,
+            size: CGSize(width: 96, height: 96),
+            scale: NSScreen.main?.backingScaleFactor ?? 2,
+            representationTypes: .all
+        )
+        QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { [weak self] representation, _ in
+            guard let image = representation?.nsImage else { return }
+            Task { @MainActor in
+                guard let self, let index = self.shelf.firstIndex(where: { $0.id == item.id }) else { return }
+                self.shelf[index].thumbnail = image
+            }
+        }
+    }
+
+    /// 맡긴 파일을 노치 밖으로 끌어낸다. 다른 앱이 받으면 노치에서 뺀다.
+    func dragFromShelf(_ ids: [ShelfItem.ID]) {
+        let items = shelf.filter { ids.contains($0.id) }
+        guard !items.isEmpty else { return }
+        panel?.dragOut(items.map(\.url), images: items.map(\.thumbnail)) { [weak self] delivered in
+            guard let self, delivered else { return }
+            withAnimation(.spring(response: 0.36, dampingFraction: 0.8)) {
+                self.shelf.removeAll { ids.contains($0.id) }
+                if self.shelf.isEmpty { self.shelfOpen = false }
+            }
+            self.panel?.updateMouse()
+        }
+    }
+
+    func clearShelf() {
+        withAnimation(.spring(response: 0.36, dampingFraction: 0.8)) {
+            shelf.removeAll()
+            shelfOpen = false
+        }
+        panel?.updateMouse()
+    }
+
+    private func setShelfOpen(_ open: Bool) {
+        guard shelfOpen != open, !open || shelfVisible else { return }
+        if open {
+            hoverTask?.cancel()
+        }
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.66)) {
+            shelfOpen = open
+        }
+    }
+
+    private func sendViaAirDrop(_ files: [URL]) -> Bool {
+        guard let service = NSSharingService(named: .sendViaAirDrop), service.canPerform(withItems: files) else {
+            return false
+        }
         // AirDrop 창을 띄우는 동안 화면이 멈춘다. 그 사이에 접히면 접힘이 건너뛰어지니, 다 접은 뒤에 연다.
         Task {
             try? await Task.sleep(for: .milliseconds(450))
