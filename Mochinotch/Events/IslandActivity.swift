@@ -10,8 +10,25 @@ enum IslandPresentation: Equatable {
 enum FileDragPhase: Equatable {
     /// 노치 가까이. 놓을 자리를 보여 준다.
     case near
-    /// 놓을 자리 위. 여기서 놓으면 AirDrop으로 보낸다.
-    case over
+    /// 놓을 자리 위. 왼쪽 반은 AirDrop, 오른쪽 반은 맡기기.
+    case over(FileDropTarget)
+
+    var target: FileDropTarget? {
+        if case .over(let target) = self { return target }
+        return nil
+    }
+}
+
+enum FileDropTarget: Equatable {
+    case airDrop
+    case shelf
+}
+
+/// 노치에 잠깐 맡겨 둔 파일. 앱을 끄면 비운다.
+struct ShelfItem: Identifiable, Equatable {
+    let id = UUID()
+    let url: URL
+    var thumbnail: NSImage?
 }
 
 enum AgentTool: String, Equatable {

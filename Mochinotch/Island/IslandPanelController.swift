@@ -19,9 +19,15 @@ final class IslandPanelController {
     var onFileDrag: (CGPoint?) -> Void = { _ in }
     var canDropFiles: () -> Bool = { false }
     var onDropFiles: ([URL]) -> Bool = { _ in false }
+    /// 노치 아래 맡긴 파일 자리. 이 위에서는 목록 대신 사진을 벌린다.
+    var shelfRectProvider: () -> CGRect? = { nil }
+    var onShelfHover: (Bool) -> Void = { _ in }
+    private var lastShelfInside = false
     /// 누른 순간의 끌기 보드. 이 값이 바뀌어야 새 끌기가 시작된 것이다.
     private var dragBaseline = NSPasteboard(name: .drag).changeCount
     private var fileDragTimer: Timer?
+    /// 노치에서 파일을 끌어내는 중. 내 끌기를 놓을 자리로 받으면 안 된다.
+    private var draggingOut = false
 
     init<Content: View>(rootView: Content) {
         let panel = NSPanel(
@@ -115,10 +121,31 @@ final class IslandPanelController {
     func trackPointer() {
         updateMouse()
         let point = NSEvent.mouseLocation
-        let inside = hoverRectProvider().insetBy(dx: -8, dy: -6).contains(point)
+        let onShelf = !draggingOut && (shelfRectProvider()?.contains(point) ?? false)
+        if onShelf != lastShelfInside {
+            lastShelfInside = onShelf
+            onShelfHover(onShelf)
+            updateMouse()
+        }
+        let inside = !onShelf && hoverRectProvider().insetBy(dx: -8, dy: -6).contains(point)
         guard lastInside != inside else { return }
         lastInside = inside
         onHoverChange(inside)
+    }
+
+    /// 지금 누르고 끄는 이벤트로 파일 끌기를 시작한다. 다른 앱이 받으면 `delivered`가 참이다.
+    func dragOut(_ urls: [URL], images: [NSImage?], ended: @escaping (_ delivered: Bool) -> Void) {
+        guard !draggingOut, let event = NSApp.currentEvent,
+              event.type == .leftMouseDragged || event.type == .leftMouseDown
+        else { return }
+        draggingOut = true
+        hosting.beginFileDrag(urls, images: images, event: event) { [weak self] delivered in
+            guard let self else { return }
+            self.draggingOut = false
+            self.dragBaseline = NSPasteboard(name: .drag).changeCount
+            ended(delivered)
+            self.trackPointer()
+        }
     }
 
     private func handlePointer(_ type: NSEvent.EventType) {
@@ -126,7 +153,7 @@ final class IslandPanelController {
         case .leftMouseDown:
             endFileDrag()
             dragBaseline = NSPasteboard(name: .drag).changeCount
-        case .leftMouseDragged where fileDragTimer == nil:
+        case .leftMouseDragged where fileDragTimer == nil && !draggingOut:
             if isFileDrag() { beginFileDrag() }
         default:
             break
@@ -214,6 +241,42 @@ final class IslandHostingView: NSHostingView<AnyView> {
             options: [.urlReadingFileURLsOnly: true]
         )
         return objects as? [URL] ?? []
+    }
+
+    private let dragSource = FileDragSource()
+
+    func beginFileDrag(_ urls: [URL], images: [NSImage?], event: NSEvent, ended: @escaping (Bool) -> Void) {
+        let point = convert(event.locationInWindow, from: nil)
+        let size: CGFloat = 56
+        let items = urls.enumerated().map { index, url in
+            let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+            let image = images[index] ?? NSWorkspace.shared.icon(forFile: url.path)
+            let offset = CGFloat(index) * 5
+            item.setDraggingFrame(
+                NSRect(x: point.x - size / 2 + offset, y: point.y - size / 2 + offset, width: size, height: size),
+                contents: image
+            )
+            return item
+        }
+        dragSource.ended = ended
+        let session = beginDraggingSession(with: items, event: event, source: dragSource)
+        session.animatesToStartingPositionsOnCancelOrFail = true
+        session.draggingFormation = .pile
+    }
+}
+
+/// 노치에서 끌어낸 파일의 출발점. 호스팅 뷰가 SwiftUI 끌기용으로 이미 맡고 있어 따로 둔다.
+private final class FileDragSource: NSObject, NSDraggingSource {
+    var ended: ((Bool) -> Void)?
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        // 원본은 제자리에 두고 받는 쪽이 복사해 가게 한다.
+        context == .outsideApplication ? .copy : []
+    }
+
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        ended?(operation != [])
+        ended = nil
     }
 }
 
