@@ -186,12 +186,14 @@ private struct ShelfClearButton: View {
 }
 
 private struct ShelfLimitToast: View {
+    @Environment(AppModel.self) private var model
+
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(IslandColor.warning)
-            Text("최대 \(ShelfLayout.maxCards)개까지만 맡길 수 있어요")
+            Text(model.text(.shelfLimit, ShelfLayout.maxCards))
                 .font(.system(size: 11.5, weight: .semibold))
                 .foregroundStyle(IslandColor.primary)
         }
@@ -813,41 +815,11 @@ private struct DropZoneContent: View {
         VStack(spacing: 0) {
             Color.clear.frame(height: topInset + 4)
             HStack(spacing: 8) {
-                slot(.airDrop, title: "AirDrop", idle: "여기에 놓으면 보내요", armed: "놓으면 기기를 골라요") {
-                    if let icon = Self.airDropIcon {
-                        Image(nsImage: icon).resizable()
-                    }
+                let order: [FileDropTarget] = model.shelfOnLeft ? [.shelf, .airDrop] : [.airDrop, .shelf]
+                ForEach(order, id: \.self) { kind in
+                    dropSlot(kind)
+                        .frame(width: half, height: boxHeight)
                 }
-                .frame(width: half, height: boxHeight)
-                slot(
-                    .shelf,
-                    title: "맡기기",
-                    count: model.shelf.isEmpty || model.shelfFull ? nil : "\(model.shelf.count)/\(ShelfLayout.maxCards)",
-                    idle: shelfIdle,
-                    armed: shelfArmed,
-                    blocked: model.shelfFull,
-                    warns: model.shelfFull || model.shelfOverflowing
-                ) {
-                    ZStack {
-                        Circle().fill(model.shelfFull ? IslandColor.warning : IslandColor.shelf)
-                        Image(systemName: model.shelfFull ? "tray.full.fill" : "tray.and.arrow.down.fill")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .contentTransition(.symbolEffect(.replace))
-                    }
-                }
-                .keyframeAnimator(initialValue: Shake(), trigger: refusals) { content, value in
-                    content.offset(x: value.x)
-                } keyframes: { _ in
-                    KeyframeTrack(\.x) {
-                        CubicKeyframe(7.0, duration: 0.07)
-                        CubicKeyframe(-6.0, duration: 0.08)
-                        CubicKeyframe(4.0, duration: 0.07)
-                        CubicKeyframe(-2.0, duration: 0.07)
-                        CubicKeyframe(0.0, duration: 0.1)
-                    }
-                }
-                .frame(width: half, height: boxHeight)
             }
         }
         .animation(.spring(response: 0.34, dampingFraction: 0.82), value: target)
@@ -859,17 +831,60 @@ private struct DropZoneContent: View {
         }
     }
 
+    @ViewBuilder
+    private func dropSlot(_ kind: FileDropTarget) -> some View {
+        switch kind {
+        case .airDrop:
+            slot(kind, title: "AirDrop", idle: model.text(.airdropIdle), armed: model.text(.airdropArmed)) {
+                if let icon = Self.airDropIcon {
+                    Image(nsImage: icon).resizable()
+                }
+            }
+        case .shelf:
+            slot(
+                kind,
+                title: model.text(.shelfTitle),
+                count: model.shelf.isEmpty || model.shelfFull ? nil : "\(model.shelf.count)/\(ShelfLayout.maxCards)",
+                idle: shelfIdle,
+                armed: shelfArmed,
+                blocked: model.shelfFull,
+                warns: model.shelfFull || model.shelfOverflowing
+            ) {
+                ZStack {
+                    Circle().fill(model.shelfFull ? IslandColor.warning : IslandColor.shelf)
+                    Image(systemName: model.shelfFull ? "tray.full.fill" : "tray.and.arrow.down.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .contentTransition(.symbolEffect(.replace))
+                }
+            }
+            .keyframeAnimator(initialValue: Shake(), trigger: refusals) { content, value in
+                content.offset(x: value.x)
+            } keyframes: { _ in
+                KeyframeTrack(\.x) {
+                    CubicKeyframe(7.0, duration: 0.07)
+                    CubicKeyframe(-6.0, duration: 0.08)
+                    CubicKeyframe(4.0, duration: 0.07)
+                    CubicKeyframe(-2.0, duration: 0.07)
+                    CubicKeyframe(0.0, duration: 0.1)
+                }
+            }
+        }
+    }
+
     private var shelfIdle: String {
         let room = ShelfLayout.maxCards - model.shelf.count
-        if model.shelf.isEmpty { return "노치에 잠깐 넣어 둬요" }
-        return room > 0 ? "\(room)개 더 맡길 수 있어요" : "꽉 찼어요 (\(model.shelf.count)/\(ShelfLayout.maxCards))"
+        if model.shelf.isEmpty { return model.text(.shelfEmpty) }
+        return room > 0
+            ? model.text(.shelfRoom, room)
+            : model.text(.shelfFull, model.shelf.count, ShelfLayout.maxCards)
     }
 
     private var shelfArmed: String {
         let room = ShelfLayout.maxCards - model.shelf.count
-        if room <= 0 { return "최대 \(ShelfLayout.maxCards)개까지만 맡길 수 있어요" }
-        if model.shelfOverflowing { return "\(room)개만 들어가요 · 최대 \(ShelfLayout.maxCards)개" }
-        return "놓으면 노치에 맡겨요"
+        if room <= 0 { return model.text(.shelfArmedFull, ShelfLayout.maxCards) }
+        if model.shelfOverflowing { return model.text(.shelfArmedSome, room, ShelfLayout.maxCards) }
+        return model.text(.shelfArmed)
     }
 
     /// `blocked`면 놓아도 받지 않는다. `warns`면 위에 올렸을 때 다 받지 못한다고 주황으로 알린다.
@@ -961,6 +976,7 @@ private struct IntroBeads: View {
 }
 
 private struct IntroMark: View {
+    @Environment(AppModel.self) private var model
     let activity: IslandActivity
     @State private var icon = false
     @State private var name = false
@@ -975,7 +991,7 @@ private struct IntroMark: View {
                 .animation(.spring(response: 0.42, dampingFraction: 0.42), value: icon)
             // 글자마다 한 박자씩 늦게 올라온다.
             HStack(spacing: 0) {
-                ForEach(Array(activity.leadingText.enumerated()), id: \.offset) { index, letter in
+                ForEach(Array(activity.leadingLabel(in: model.language).enumerated()), id: \.offset) { index, letter in
                     Text(String(letter))
                         .opacity(name ? 1 : 0)
                         .offset(y: name ? 0 : 10)
@@ -998,11 +1014,12 @@ private struct IntroMark: View {
 
 /// 작업 완료 때 왼쪽. 아이콘이 노치 안에서 쏙 내려와 바닥에 눌렸다 튀어 서고, 이름이 한 자씩 따라 나온다.
 private struct AgentLead: View {
+    @Environment(AppModel.self) private var model
     let activity: IslandActivity
     @State private var shown = false
 
     var body: some View {
-        let letters = Array(activity.leadingText)
+        let letters = Array(activity.leadingLabel(in: model.language))
         HStack(spacing: 6) {
             ActivityIcon(activity: activity, size: activity.compactIconSize)
                 .opacity(shown ? 1 : 0)
@@ -1059,12 +1076,13 @@ private struct AgentLead: View {
 
 /// 작업 완료 때 오른쪽 결과. 아이콘이 앉은 뒤 한 자씩 뿅 튀어나온다.
 private struct AgentTrail: View {
+    @Environment(AppModel.self) private var model
     let activity: IslandActivity
     @State private var shown = false
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(Array(activity.trailingText.enumerated()), id: \.offset) { index, letter in
+            ForEach(Array(activity.trailingLabel(in: model.language).enumerated()), id: \.offset) { index, letter in
                 Text(String(letter))
                     .scaleEffect(shown ? 1 : 0.3)
                     .rotationEffect(.degrees(shown ? 0 : 14))
@@ -1141,7 +1159,7 @@ private struct CompactIslandContent: View {
             if alignment == .leading {
                 HStack(spacing: 6) {
                     ActivityIcon(activity: activity, size: activity.compactIconSize)
-                    Text(activity.leadingText)
+                    Text(activity.leadingLabel(in: model.language))
                         .lineLimit(1)
                         .foregroundStyle(activity.isUpdateNotice ? activity.tint : IslandColor.primary)
                 }
@@ -1168,8 +1186,8 @@ private struct CompactIslandContent: View {
             .monospacedDigit()
             .foregroundStyle(activity.tint)
             .animation(.snappy(duration: 0.35), value: percent)
-        } else if !activity.trailingText.isEmpty {
-            Text(activity.trailingText)
+        } else if !activity.trailingLabel(in: model.language).isEmpty {
+            Text(activity.trailingLabel(in: model.language))
                 .foregroundStyle(activity.tint)
         }
     }
@@ -1234,7 +1252,7 @@ private struct ExpandedIslandContent: View {
             Spacer()
             if model.showsSetup {
                 if model.setupStatus.remaining > 0 {
-                    headerChip("나중에", hovered: laterHovered) {
+                    headerChip(model.text(.later), hovered: laterHovered) {
                         model.finishSetup()
                     }
                     .onHover { hovering in
@@ -1243,7 +1261,7 @@ private struct ExpandedIslandContent: View {
                     .transition(.opacity)
                 }
             } else if model.showsSettings {
-                headerChip("닫기", hovered: closeHovered) {
+                headerChip(model.text(.close), hovered: closeHovered) {
                     model.closeSettings()
                 }
                 .onHover { hovering in
@@ -1251,7 +1269,7 @@ private struct ExpandedIslandContent: View {
                 }
                 .transition(.opacity)
             } else if !model.activities.isEmpty {
-                headerChip("지우기", hovered: clearHovered, danger: true) {
+                headerChip(model.text(.clear), hovered: clearHovered, danger: true) {
                     model.clearHistory()
                 }
                 .onHover { hovering in
@@ -1285,7 +1303,7 @@ private struct ExpandedIslandContent: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .help(model.showsSettings ? "목록" : "설정")
+        .help(model.showsSettings ? model.text(.helpList) : model.text(.helpSettings))
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.15)) { settingsHovered = hovering }
         }
@@ -1332,9 +1350,9 @@ private struct ExpandedIslandContent: View {
 
     private var empty: some View {
         VStack(spacing: 5) {
-            Text("지금은 조용해요")
+            Text(model.text(.quietTitle))
                 .font(.system(size: 15, weight: .semibold, design: .rounded))
-            Text("충전기, 작업 완료, 알림이 여기 쌓여요.")
+            Text(model.text(.quietBody))
                 .font(.system(size: 12))
                 .foregroundStyle(IslandColor.secondary)
         }
@@ -1391,11 +1409,11 @@ private struct ActivityRow: View {
             ActivityIcon(activity: activity, size: 32)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(activity.expandedTitle)
+                    Text(activity.expandedTitle(in: model.language))
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(IslandColor.primary)
                         .lineLimit(1)
-                    if let badge = activity.expandedBadge {
+                    if let badge = activity.expandedBadge(in: model.language) {
                         Text(badge.label)
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(badge.color)
@@ -1412,7 +1430,7 @@ private struct ActivityRow: View {
                     }
                 }
                 let updating = activity.isUpdateNotice ? model.updateStatus : nil
-                let detail = updating ?? activity.expandedDetail
+                let detail = updating ?? activity.expandedDetail(in: model.language)
                 if !detail.isEmpty {
                     Text(detail)
                         .font(.system(size: 12))

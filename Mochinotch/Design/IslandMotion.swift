@@ -146,10 +146,10 @@ enum IntroStudy: String, CaseIterable {
         return .mochi
     }
 
-    var title: String {
+    func title(in language: AppLanguage) -> String {
         switch self {
-        case .mochi: return "모찌"
-        case .taffy: return "늘리기"
+        case .mochi: return L10n.text(.introMochi, language)
+        case .taffy: return L10n.text(.introTaffy, language)
         }
     }
 }

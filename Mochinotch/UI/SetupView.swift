@@ -18,11 +18,46 @@ struct SetupStatus: Equatable {
     }
 }
 
+/// 연결이 어디쯤인지. 문구는 그릴 때 지금 언어로 만든다.
 enum AgentLinkProgress: Equatable {
     case idle
-    case working(String)
-    case done(String)
-    case failed(String)
+    case connecting
+    case restarting(String)
+    case failed(tool: String, problem: HookProblem)
+    case done(AgentLinkResult)
+
+    var isWorking: Bool {
+        switch self {
+        case .connecting, .restarting: return true
+        default: return false
+        }
+    }
+}
+
+struct AgentLinkResult: Equatable {
+    var restarted: [String] = []
+    var stuck: [String] = []
+    var already = false
+    var connected = false
+    var terminal = false
+
+    func summary(in language: AppLanguage) -> String {
+        var notes: [String] = []
+        if already {
+            notes.append(L10n.text(.alreadyLinked, language))
+        } else if !restarted.isEmpty {
+            notes.append(L10n.text(.restartedApps, language, restarted.joined(separator: ", ")))
+        } else if stuck.isEmpty {
+            notes.append(L10n.text(.linked, language))
+        }
+        if !stuck.isEmpty {
+            notes.append(L10n.text(.restartManually, language, stuck.joined(separator: ", ")))
+        }
+        if terminal {
+            notes.append(L10n.text(.terminalNext, language))
+        }
+        return notes.joined(separator: " · ")
+    }
 }
 
 /// 처음 켰을 때 인트로 뒤에 펼쳐지는 안내. 권한 창을 오가는 동안 접히지 않는다.
@@ -33,10 +68,10 @@ struct SetupView: View {
         let status = model.setupStatus
         VStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("초기 권한 설정")
+                Text(model.text(.setupTitle))
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(IslandColor.primary)
-                Text("켜 두면 알림과 작업 완료를 노치가 바로 보여 줘요. 켠 항목은 저절로 체크돼요.")
+                Text(model.text(.setupBody))
                     .font(.system(size: 11))
                     .foregroundStyle(IslandColor.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -46,53 +81,53 @@ struct SetupView: View {
 
             SettingsCard {
                 SettingsRow(
-                    title: "알림 읽기",
+                    title: model.text(.permNotifications),
                     subtitle: status.notifications
-                        ? "다른 앱 알림이 노치에 떠요"
-                        : "전체 디스크 접근 권한 · 목록에 없으면 +로 추가"
+                        ? model.text(.permNotificationsOn)
+                        : model.text(.permNotificationsOff)
                 ) {
-                    SetupAction(done: status.notifications, title: "허용") {
+                    SetupAction(done: status.notifications, title: model.text(.allow)) {
                         model.openFullDiskAccessSettings()
                     }
                 }
                 SettingsDivider()
                 SettingsRow(
-                    title: "손쉬운 사용",
+                    title: model.text(.permAccessibility),
                     subtitle: status.accessibility
-                        ? "알림을 바로 읽고, 읽은 알림은 거둬요"
-                        : "앱과 터미널 hook이 같이 써요. 요청 창이 떠요"
+                        ? model.text(.permAccessibilityOn)
+                        : model.text(.permAccessibilityOff)
                 ) {
-                    SetupAction(done: status.accessibility, title: "허용") {
+                    SetupAction(done: status.accessibility, title: model.text(.allow)) {
                         model.requestAccessibility()
                     }
                 }
                 SettingsDivider()
-                SettingsRow(title: "화면 기록", subtitle: screenSubtitle(status)) {
-                    SetupAction(done: status.screenRecording, title: "허용") {
+                SettingsRow(title: model.text(.permScreen), subtitle: screenSubtitle(status)) {
+                    SetupAction(done: status.screenRecording, title: model.text(.allow)) {
                         model.requestScreenRecording()
                     }
                 }
                 SettingsDivider()
-                SettingsRow(title: "AI 에이전트 연결", subtitle: agentSubtitle(status)) {
+                SettingsRow(title: model.text(.agentsTitle), subtitle: agentSubtitle(status)) {
                     agentAction(status)
                 }
             }
 
             HStack(spacing: 8) {
                 if model.requestedScreenRecording, !status.screenRecording {
-                    SetupPill(title: "다시 켜기", tint: IslandColor.warning, filled: false) {
+                    SetupPill(title: model.text(.relaunch), tint: IslandColor.warning, filled: false) {
                         model.relaunch()
                     }
                     .transition(.opacity)
                 } else if status.remaining > 0 {
-                    Text("\(status.remaining)개 남았어요")
+                    Text(model.text(.remaining, status.remaining))
                         .font(.system(size: 10.5, weight: .medium, design: .rounded))
                         .foregroundStyle(Color.white.opacity(0.36))
                         .contentTransition(.numericText())
                 }
                 Spacer()
                 if status.remaining == 0 {
-                    SetupPill(title: "시작하기", tint: IslandColor.charge, filled: true) {
+                    SetupPill(title: model.text(.start), tint: IslandColor.charge, filled: true) {
                         model.finishSetup()
                     }
                 }
@@ -117,29 +152,30 @@ struct SetupView: View {
     }
 
     private func screenSubtitle(_ status: SetupStatus) -> String {
-        if status.screenRecording { return "작업이 끝나면 화면 가장자리까지 빛나요" }
-        if model.requestedScreenRecording { return "켰다면 아래 다시 켜기를 눌러야 적용돼요" }
-        return "작업이 끝날 때 화면 가장자리 연출에만 써요"
+        if status.screenRecording { return model.text(.permScreenOn) }
+        if model.requestedScreenRecording { return model.text(.permScreenPending) }
+        return model.text(.permScreenOff)
     }
 
     private func agentSubtitle(_ status: SetupStatus) -> String {
         switch model.agentLinkProgress {
-        case .working(let message): return message
-        case .failed(let message): return message
-        case .done(let message) where status.agents.ready: return message
+        case .connecting: return model.text(.connecting)
+        case .restarting(let name): return model.text(.restarting, name)
+        case .failed(let tool, let problem): return "\(tool) · \(problem.text(in: model.language))"
+        case .done(let result) where status.agents.ready: return result.summary(in: model.language)
         default: break
         }
-        if !status.movedFromDownloads { return "앱을 응용 프로그램 폴더로 옮긴 뒤 연결할 수 있어요" }
+        if !status.movedFromDownloads { return model.text(.agentsMove) }
         let present = status.agents.present
-        if present.isEmpty { return "Claude Code · Cursor · Codex · Kiro를 찾지 못했어요" }
+        if present.isEmpty { return model.text(.agentsMissing) }
         let names = present.map(\.displayName).joined(separator: " · ")
-        if status.agents.ready { return "\(names) 연결됨" }
-        return "\(names)\n켜 둔 앱은 연결한 뒤 다시 켜져요"
+        if status.agents.ready { return model.text(.agentsConnected, names) }
+        return model.text(.agentsWillRestart, names)
     }
 
     @ViewBuilder
     private func agentAction(_ status: SetupStatus) -> some View {
-        if case .working = model.agentLinkProgress {
+        if model.agentLinkProgress.isWorking {
             SetupSpinner()
                 .frame(width: 44, height: 22)
         } else if status.agents.present.isEmpty || !status.movedFromDownloads {
@@ -148,7 +184,7 @@ struct SetupView: View {
                 .foregroundStyle(Color.white.opacity(0.3))
                 .frame(width: 44, height: 22)
         } else {
-            SetupAction(done: status.agents.ready, title: "연결") {
+            SetupAction(done: status.agents.ready, title: model.text(.connect)) {
                 model.connectAgents()
             }
         }

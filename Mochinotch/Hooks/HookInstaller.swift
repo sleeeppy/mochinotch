@@ -70,7 +70,7 @@ struct HookInstallResult: Sendable {
     /// 설정 파일을 실제로 고친 도구. 이 도구의 앱만 다시 켠다.
     var changed: [HookTool] = []
     var connected: [HookTool] = []
-    var failures: [(tool: HookTool, message: String)] = []
+    var failures: [(tool: HookTool, problem: HookProblem)] = []
 }
 
 /// hook 설정은 전부 `~/.local/bin/mochinotch-notify`를 부른다. 그 파일은 앱 실행 파일을 부르는 셸 스크립트라
@@ -160,7 +160,7 @@ enum HookInstaller {
         do {
             try writeRelay()
         } catch {
-            for tool in tools { result.failures.append((tool, "전달 스크립트를 만들지 못했어요")) }
+            for tool in tools { result.failures.append((tool, .script)) }
             return result
         }
         for tool in tools {
@@ -168,7 +168,7 @@ enum HookInstaller {
                 if try merge(tool) { result.changed.append(tool) }
                 result.connected.append(tool)
             } catch {
-                result.failures.append((tool, error.localizedDescription))
+                result.failures.append((tool, (error as? InstallError)?.problem ?? .other(error.localizedDescription)))
             }
         }
         return result
@@ -303,7 +303,7 @@ enum HookInstaller {
     private static func kiroHook() -> String {
         let hook = OrderedJSON.object([
             ("name", .string("Mochinotch")),
-            ("description", .string("작업이 끝나면 노치에 알려요")),
+            ("description", .string(L10n.text(.hookDescription, AppLanguage.stored))),
             ("trigger", .string("Stop")),
             ("action", .object([("type", .string("command")), ("command", .string(relayCommand(source: "kiro")))])),
             ("timeout", .number("10")),
@@ -400,12 +400,35 @@ enum HookInstaller {
         case translocated
         case codexNotify
 
-        var errorDescription: String? {
+        var problem: HookProblem {
             switch self {
-            case .unreadable: return "설정 파일을 읽지 못했어요"
-            case .translocated: return "앱을 응용 프로그램 폴더로 옮긴 뒤 연결해 주세요"
-            case .codexNotify: return "Codex 설정의 notify를 읽지 못했어요"
+            case .unreadable: return .unreadable
+            case .translocated: return .translocated
+            case .codexNotify: return .codexNotify
             }
+        }
+
+        var errorDescription: String? {
+            problem.text(in: AppLanguage.stored)
+        }
+    }
+}
+
+/// hook을 넣다 막힌 이유. 화면 문구는 그릴 때 언어에 맞춰 고른다.
+enum HookProblem: Equatable {
+    case script
+    case unreadable
+    case translocated
+    case codexNotify
+    case other(String)
+
+    func text(in language: AppLanguage) -> String {
+        switch self {
+        case .script: return L10n.text(.hookScript, language)
+        case .unreadable: return L10n.text(.hookUnreadable, language)
+        case .translocated: return L10n.text(.hookTranslocated, language)
+        case .codexNotify: return L10n.text(.hookCodex, language)
+        case .other(let message): return message
         }
     }
 }

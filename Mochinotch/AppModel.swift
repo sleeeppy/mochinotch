@@ -67,6 +67,10 @@ final class AppModel {
     private(set) var introStudy = IntroStudy.stored
     /// 작업이 끝날 때 화면 가장자리 연출. 꺼도 노치 연출은 그대로다.
     private(set) var playsScreenEffect = UserDefaults.standard.object(forKey: AppModel.screenEffectKey) as? Bool ?? true
+    /// 끄면 AirDrop이 왼쪽, 맡기기가 오른쪽. 켜면 둘이 자리를 바꾼다.
+    private(set) var shelfOnLeft = UserDefaults.standard.bool(forKey: AppModel.shelfSideKey)
+    /// 노치에 보이는 말. 맥 언어와 따로다.
+    private(set) var language = AppLanguage.stored
     /// GitHub 최신 릴리즈가 이 앱보다 새로울 때.
     private(set) var updateAvailable = false
     /// 새 버전을 받는 중이면 0에서 1, 다 받고 바꿔 넣을 준비를 하면 1. 끝나면 앱이 꺼졌다 새 버전으로 켜진다.
@@ -74,7 +78,9 @@ final class AppModel {
     var installingUpdate: Bool { updateProgress != nil }
     var updateStatus: String? {
         guard let updateProgress else { return nil }
-        return updateProgress < 1 ? "받는 중 · \(Int(updateProgress * 100))%" : "설치 준비 중"
+        return updateProgress < 1
+            ? L10n.text(.receiving, language, Int(updateProgress * 100))
+            : L10n.text(.preparing, language)
     }
     /// 설정에서 직접 누른 업데이트 확인의 결과. 잠깐 보여 주고 지운다.
     private(set) var updateCheckStatus: UpdateCheckStatus?
@@ -386,6 +392,7 @@ final class AppModel {
 
     private static let introStudyKey = "introStudy"
     private static let screenEffectKey = "playsScreenEffect"
+    private static let shelfSideKey = "shelfOnLeft"
     private static let setupDoneKey = "setupDone"
     func setIntro(_ study: IntroStudy) {
         introStudy = study
@@ -400,6 +407,21 @@ final class AppModel {
     func setPlaysScreenEffect(_ enabled: Bool) {
         playsScreenEffect = enabled
         UserDefaults.standard.set(enabled, forKey: Self.screenEffectKey)
+    }
+
+    func setShelfOnLeft(_ enabled: Bool) {
+        shelfOnLeft = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.shelfSideKey)
+    }
+
+    func setLanguage(_ language: AppLanguage) {
+        guard self.language != language else { return }
+        self.language = language
+        UserDefaults.standard.set(language.rawValue, forKey: AppLanguage.storageKey)
+    }
+
+    func text(_ key: L10n.Key, _ args: CVarArg...) -> String {
+        L10n.render(key, language, args)
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -458,7 +480,7 @@ final class AppModel {
         }
         let outcome = outcome(for: event)
         let title = event.title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-            ?? "\(tool.displayName) \(outcome.shortLabel)"
+            ?? "\(tool.displayName) \(outcome.shortLabel(in: language))"
         let detail = event.detail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let now = Date()
         recentEventKeys = recentEventKeys.filter { $0.value > now }
@@ -499,8 +521,8 @@ final class AppModel {
         if let ask = Self.terminalPermission(notice) {
             ingest(IncomingEvent(
                 tool: ask.rawValue,
-                title: "\(ask.appTitle) 확인 필요",
-                detail: "Permission required",
+                title: L10n.text(.confirmTitle, language, ask.appTitle),
+                detail: L10n.text(.permissionAsk, language),
                 kind: "needsInput",
                 bundleID: notice.bundleID
             ))
@@ -509,7 +531,7 @@ final class AppModel {
         if let question = Self.cursorQuestion(notice) {
             ingest(IncomingEvent(
                 tool: AgentTool.cursor.rawValue,
-                title: "Cursor 확인 필요",
+                title: L10n.text(.confirmTitle, language, AgentTool.cursor.appTitle),
                 detail: question,
                 kind: "needsInput",
                 bundleID: notice.bundleID
@@ -599,8 +621,7 @@ final class AppModel {
     }
 
     func openGuide() {
-        guard let url = URL(string: "https://github.com/sleeeppy/mochinotch#readme") else { return }
-        NSWorkspace.shared.open(url)
+        NSWorkspace.shared.open(language.guideURL)
     }
 
     /// 최신 릴리즈 태그만 본다. 켜질 때, 한 시간마다, 깨어날 때. 설정을 열 때는 10분이 지났으면 다시 본다.
@@ -804,10 +825,10 @@ final class AppModel {
     private func syncSetupReminder() {
         var missing: [String] = []
         // 알림 권한은 켤 때 잠깐 확인 중이다. 그 사이에 넣으면 다 켠 사람에게도 한 번 번쩍 뜬다.
-        if !setupStatus.notifications, notificationAccess != .starting { missing.append("알림 읽기") }
-        if !setupStatus.accessibility { missing.append("손쉬운 사용") }
-        if !setupStatus.screenRecording { missing.append("화면 기록") }
-        if !setupStatus.agentsDone { missing.append("AI 연결") }
+        if !setupStatus.notifications, notificationAccess != .starting { missing.append("notifications") }
+        if !setupStatus.accessibility { missing.append("accessibility") }
+        if !setupStatus.screenRecording { missing.append("screen") }
+        if !setupStatus.agentsDone { missing.append("agents") }
         let index = activities.firstIndex(where: \.isSetupReminder)
         if missing.isEmpty || setupReminderDismissed {
             if let index {
@@ -917,49 +938,37 @@ final class AppModel {
 
     /// hook을 넣고, 설정이 바뀐 도구의 앱이 켜져 있으면 다시 켠다.
     func connectAgents() {
-        if case .working = agentLinkProgress { return }
+        if agentLinkProgress.isWorking { return }
         let tools = setupStatus.agents.present
         guard !tools.isEmpty else { return }
-        agentLinkProgress = .working("연결하는 중")
+        agentLinkProgress = .connecting
         Task { @MainActor [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
                 HookInstaller.install(tools: tools)
             }.value
             guard let self else { return }
             if let failure = result.failures.first {
-                self.agentLinkProgress = .failed("\(failure.tool.displayName) · \(failure.message)")
+                self.agentLinkProgress = .failed(tool: failure.tool.displayName, problem: failure.problem)
                 self.refreshSetup()
                 return
             }
-            var restarted: [String] = []
-            var stuck: [String] = []
+            var report = AgentLinkResult()
             for tool in result.changed where tool.needsRestart {
                 for app in tool.appBundleIDs.flatMap(NSRunningApplication.runningApplications(withBundleIdentifier:)) {
                     // Codex 앱은 프로세스 이름이 ChatGPT다. 사람들이 아는 건 앱 파일 이름이다.
                     let name = app.bundleURL?.deletingPathExtension().lastPathComponent ?? tool.displayName
-                    self.agentLinkProgress = .working("\(name) 다시 켜는 중")
+                    self.agentLinkProgress = .restarting(name)
                     if await Self.restart(app) {
-                        restarted.append(name)
+                        report.restarted.append(name)
                     } else {
-                        stuck.append(name)
+                        report.stuck.append(name)
                     }
                 }
             }
-            var notes: [String] = []
-            if result.changed.isEmpty {
-                notes.append("이미 연결돼 있어요")
-            } else if !restarted.isEmpty {
-                notes.append("\(restarted.joined(separator: ", ")) 다시 켰어요")
-            } else if stuck.isEmpty {
-                notes.append("연결했어요")
-            }
-            if !stuck.isEmpty {
-                notes.append("\(stuck.joined(separator: ", "))는 직접 다시 켜 주세요")
-            }
-            if result.changed.contains(where: { $0 == .claude || $0 == .codex }) {
-                notes.append("터미널은 새 세션부터 적용돼요")
-            }
-            self.agentLinkProgress = .done(notes.joined(separator: " · "))
+            report.already = result.changed.isEmpty
+            report.connected = !report.already && report.restarted.isEmpty && report.stuck.isEmpty
+            report.terminal = result.changed.contains(where: { $0 == .claude || $0 == .codex })
+            self.agentLinkProgress = .done(report)
             self.refreshSetup()
         }
     }
@@ -1663,7 +1672,8 @@ final class AppModel {
         fileDragEndTask?.cancel()
         let zone = IslandMetrics.dropZone(notch: notch, targeted: true).screenRect(notch: notch)
         if zone.insetBy(dx: -4, dy: -4).contains(point) {
-            setFileDrag(.over(point.x < notch.centerX ? .airDrop : .shelf))
+            let onLeft = point.x < notch.centerX
+            setFileDrag(.over(onLeft == shelfOnLeft ? .shelf : .airDrop))
         } else if zone.insetBy(dx: -180, dy: -220).contains(point) {
             setFileDrag(.near)
         } else {

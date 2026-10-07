@@ -18,21 +18,23 @@ enum Launcher {
 
     private static func installHooks() -> Int32 {
         let status = HookInstaller.status()
+        let language = AppLanguage.stored
         guard !status.present.isEmpty else {
-            print("Claude Code, Cursor, Codex를 찾지 못했어요.")
+            print(L10n.text(.agentsMissing, language))
             return 1
         }
         let result = HookInstaller.install(tools: status.present)
-        print("전달 스크립트: \(HookInstaller.relayURL.path)")
+        print("\(HookInstaller.relayURL.path)")
         for tool in result.connected {
-            print("\(tool.displayName): " + (result.changed.contains(tool) ? "연결함" : "이미 연결됨"))
+            let state = result.changed.contains(tool) ? L10n.text(.linked, language) : L10n.text(.alreadyLinked, language)
+            print("\(tool.displayName): \(state)")
         }
-        for (tool, message) in result.failures {
-            print("\(tool.displayName): \(message)")
+        for (tool, problem) in result.failures {
+            print("\(tool.displayName): \(problem.text(in: language))")
         }
         let restarts = result.changed.filter(\.needsRestart)
         if !restarts.isEmpty {
-            print("켜져 있는 \(restarts.map(\.displayName).joined(separator: ", "))는 다시 시작해야 적용돼요.")
+            print(L10n.text(.restartManually, language, restarts.map(\.displayName).joined(separator: ", ")))
         }
         return result.failures.isEmpty ? 0 : 1
     }
