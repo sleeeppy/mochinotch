@@ -92,12 +92,16 @@ private struct ShelfTuck: View {
     var body: some View {
         let visible = model.shelfVisible
         let open = visible && model.shelfOpen
+        let approach = visible ? model.shelfApproach : 0
         let items = Array(model.shelf.suffix(ShelfLayout.maxCards))
-        // 숨을 때는 노치 안으로 쏙 들어가고, 나타날 때 아래로 빠져나온다.
-        let reach = visible ? (open ? ShelfLayout.openPeek : ShelfLayout.peek) : -4
-        let spread: CGFloat = open ? 2.6 : 1
+        // 근처에 오면 조금 내려오고, 사진 위에 오면 끝까지 벌어진다.
+        let reach = visible
+            ? ShelfLayout.peek + (open ? ShelfLayout.openPeek - ShelfLayout.peek : approach * 14)
+            : -4
+        let spread: CGFloat = open ? 2.6 : 1 + approach * 0.85
+        let baseScale = 1 + approach * 0.14 + (open ? 0.06 : 0)
         let card = ShelfLayout.card
-        let tilt = open ? 1.6 : 1
+        let tilt = open ? 1.6 : 1 + approach * 0.4
         // 배지는 보이는 아랫단에 걸치고, 벌리면 사진 옆 가운데로 내려온다.
         let badgeY = open ? card / 2 - ShelfBadge.size / 2 : card - reach / 2 - 6
         // 기울어진 사진은 각도만큼 옆으로 넓어진다. 양쪽 배지가 같은 틈을 두도록 바깥 사진의 실제 끝에서 잰다.
@@ -112,9 +116,13 @@ private struct ShelfTuck: View {
         ZStack(alignment: .top) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 let slot = min(items.count - 1 - index, Self.fan.count - 1)
+                let focused = model.shelfFocus == index && approach > 0
+                let scale = baseScale * (focused ? 1.22 : 1)
                 ShelfCard(item: item, grabbed: model.shelfGrabsAll)
-                    .rotationEffect(.degrees(Self.fan[slot].angle * tilt))
-                    .offset(x: Self.fan[slot].x * spread)
+                    .scaleEffect(scale, anchor: .top)
+                    .rotationEffect(.degrees(Self.fan[slot].angle * tilt * (focused ? 0.4 : 1)))
+                    .offset(x: Self.fan[slot].x * spread, y: focused ? 6 + approach * 8 : 0)
+                    .zIndex(focused ? 4 : Double(index) * 0.1)
                     .gesture(drag([item.id]))
             }
             if model.shelf.count > 1 {
@@ -152,6 +160,8 @@ private struct ShelfTuck: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .opacity(visible ? 1 : 0)
         .animation(.spring(response: 0.34, dampingFraction: 0.66), value: open)
+        .animation(.spring(response: 0.32, dampingFraction: 0.74), value: model.shelfApproach)
+        .animation(.spring(response: 0.28, dampingFraction: 0.7), value: model.shelfFocus)
         .animation(.spring(response: 0.42, dampingFraction: 0.72), value: visible)
     }
 
@@ -1217,6 +1227,9 @@ private struct ExpandedIslandContent: View {
                 if model.showsSetup {
                     SetupView()
                         .transition(.opacity.combined(with: .offset(y: 6)))
+                } else if model.showsReleaseNotes {
+                    ReleaseNotesView()
+                        .transition(.opacity.combined(with: .offset(y: 6)))
                 } else if model.showsSettings {
                     SettingsView()
                         .transition(.opacity.combined(with: .offset(y: 6)))
@@ -1236,6 +1249,7 @@ private struct ExpandedIslandContent: View {
             .animation(.easeInOut(duration: 0.32), value: model.activities.isEmpty)
             .animation(IslandMotion.morph, value: model.showsSettings)
             .animation(IslandMotion.morph, value: model.showsSetup)
+            .animation(IslandMotion.morph, value: model.showsReleaseNotes)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .padding(.horizontal, metrics.shoulder)
@@ -1246,11 +1260,19 @@ private struct ExpandedIslandContent: View {
             Text("もちノッチ")
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .foregroundStyle(Color.white.opacity(0.82))
-            if !model.showsSetup {
+            if !model.showsSetup, !model.showsReleaseNotes {
                 settingsButton
             }
             Spacer()
-            if model.showsSetup {
+            if model.showsReleaseNotes {
+                headerChip(model.text(.close), hovered: closeHovered) {
+                    model.dismissReleaseNotes()
+                }
+                .onHover { hovering in
+                    withAnimation(.easeOut(duration: 0.15)) { closeHovered = hovering }
+                }
+                .transition(.opacity)
+            } else if model.showsSetup {
                 if model.setupStatus.remaining > 0 {
                     headerChip(model.text(.later), hovered: laterHovered) {
                         model.finishSetup()
@@ -1281,6 +1303,7 @@ private struct ExpandedIslandContent: View {
         .frame(height: 22)
         .animation(.easeInOut(duration: 0.22), value: model.activities.isEmpty)
         .animation(.easeInOut(duration: 0.22), value: model.showsSettings)
+        .animation(.easeInOut(duration: 0.22), value: model.showsReleaseNotes)
         .animation(.easeInOut(duration: 0.22), value: model.showsSetup)
         .animation(.easeInOut(duration: 0.22), value: model.setupStatus.remaining)
     }
@@ -1469,6 +1492,44 @@ private struct ActivityRow: View {
         formatter.unitsStyle = .short
         return formatter
     }()
+}
+
+/// 인앱 업데이트가 끝난 뒤 다시 켜지면 보이는 패치 노트. 닫기 전에는 접히지 않는다.
+private struct ReleaseNotesView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let notes = model.releaseNotes {
+                Text(model.text(.notesInstalled, notes.version))
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(IslandColor.primary)
+                if !notes.body.isEmpty {
+                    ScrollView {
+                        Text(notes.body)
+                            .font(.system(size: 12))
+                            .foregroundStyle(IslandColor.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                }
+                if notes.page != nil {
+                    Button {
+                        model.openReleaseNotesPage()
+                    } label: {
+                        Text(model.text(.notesPage))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(IslandColor.update)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 4)
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
 }
 
 /// 업데이트를 받는 동안의 얇은 막대. 다 받고 설치를 준비하는 동안은 가득 찬 채로 숨 쉰다.

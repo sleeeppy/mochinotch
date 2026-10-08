@@ -118,6 +118,10 @@ final class AppModel {
     private(set) var shelf: [ShelfItem] = []
     /// 맡긴 파일 위에 마우스가 있어 부채꼴로 벌어진 상태.
     private(set) var shelfOpen = false
+    /// 노치 아래로 다가온 정도. 0이면 평소, 1이면 바로 아래. 사진이 조금 내려오고 커진다.
+    private(set) var shelfApproach: CGFloat = 0
+    /// 보이는 사진 중 커서에 가장 가까운 장. 그 장만 더 앞으로 나온다.
+    private(set) var shelfFocus: Int?
     /// 벌어진 채로 ⌘를 누르고 있으면 어느 사진을 끌어도 전부 꺼낸다.
     private(set) var shelfGrabsAll = false
     private var shelfModifierTimer: Timer?
@@ -148,6 +152,9 @@ final class AppModel {
     private(set) var pendingIntroPreview: IntroStudy?
     /// 권한과 AI 연결 안내. 처음 켰을 때 인트로 뒤에 열리고, 닫기 전까지 펼친 채로 둔다.
     private(set) var showsSetup = false
+    /// 인앱 업데이트가 끝나고 다시 켜진 직후, 방금 받은 버전의 패치 노트.
+    private(set) var showsReleaseNotes = false
+    private(set) var releaseNotes: ReleaseNotes?
     private(set) var setupStatus = SetupStatus()
     private(set) var agentLinkProgress = AgentLinkProgress.idle
     /// 화면 기록은 켠 뒤 앱을 다시 켜야 적용된다.
@@ -176,7 +183,7 @@ final class AppModel {
             rowCount: frozenRows ?? activities.count,
             peekSlots: noticeGroups.count,
             agentSlots: agentEarSuppressed ? 0 : agentGroups.count,
-            settingsHeight: showsSettings || showsSetup ? settingsHeight : nil,
+            settingsHeight: showsSettings || showsSetup || showsReleaseNotes ? settingsHeight : nil,
             listHeight: frozenRows != nil ? frozenListHeight : (activities.isEmpty ? nil : listHeight)
         )
     }
@@ -202,8 +209,10 @@ final class AppModel {
     /// 노치 아래로 삐져나온 사진 자리. 이 위에서는 목록을 펼치지 않고 사진만 벌린다.
     var shelfScreenRect: CGRect? {
         guard shelfVisible else { return nil }
-        let reach = shelfOpen ? ShelfLayout.openPeek : ShelfLayout.peek
-        let width = shelfOpen ? ShelfLayout.openWidth : ShelfLayout.restWidth
+        let reach = shelfOpen
+            ? ShelfLayout.openPeek + 8
+            : ShelfLayout.peek + shelfApproach * 16 + (shelfFocus == nil ? 0 : 12)
+        let width = shelfOpen ? ShelfLayout.openWidth : ShelfLayout.restWidth + shelfApproach * 56
         let bottom = notch.screenFrame.maxY - metrics.height
         return CGRect(x: notch.centerX - width / 2, y: bottom - reach - 6, width: width, height: reach + 6)
     }
@@ -272,6 +281,9 @@ final class AppModel {
         }
         controller.onShelfHover = { [weak self] inside in
             self?.setShelfOpen(inside)
+        }
+        controller.onShelfPointer = { [weak self] point in
+            self?.updateShelfPointer(point)
         }
         controller.start()
         panel = controller
@@ -387,6 +399,7 @@ final class AppModel {
                 self?.presentSetupIfPending()
             }
         }
+        loadPendingReleaseNotes()
         showWelcome()
     }
 
@@ -589,6 +602,7 @@ final class AppModel {
                     }
                 }
                 self?.updateProgress = 1
+                self?.rememberReleaseNotes(release)
                 self?.quit()
             } catch {
                 self?.updateProgress = nil
@@ -613,6 +627,80 @@ final class AppModel {
         activities.insert(activity, at: 0)
         featuredID = activity.id
     }
+
+    /// 바꿔 넣기가 성공하면 새 앱이 이 버전으로 켜진다. 그때 한 번 패치 노트를 펼친다.
+    private func rememberReleaseNotes(_ release: AppUpdater.Release) {
+        let version = Self.versionParts(release.version).map(String.init).joined(separator: ".")
+        guard !version.isEmpty else { return }
+        UserDefaults.standard.set(
+            [
+                "version": version,
+                "body": release.notes,
+                "page": release.page.absoluteString,
+            ],
+            forKey: Self.pendingNotesKey
+        )
+    }
+
+    /// 켜질 때, 방금 인앱으로 받은 버전이면 노트를 들고 있는다. 인사가 끝난 뒤에 펼친다.
+    private func loadPendingReleaseNotes() {
+        guard let stored = UserDefaults.standard.dictionary(forKey: Self.pendingNotesKey) as? [String: String],
+              let version = stored["version"],
+              version == (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
+        else { return }
+        releaseNotes = ReleaseNotes(
+            version: version,
+            body: Self.plainNotes(stored["body"] ?? ""),
+            page: stored["page"].flatMap(URL.init(string:))
+        )
+    }
+
+    func dismissReleaseNotes() {
+        withAnimation(IslandMotion.morph) {
+            showsReleaseNotes = false
+        }
+        if !isHovering {
+            setPresentation(.idle)
+        }
+    }
+
+    func openReleaseNotesPage() {
+        guard let page = releaseNotes?.page else { return }
+        NSWorkspace.shared.open(page)
+    }
+
+    private func presentInstalledNotes() {
+        guard releaseNotes != nil, !showsReleaseNotes else { return }
+        UserDefaults.standard.removeObject(forKey: Self.pendingNotesKey)
+        settingsHeight = 300
+        withAnimation(IslandMotion.morph) {
+            showsReleaseNotes = true
+        }
+        expandNow()
+    }
+
+    /// 마크다운과 HTML을 노치에서 읽을 글로 바꾼다.
+    private static func plainNotes(_ markdown: String) -> String {
+        var text = markdown
+        text = text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        text = text.replacingOccurrences(of: "!\\[[^\\]]*\\]\\([^)]*\\)", with: "", options: .regularExpression)
+        text = text.replacingOccurrences(of: "\\[([^\\]]+)\\]\\([^)]*\\)", with: "$1", options: .regularExpression)
+        text = text.replacingOccurrences(of: "(?m)^#{1,6}\\s*", with: "", options: .regularExpression)
+        text = text.replacingOccurrences(of: "[*_]{1,3}", with: "", options: .regularExpression)
+        text = text.replacingOccurrences(of: "(?m)^[ \\t]+|[ \\t]+$", with: "", options: .regularExpression)
+        while text.contains("\n\n\n") {
+            text = text.replacingOccurrences(of: "\n\n\n", with: "\n\n")
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static let pendingNotesKey = "pendingReleaseNotes"
+
+struct ReleaseNotes: Equatable {
+    var version: String
+    var body: String
+    var page: URL?
+}
 
     private func openReleasePage() {
         NSApp.activate(ignoringOtherApps: true)
@@ -738,6 +826,9 @@ final class AppModel {
     /// 켜질 때 인사가 끝났거나 건너뛴 뒤에 미뤄 둔 업데이트를 띄운다.
     private func finishLaunchIntro() {
         awaitingLaunchIntro = false
+        if releaseNotes != nil {
+            presentInstalledNotes()
+        }
         guard let version = pendingUpdateVersion else { return }
         pendingUpdateVersion = nil
         presentUpdateNotice(version)
@@ -1604,7 +1695,7 @@ final class AppModel {
         }
         if activity.isFailure {
             shakeToken += 1
-        } else if activity.bouncesIsland, !isHovering, !showsSetup {
+        } else if activity.bouncesIsland, !isHovering, !showsSetup, !showsReleaseNotes {
             boingToken += 1
         }
         let waiting = if case .agent(_, .needsInput, _, _, _) = activity.payload { true } else { false }
@@ -1614,7 +1705,7 @@ final class AppModel {
            let index = activities.firstIndex(where: { $0.id == activity.id }) {
             activities[index].hidesPeek = true
         }
-        if isHovering || showsSetup {
+        if isHovering || showsSetup || showsReleaseNotes {
             setPresentation(.expanded)
         } else if activity.isNotice {
             setPresentation(.idle)
@@ -1642,7 +1733,7 @@ final class AppModel {
         guard !ids.isEmpty else { return }
         let wasShowing = featuredID.map { ids.contains($0) } == true
         activities.removeAll { ids.contains($0.id) }
-        if wasShowing, !isHovering, !showsSetup {
+        if wasShowing, !isHovering, !showsSetup, !showsReleaseNotes {
             setPresentation(.idle)
         }
     }
@@ -1665,7 +1756,7 @@ final class AppModel {
             }
             return
         }
-        guard !isQuitting, introShape == nil, !showsSetup else {
+        guard !isQuitting, introShape == nil, !showsSetup, !showsReleaseNotes else {
             setFileDrag(nil)
             return
         }
@@ -1779,7 +1870,48 @@ final class AppModel {
         withAnimation(.spring(response: 0.36, dampingFraction: 0.8)) {
             shelf.removeAll()
             shelfOpen = false
+            shelfApproach = 0
+            shelfFocus = nil
         }
+        panel?.updateMouse()
+    }
+
+    /// 노치 아래에 있으면 사진을 조금씩 내리고, 가로로 가장 가까운 장을 고른다.
+    private func updateShelfPointer(_ point: CGPoint) {
+        guard shelfVisible else {
+            guard shelfApproach != 0 || shelfFocus != nil else { return }
+            shelfApproach = 0
+            shelfFocus = nil
+            panel?.updateMouse()
+            return
+        }
+        let center = notch.centerX
+        let bottom = notch.screenFrame.maxY - metrics.height
+        let below = bottom - point.y
+        let dx = abs(point.x - center)
+        let inZone = below > -6 && below < 110 && dx < 130
+        let raw: CGFloat = inZone
+            ? min(1, max(0, 1 - max(dx / 130, max(0, below - 4) / 100)))
+            : 0
+        let stepped = (raw * 16).rounded() / 16
+        let shown = Array(shelf.suffix(ShelfLayout.maxCards))
+        let spread = shelfOpen ? 2.6 : 1 + stepped * 0.85
+        let fanX: [CGFloat] = [0, -9, 9]
+        var focus: Int?
+        if stepped > 0.12, !shown.isEmpty {
+            var best = CGFloat.greatestFiniteMagnitude
+            for index in shown.indices {
+                let slot = min(shown.count - 1 - index, fanX.count - 1)
+                let dist = abs(point.x - (center + fanX[slot] * spread))
+                if dist < best {
+                    best = dist
+                    focus = index
+                }
+            }
+        }
+        guard abs(stepped - shelfApproach) > 0.01 || focus != shelfFocus else { return }
+        shelfApproach = stepped
+        shelfFocus = focus
         panel?.updateMouse()
     }
 
@@ -1858,7 +1990,7 @@ final class AppModel {
                     guard !Task.isCancelled else { return }
                 }
                 guard !self.isHovering else { return }
-                if self.presentation == .expanded, !self.showsSetup {
+                if self.presentation == .expanded, !self.showsSetup, !self.showsReleaseNotes {
                     // 받는 중이면 접힌 노치 귀에 진행을 남긴다.
                     if self.installingUpdate, let update = self.activities.first(where: \.isUpdateNotice) {
                         self.featuredID = update.id
@@ -1921,6 +2053,7 @@ final class AppModel {
     private func commitPresentation(_ next: IslandPresentation) {
         if presentation == .expanded, next != .expanded {
             showsSettings = false
+            showsReleaseNotes = false
             if showsSetup {
                 showsSetup = false
                 stopSetupPolling()
