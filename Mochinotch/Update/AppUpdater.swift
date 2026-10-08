@@ -8,6 +8,7 @@ enum AppUpdater {
     struct Release: Equatable {
         var version: String
         var page: URL
+        var notes: String
         var dmg: URL?
         /// GitHub가 올린 파일마다 붙여 주는 SHA-256.
         var sha256: String?
@@ -32,7 +33,8 @@ enum AppUpdater {
             guard value.hasPrefix("sha256:") else { return nil }
             return String(value.dropFirst("sha256:".count)).lowercased()
         }
-        return Release(version: tag, page: page, dmg: url, sha256: digest)
+        let notes = json["body"] as? String ?? ""
+        return Release(version: tag, page: page, notes: notes, dmg: url, sha256: digest)
     }
 
     /// DMG 안에서 바로 켰거나 macOS가 격리한 사본이면 바꿀 자리가 없다.

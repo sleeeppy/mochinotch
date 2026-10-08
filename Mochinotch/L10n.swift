@@ -74,6 +74,7 @@ enum L10n {
         case charging, unplugged, chargedFull
         case powerOn, powerBattery, batteryFull
         case newUpdate, updateOut, tapUpdate, notice
+        case notesInstalled, notesPage
         case setupLeft, setupTap, setupBadge, updateBadge
         case introHint, confirmTitle, permissionAsk
         case setupTitle, setupBody
@@ -166,6 +167,8 @@ enum L10n {
             .updateOut: "v%@이 나왔어요",
             .tapUpdate: "눌러서 업데이트",
             .notice: "알림",
+            .notesInstalled: "v%@이 설치됐어요",
+            .notesPage: "릴리즈 페이지",
             .setupLeft: "설정할 게 %d개 남았어요",
             .setupTap: "눌러서 켜기",
             .setupBadge: "설정",
@@ -276,6 +279,8 @@ enum L10n {
             .updateOut: "v%@ が出ました",
             .tapUpdate: "押してアップデート",
             .notice: "通知",
+            .notesInstalled: "v%@ を入れました",
+            .notesPage: "リリースページ",
             .setupLeft: "設定が %d 件残っています",
             .setupTap: "押してオン",
             .setupBadge: "設定",
@@ -386,6 +391,8 @@ enum L10n {
             .updateOut: "v%@ is out",
             .tapUpdate: "Press to update",
             .notice: "Notice",
+            .notesInstalled: "v%@ is installed",
+            .notesPage: "Release page",
             .setupLeft: "%d things left to set up",
             .setupTap: "Press to turn on",
             .setupBadge: "Setup",
@@ -496,6 +503,8 @@ enum L10n {
             .updateOut: "v%@ 已发布",
             .tapUpdate: "点按即可更新",
             .notice: "通知",
+            .notesInstalled: "已安装 v%@",
+            .notesPage: "发行页面",
             .setupLeft: "还有 %d 项要设置",
             .setupTap: "点按即可打开",
             .setupBadge: "设置",

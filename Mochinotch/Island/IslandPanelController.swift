@@ -22,6 +22,8 @@ final class IslandPanelController {
     /// 노치 아래 맡긴 파일 자리. 이 위에서는 목록 대신 사진을 벌린다.
     var shelfRectProvider: () -> CGRect? = { nil }
     var onShelfHover: (Bool) -> Void = { _ in }
+    /// 맡긴 파일 근처의 커서. 다가오면 사진이 내려오고, 가장 가까운 장이 앞으로 나온다.
+    var onShelfPointer: (CGPoint) -> Void = { _ in }
     private var lastShelfInside = false
     /// 누른 순간의 끌기 보드. 이 값이 바뀌어야 새 끌기가 시작된 것이다.
     private var dragBaseline = NSPasteboard(name: .drag).changeCount
@@ -119,8 +121,9 @@ final class IslandPanelController {
     }
 
     func trackPointer() {
-        updateMouse()
         let point = NSEvent.mouseLocation
+        onShelfPointer(point)
+        updateMouse()
         let onShelf = !draggingOut && (shelfRectProvider()?.contains(point) ?? false)
         if onShelf != lastShelfInside {
             lastShelfInside = onShelf
