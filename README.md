@@ -48,7 +48,8 @@ AI Agent(Claude Code, Cursor, Codex, Kiro)가 작업을 마치면 노치가 옆�
 
 ### 에이전트가 답을 기다리면
 
-Claude와 Codex가 승인 창이나 질문 카드를 띄우면 노치에 주황색 **확인**이 열려요. 답을 고를 때까지 펼쳐 두고, 화면 가장자리는 빛나지 않아요.
+Claude와 Codex가 승인 창이나 질문 카드를 띄우면 노치에 주황색 **확인**이 열려요. 
+<br/> 답을 고를 때까지 펼쳐 두고, 화면 가장자리는 빛나지 않아요.
 
 <p align="center">
   <img src="docs/images/confirm.gif" width="720" alt="Cursor가 질문을 띄우면 노치에 주황색 확인이 열리고, 펼치면 질문 내용이 보이는 모습">
