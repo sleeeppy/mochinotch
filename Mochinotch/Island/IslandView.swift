@@ -1497,37 +1497,60 @@ private struct ActivityRow: View {
 /// 인앱 업데이트가 끝난 뒤 다시 켜지면 보이는 패치 노트. 닫기 전에는 접히지 않는다.
 private struct ReleaseNotesView: View {
     @Environment(AppModel.self) private var model
+    @State private var pageHovered = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             if let notes = model.releaseNotes {
                 Text(model.text(.notesInstalled, notes.version))
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(IslandColor.primary)
                 if !notes.body.isEmpty {
-                    ScrollView {
-                        Text(notes.body)
-                            .font(.system(size: 12))
-                            .foregroundStyle(IslandColor.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                    }
+                    Text(notes.body)
+                        .font(.system(size: 12))
+                        .foregroundStyle(IslandColor.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
                 }
                 if notes.page != nil {
                     Button {
                         model.openReleaseNotesPage()
                     } label: {
-                        Text(model.text(.notesPage))
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(IslandColor.update)
+                        HStack(spacing: 4) {
+                            Text(model.text(.notesPage))
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.black.opacity(pageHovered ? 0.8 : 0.92))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule().fill(IslandColor.update.opacity(pageHovered ? 0.9 : 1))
+                        )
+                        .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
+                    .padding(.top, 2)
+                    .onHover { hovering in
+                        withAnimation(.easeOut(duration: 0.15)) { pageHovered = hovering }
+                    }
                 }
             }
         }
         .padding(.horizontal, 14)
         .padding(.top, 4)
-        .padding(.bottom, 10)
+        .padding(.bottom, 16)
+        .fixedSize(horizontal: false, vertical: true)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: SettingsHeightKey.self, value: proxy.size.height)
+            }
+        }
+        .onPreferenceChange(SettingsHeightKey.self) { height in
+            model.setSettingsHeight(height)
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
