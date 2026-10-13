@@ -11,6 +11,8 @@ enum Launcher {
             exit(HookRelay.run(Array(arguments.dropFirst())))
         case "--install-hooks":
             exit(installHooks())
+        case "--self-test":
+            exit(NotificationWatcherSelfTest.run())
         default:
             MochinotchApp.main()
         }
