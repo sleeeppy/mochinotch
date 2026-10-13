@@ -3,8 +3,12 @@ import SQLite3
 
 /// Phase 4a. 알림 센터 DB를 실제로 해석하지 않고, 읽기 가능 여부와 테이블 이름만 확인한다.
 enum NotificationProbe {
+    /// 테스트가 가짜 데이터베이스를 가리킬 때 쓴다.
+    static var databaseOverride: URL?
+
     static var databaseURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        if let databaseOverride { return databaseOverride }
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Group Containers/group.com.apple.usernoted/db2/db")
     }
 

@@ -38,6 +38,8 @@ final class NotificationWatcher {
     private var recentKeys: [String: Date] = [:]
     /// 배너로 이미 보여 준 기록. 행이 지워지거나 알림센터 목록에서 빠지면 노치에서도 뺀다.
     private var tracked: [Int64: TrackedNotice] = [:]
+    /// 원본 데이터베이스와 WAL의 수정 시각. 그대로면 복사와 조회를 건너뛴다.
+    private var lastDatabaseStamp: DatabaseStamp?
     /// 배너는 떴는데 아직 데이터베이스 행과 연결하지 못한 알림.
     private var pending: [(bundleID: String, title: String, body: String, at: Date)] = []
     private var bundleIDsByName: [String: String] = [:]
@@ -65,17 +67,53 @@ final class NotificationWatcher {
         }
     }
 
+    /// 타이머 없이 한 번만 확인한다.
+    func checkOnce() {
+        tick()
+    }
+
+    /// 테스트에서는 배너 탐색과 로그를 끈다.
+    static var readsBanners = true
+    static var writesLog = true
+    /// 사본을 두는 폴더. 테스트는 따로 지정한다.
+    static var snapshotRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("mochinotch-noted", isDirectory: true)
+
     private func tick() {
-        for notice in readBanners() where accept(notice) {
-            let shown = Self.storedText(notice)
-            pending.append((notice.bundleID, shown.title, shown.body, Date()))
-            Self.log("banner \(notice.bundleID) \(notice.title)")
-            deliver(notice)
+        if Self.readsBanners {
+            for notice in readBanners() where accept(notice) {
+                let shown = Self.storedText(notice)
+                pending.append((notice.bundleID, shown.title, shown.body, Date()))
+                Self.log("banner \(notice.bundleID) \(notice.title)")
+                deliver(notice)
+            }
         }
-        guard let db = openLive() else { return }
+        let source = NotificationProbe.databaseURL
+        guard FileManager.default.isReadableFile(atPath: source.path) else {
+            let listable = (try? FileManager.default.contentsOfDirectory(atPath: source.deletingLastPathComponent().path)) != nil
+            report(listable ? .missingDatabase : .denied)
+            Self.log("open denied listable=\(listable)")
+            return
+        }
+        let stamp = Self.databaseStamp(source)
+        if let stamp, stamp == lastDatabaseStamp, lastID != nil {
+            // 배너만 먼저 온 경우에는 이미 떠 둔 사본으로 연결을 이어 간다.
+            guard !pending.isEmpty else { return }
+            guard let db = openKeptSnapshot() else {
+                pending.removeAll { Date().timeIntervalSince($0.at) > 45 }
+                return
+            }
+            defer { sqlite3_close(db) }
+            linkPending(db)
+            return
+        }
+        guard let opened = openLive() else { return }
+        let db = opened.db
         defer { sqlite3_close(db) }
         if lastID == nil {
-            lastID = maxRecordID(db)
+            guard let baseline = maxRecordID(db) else { return }
+            lastID = baseline
+            if opened.snapshotted { lastDatabaseStamp = stamp }
             Self.log("baseline id=\(lastID ?? -1)")
             return
         }
@@ -90,15 +128,15 @@ final class NotificationWatcher {
                 bundleID: record.notice.bundleID,
                 title: stored.title,
                 body: stored.body,
-                uuid: record.uuid,
-                confirmedInDelivered: false
+                uuid: record.uuid
             )
             guard !known, accept(record.notice) else { continue }
             Self.log("notice \(record.notice.bundleID) \(stored.title)")
             deliver(record.notice)
         }
         linkPending(db)
-        dismissCleared(db)
+        guard dismissCleared(db) else { return }
+        if opened.snapshotted { lastDatabaseStamp = stamp }
     }
 
 
@@ -107,7 +145,37 @@ final class NotificationWatcher {
         var title: String
         var body: String
         var uuid: Data
+        /// 소문자 UUID 문자열. 목록에 글자로 들어 있는 경우를 찾는다.
+        var uuidText: String
         var confirmedInDelivered: Bool
+
+        init(bundleID: String, title: String, body: String, uuid: Data) {
+            self.bundleID = bundleID
+            self.title = title
+            self.body = body
+            self.uuid = uuid
+            self.uuidText = Self.text(of: uuid)
+            self.confirmedInDelivered = false
+        }
+
+        private static func text(of uuid: Data) -> String {
+            guard uuid.count == 16 else { return "" }
+            let bytes = [UInt8](uuid)
+            return UUID(uuid: (
+                bytes[0], bytes[1], bytes[2], bytes[3],
+                bytes[4], bytes[5], bytes[6], bytes[7],
+                bytes[8], bytes[9], bytes[10], bytes[11],
+                bytes[12], bytes[13], bytes[14], bytes[15]
+            )).uuidString.lowercased()
+        }
+    }
+
+    /// 원본 `db`와 `db-wal`의 수정 시각(나노초)과 크기.
+    private struct DatabaseStamp: Equatable {
+        var dbTime: Int64
+        var dbSize: Int64
+        var walTime: Int64
+        var walSize: Int64
     }
 
     /// 배너와 글자가 달라도, 그 앱의 가장 최근 기록을 배너에 붙인다.
@@ -136,8 +204,7 @@ final class NotificationWatcher {
                 bundleID: item.bundleID,
                 title: item.title,
                 body: item.body,
-                uuid: row.uuid,
-                confirmedInDelivered: false
+                uuid: row.uuid
             )
             Self.log("linked \(row.id) \(item.bundleID)")
             let bundleID = item.bundleID
@@ -149,15 +216,16 @@ final class NotificationWatcher {
     }
 
     /// 알림센터에서 기록이 사라지거나, 보여 주던 목록에서 빠지면 바로 뺀다.
-    private func dismissCleared(_ db: OpaquePointer) {
-        guard !tracked.isEmpty else { return }
-        guard let present = existingIDs(db, ids: Array(tracked.keys)) else { return }
-        let lists = deliveredLists(db)
+    /// 조회에 실패하면 false. 다음 번에 같은 파일을 다시 본다.
+    private func dismissCleared(_ db: OpaquePointer) -> Bool {
+        guard !tracked.isEmpty else { return true }
+        guard let present = existingIDs(db, ids: Array(tracked.keys)) else { return false }
+        guard let lists = deliveredLists(db) else { return false }
+        let index = DeliveredIndex(lists)
         let gone = tracked.keys.filter { id in
             guard let stored = tracked[id] else { return false }
             if !present.contains(id) { return true }
-            let listed = listsContain(stored.uuid, lists)
-            if listed {
+            if index.contains(stored.uuid, text: stored.uuidText) {
                 tracked[id]?.confirmedInDelivered = true
                 return false
             }
@@ -175,6 +243,7 @@ final class NotificationWatcher {
                 onDismiss?(bundleID, title, body)
             }
         }
+        return true
     }
 
     private var loggedMissingLinks = Set<String>()
@@ -214,9 +283,9 @@ final class NotificationWatcher {
         return nil
     }
 
-    private func deliveredLists(_ db: OpaquePointer) -> [Data] {
+    private func deliveredLists(_ db: OpaquePointer) -> [Data]? {
         var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT list FROM delivered", -1, &statement, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(db, "SELECT list FROM delivered", -1, &statement, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(statement) }
         var lists: [Data] = []
         while sqlite3_step(statement) == SQLITE_ROW {
@@ -227,18 +296,75 @@ final class NotificationWatcher {
         return lists
     }
 
-    private func listsContain(_ uuid: Data, _ lists: [Data]) -> Bool {
-        guard uuid.count == 16 else { return false }
-        if lists.contains(where: { $0.range(of: uuid) != nil }) { return true }
-        let bytes = [UInt8](uuid)
-        let formatted = UUID(uuid: (
-            bytes[0], bytes[1], bytes[2], bytes[3],
-            bytes[4], bytes[5], bytes[6], bytes[7],
-            bytes[8], bytes[9], bytes[10], bytes[11],
-            bytes[12], bytes[13], bytes[14], bytes[15]
-        )).uuidString
-        let encoded = [formatted.lowercased(), formatted.uppercased()].compactMap { $0.data(using: .utf8) }
-        return lists.contains { list in encoded.contains { list.range(of: $0) != nil } }
+    /// `delivered.list`는 16바이트 UUID가 이어진 값이다. 한 번만 나눠 두고 찾는다.
+    struct DeliveredIndex {
+        var packed: Set<Data>
+        var loose: [Data]
+        var texts: Set<String>
+
+        init(_ lists: [Data]) {
+            var packed = Set<Data>()
+            var loose: [Data] = []
+            var texts = Set<String>()
+            for list in lists {
+                if list.count >= 16, list.count.isMultiple(of: 16) {
+                    var offset = 0
+                    while offset + 16 <= list.count {
+                        packed.insert(list.subdata(in: offset..<(offset + 16)))
+                        offset += 16
+                    }
+                } else if !list.isEmpty {
+                    loose.append(list)
+                }
+                texts.formUnion(Self.uuidTexts(in: list))
+            }
+            self.packed = packed
+            self.loose = loose
+            self.texts = texts
+        }
+
+        func contains(_ uuid: Data, text: String) -> Bool {
+            guard uuid.count == 16 else { return false }
+            if packed.contains(uuid) { return true }
+            if !text.isEmpty, texts.contains(text) { return true }
+            return loose.contains { $0.range(of: uuid) != nil }
+        }
+
+        private static func uuidTexts(in data: Data) -> Set<String> {
+            let bytes = [UInt8](data)
+            guard bytes.count >= 36 else { return [] }
+            var found = Set<String>()
+            var index = 0
+            while index + 36 <= bytes.count {
+                if isUUIDText(bytes, at: index) {
+                    let slice = Data(bytes[index..<(index + 36)])
+                    if let text = String(data: slice, encoding: .ascii) {
+                        found.insert(text.lowercased())
+                    }
+                    index += 36
+                } else {
+                    index += 1
+                }
+            }
+            return found
+        }
+
+        private static func isUUIDText(_ bytes: [UInt8], at index: Int) -> Bool {
+            for offset in 0..<36 {
+                let byte = bytes[index + offset]
+                let isDash = offset == 8 || offset == 13 || offset == 18 || offset == 23
+                if isDash {
+                    if byte != 45 { return false }
+                } else if !isHex(byte) {
+                    return false
+                }
+            }
+            return true
+        }
+
+        private static func isHex(_ byte: UInt8) -> Bool {
+            (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)
+        }
     }
 
     private func deliver(_ notice: SystemNotice) {
@@ -367,7 +493,9 @@ final class NotificationWatcher {
     private func bundleID(forAppName name: String) -> String? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        if let cached = bundleIDsByName[trimmed] { return cached }
+        if let cached = bundleIDsByName[trimmed] {
+            return cached.isEmpty ? nil : cached
+        }
         let directories = [
             "/Applications",
             "/System/Applications",
@@ -386,6 +514,8 @@ final class NotificationWatcher {
                 }
             }
         }
+        // 못 찾은 이름도 기억한다. 배너가 떠 있는 동안 같은 폴더를 다시 훑지 않는다.
+        bundleIDsByName[trimmed] = ""
         return nil
     }
 
@@ -405,7 +535,7 @@ final class NotificationWatcher {
     }
 
     /// 읽기 전용으로 원본을 열면 WAL에만 있는 최신 알림이 안 보인다. 세 파일을 같이 떠서 연다.
-    private func openLive() -> OpaquePointer? {
+    private func openLive() -> (db: OpaquePointer, snapshotted: Bool)? {
         let source = NotificationProbe.databaseURL
         guard FileManager.default.isReadableFile(atPath: source.path) else {
             let listable = (try? FileManager.default.contentsOfDirectory(atPath: source.deletingLastPathComponent().path)) != nil
@@ -413,27 +543,63 @@ final class NotificationWatcher {
             Self.log("open denied listable=\(listable)")
             return nil
         }
-        let path = snapshotDatabase(source)?.path ?? source.path
+        if let snapshot = snapshotDatabase(source), let handle = openDatabase(at: snapshot.path, reportErrors: false) {
+            report(.watching)
+            return (handle, true)
+        }
+        guard let handle = openDatabase(at: source.path) else { return nil }
+        report(.watching)
+        return (handle, false)
+    }
+
+    /// 파일이 안 바뀐 틱에서, 직전에 떠 둔 사본을 다시 연다.
+    private func openKeptSnapshot() -> OpaquePointer? {
+        let path = Self.snapshotDatabaseURL().path
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        return openDatabase(at: path, reportErrors: false)
+    }
+
+    private func openDatabase(at path: String, reportErrors: Bool = true) -> OpaquePointer? {
         var handle: OpaquePointer?
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX
-        let uri = "file:\(path)?immutable=1"
+        // 사본은 우리만 쓴다. immutable로 열면 WAL이 무시돼서 방금 온 기록이 안 보인다.
+        let uri = "file:\(path)?mode=ro"
         guard sqlite3_open_v2(uri, &handle, flags, nil) == SQLITE_OK, let handle else {
             let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
             sqlite3_close(handle)
-            report(message.contains("authorization") ? .denied : .failed(message))
-            Self.log("open failed \(message)")
+            if reportErrors {
+                report(message.contains("authorization") ? .denied : .failed(message))
+                Self.log("open failed \(message)")
+            }
             return nil
         }
         sqlite3_busy_timeout(handle, 80)
-        report(.watching)
         return handle
     }
 
+    private static func snapshotDatabaseURL() -> URL {
+        snapshotRoot.appendingPathComponent("db")
+    }
+
+    /// 나노초 단위 수정 시각과 크기. 둘 다 같으면 내용이 그대로다.
+    private static func databaseStamp(_ source: URL) -> DatabaseStamp? {
+        guard let db = revision(source.path) else { return nil }
+        let wal = revision(source.path + "-wal") ?? (0, 0)
+        return DatabaseStamp(dbTime: db.0, dbSize: db.1, walTime: wal.0, walSize: wal.1)
+    }
+
+    private static func revision(_ path: String) -> (Int64, Int64)? {
+        var info = stat()
+        guard path.withCString({ fileStatus($0, &info) }) == 0 else { return nil }
+        let time = Int64(info.st_mtimespec.tv_sec) * 1_000_000_000 + Int64(info.st_mtimespec.tv_nsec)
+        return (time, Int64(info.st_size))
+    }
+
     private func snapshotDatabase(_ source: URL) -> URL? {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("mochinotch-noted", isDirectory: true)
+        let dest = Self.snapshotDatabaseURL()
+        let root = dest.deletingLastPathComponent()
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-            let dest = root.appendingPathComponent("db")
             for suffix in ["", "-wal", "-shm"] {
                 let from = URL(fileURLWithPath: source.path + suffix)
                 let to = URL(fileURLWithPath: dest.path + suffix)
@@ -447,6 +613,8 @@ final class NotificationWatcher {
             return dest
         } catch {
             Self.log("snapshot failed")
+            try? FileManager.default.removeItem(at: dest)
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: dest.path + "-wal"))
             return nil
         }
     }
@@ -611,6 +779,7 @@ final class NotificationWatcher {
     }
 
     private static func log(_ message: String) {
+        guard writesLog else { return }
         let line = "\(ISO8601DateFormatter().string(from: Date())) \(message)\n"
         guard let data = line.data(using: .utf8) else { return }
         let targets = [
@@ -630,6 +799,10 @@ final class NotificationWatcher {
         }
     }
 }
+
+/// `stat` 구조체와 함수 이름이 같아서 C 함수를 직접 부른다.
+@_silgen_name("stat")
+private func fileStatus(_ path: UnsafePointer<CChar>, _ info: UnsafeMutablePointer<stat>) -> Int32
 
 /// 같은 알림 센터 요소는 `CFEqual`로 같다. 포인터만 다르고 같은 노드를 다시 주면 재귀가 멈추게 한다.
 private struct AXVisit: Hashable {
