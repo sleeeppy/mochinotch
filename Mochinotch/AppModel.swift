@@ -45,6 +45,8 @@ final class AppModel {
     private var unstoredBundles: Set<String> = []
     /// Dock에 숫자 뱃지가 있던 앱. 뱃지가 없어지면 그 앱의 오른쪽 알림은 읽힌 것이다.
     private var dockBadgeCounts: [String: Int] = [:]
+    /// 오른쪽 알림을 거둘 때만 돌아간다. 알림이 없으면 Dock을 훑지 않는다.
+    private var backgroundWatch: Timer?
     /// 펼치기 전과 접힌 직후에는 왼쪽 귀를 숨긴다. 다 접힌 뒤에 다시 내민다.
     private var agentEarSuppressed = false
     /// 펼치기 직전, 모양은 둔 채 왼쪽 아이콘만 먼저 거둔다.
@@ -313,11 +315,13 @@ final class AppModel {
         notifications.onUnstored = { [weak self] bundleID in
             Task { @MainActor in
                 self?.unstoredBundles.insert(bundleID.lowercased())
+                self?.updateBackgroundWatch()
             }
         }
         notifications.onStored = { [weak self] bundleID in
             Task { @MainActor in
                 self?.unstoredBundles.remove(bundleID.lowercased())
+                self?.updateBackgroundWatch()
             }
         }
         notifications.onAccessChange = { [weak self] access in
@@ -340,12 +344,6 @@ final class AppModel {
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(8))
                 self?.checkForUpdate()
-            }
-        }
-        Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.syncOpenConversation()
-                self?.syncDockBadges()
             }
         }
 
@@ -1170,6 +1168,57 @@ struct ReleaseNotes: Equatable {
         }
     }
 
+    /// 접힌 오른쪽에 알림이 남아 있다. 이것만 Dock 뱃지로 거둔다.
+    private var hasClearableNotices: Bool {
+        activities.contains { activity in
+            guard !activity.hidesPeek, !activity.staysOnLeft else { return false }
+            if case .notice = activity.payload { return true }
+            return false
+        }
+    }
+
+    private var needsBackgroundWatch: Bool {
+        hasClearableNotices || !unstoredBundles.isEmpty
+    }
+
+    /// 알림이 있을 때만 1.5초마다 확인한다. 없으면 타이머 자체를 끈다.
+    private func updateBackgroundWatch() {
+        guard needsBackgroundWatch else {
+            backgroundWatch?.invalidate()
+            backgroundWatch = nil
+            dockBadgeCounts.removeAll()
+            return
+        }
+        guard backgroundWatch == nil else { return }
+        let timer = Timer(timeInterval: 1.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.runBackgroundWatch()
+            }
+        }
+        timer.tolerance = 0.4
+        RunLoop.main.add(timer, forMode: .common)
+        backgroundWatch = timer
+        Task { @MainActor [weak self] in
+            self?.runBackgroundWatch()
+        }
+    }
+
+    private func runBackgroundWatch() {
+        guard needsBackgroundWatch else {
+            updateBackgroundWatch()
+            return
+        }
+        if !unstoredBundles.isEmpty {
+            syncOpenConversation()
+        }
+        if hasClearableNotices {
+            syncDockBadges()
+        }
+        if !needsBackgroundWatch {
+            updateBackgroundWatch()
+        }
+    }
+
     /// Dock 뱃지가 있다가 사라지면, 그 앱의 오른쪽 알림은 전부 읽힌 것이다.
     /// 뱃지를 한 번도 안 다는 앱은 건드리지 않는다. 디스코드는 지금 뱃지가 없다.
     private func syncDockBadges() {
@@ -1232,9 +1281,10 @@ struct ReleaseNotes: Equatable {
         if roleName == "AXList" { sawList = true }
         if roleName == "AXDockItem" {
             sawList = true
-            guard let title = axString(element, kAXTitleAttribute as CFString),
-                  let bundleID = bundleID(matchingDockTitle: title),
-                  let count = dockBadgeCount(element), count > 0 else { return }
+            // 뱃지가 없는 항목은 앱 이름을 찾지 않는다. 이름 조회가 실행 중인 앱마다 시스템 호출이다.
+            guard let count = dockBadgeCount(element), count > 0,
+                  let title = axString(element, kAXTitleAttribute as CFString),
+                  let bundleID = bundleID(matchingDockTitle: title) else { return }
             counts[bundleID.lowercased()] = count
             return
         }
@@ -1259,14 +1309,25 @@ struct ReleaseNotes: Equatable {
         return value as? String
     }
 
+    /// 실행 중인 앱 구성이 그대로면 이름을 다시 묻지 않는다.
+    private static var dockTitlePIDs: Set<pid_t> = []
+    private static var dockBundleIDByTitle: [String: String] = [:]
+
     private static func bundleID(matchingDockTitle title: String) -> String? {
-        let wanted = title.precomposedStringWithCanonicalMapping
-        for app in NSWorkspace.shared.runningApplications {
-            guard let name = app.localizedName?.precomposedStringWithCanonicalMapping,
-                  let bundleID = app.bundleIdentifier else { continue }
-            if name.caseInsensitiveCompare(wanted) == .orderedSame { return bundleID }
+        let apps = NSWorkspace.shared.runningApplications
+        let pids = Set(apps.map(\.processIdentifier))
+        if pids != dockTitlePIDs {
+            dockTitlePIDs = pids
+            var map: [String: String] = [:]
+            for app in apps {
+                guard let name = app.localizedName?.precomposedStringWithCanonicalMapping.lowercased(),
+                      let bundleID = app.bundleIdentifier else { continue }
+                map[name] = bundleID
+            }
+            dockBundleIDByTitle = map
         }
-        return nil
+        let wanted = title.precomposedStringWithCanonicalMapping.lowercased()
+        return dockBundleIDByTitle[wanted]
     }
 
     /// 기록이 없는 알림은, 그 대화창을 실제로 열고 있을 때만 거둔다.
@@ -1358,6 +1419,7 @@ struct ReleaseNotes: Equatable {
                 activities[index].hidesPeek = true
             }
         }
+        updateBackgroundWatch()
     }
 
     func clearHistory() {
@@ -1372,6 +1434,7 @@ struct ReleaseNotes: Equatable {
             activities.removeAll()
             featuredID = nil
         }
+        updateBackgroundWatch()
         if isHovering {
             refreshPanel()
             clearTask = Task { [weak self] in
@@ -1674,6 +1737,7 @@ struct ReleaseNotes: Equatable {
         }
         activities.insert(activity, at: 0)
         activities = Array(activities.prefix(MochinotchConfig.historyLimit))
+        updateBackgroundWatch()
         if keepCurrentCompact {
             return
         }
