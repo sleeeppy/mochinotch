@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import Foundation
+import os
 import SQLite3
 
 struct SystemNotice: Equatable {
@@ -48,20 +49,65 @@ final class NotificationWatcher {
     /// 알림 센터 접근성 트리가 자기 자신을 자식으로 돌려줘도 탐색이 끝나게 하는 한도.
     private static let maxAXDepth = 64
     private static let maxAXNodes = 2_000
+    /// 배너 창을 지켜 보는 알림 센터 프로세스. 0이면 아직 관찰자가 없다.
+    private struct BannerWatch {
+        var pid: pid_t = 0
+        var retryAt: TimeInterval = 0
+    }
+    private let bannerWatch = OSAllocatedUnfairLock(initialState: BannerWatch())
+    private var bannerAX: AXObserver?
+    private var bannerLaunchObserver: NSObjectProtocol?
+    private var bannerTerminateObserver: NSObjectProtocol?
+    private var bannerReread: DispatchWorkItem?
 
     func start() {
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now(), repeating: .milliseconds(100), leeway: .milliseconds(15))
+        // 조용할 때는 0.5초. 배너 창이 생기면 관찰자가 그 사이를 바로 읽는다.
+        timer.schedule(deadline: .now(), repeating: .milliseconds(500), leeway: .milliseconds(120))
         timer.setEventHandler { [weak self] in
             self?.tick()
         }
         timer.resume()
         self.timer = timer
+        let center = NSWorkspace.shared.notificationCenter
+        bannerLaunchObserver = center.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  app.bundleIdentifier == "com.apple.notificationcenterui" else { return }
+            self?.installBannerObserver()
+        }
+        bannerTerminateObserver = center.addObserver(
+            forName: NSWorkspace.didTerminateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  app.bundleIdentifier == "com.apple.notificationcenterui" else { return }
+            self?.removeBannerObserver()
+        }
+        installBannerObserver()
     }
 
     func stop() {
         timer?.cancel()
         timer = nil
+        bannerReread?.cancel()
+        bannerReread = nil
+        let center = NSWorkspace.shared.notificationCenter
+        if let bannerLaunchObserver { center.removeObserver(bannerLaunchObserver) }
+        if let bannerTerminateObserver { center.removeObserver(bannerTerminateObserver) }
+        bannerLaunchObserver = nil
+        bannerTerminateObserver = nil
+        if Thread.isMainThread {
+            removeBannerObserver()
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.removeBannerObserver()
+            }
+        }
         queue.async { [weak self] in
             self?.lastID = nil
         }
@@ -387,6 +433,80 @@ final class NotificationWatcher {
         return true
     }
 
+    /// 배너 창이 만들어지는 순간에만 부른다. 창이 비어 있으면 잠시 뒤 한 번 더 읽는다.
+    private func noteBannerWindow() {
+        tick()
+        guard bannerReread == nil else { return }
+        let follow = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.bannerReread = nil
+            self.tick()
+        }
+        bannerReread = follow
+        queue.asyncAfter(deadline: .now() + .milliseconds(150), execute: follow)
+    }
+
+    private func installBannerObserver() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.installBannerObserver()
+            }
+            return
+        }
+        guard Self.readsBanners, AXIsProcessTrusted(),
+              let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.notificationcenterui").first
+        else { return }
+        let pid = app.processIdentifier
+        if bannerAX != nil, bannerWatch.withLock({ $0.pid == pid }) { return }
+        removeBannerObserver()
+        var observer: AXObserver?
+        let refcon = Unmanaged.passUnretained(self).toOpaque()
+        guard AXObserverCreate(pid, Self.bannerAXCallback, &observer) == .success, let observer else { return }
+        let element = AXUIElementCreateApplication(pid)
+        guard AXObserverAddNotification(observer, element, kAXWindowCreatedNotification as CFString, refcon) == .success else {
+            return
+        }
+        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
+        bannerAX = observer
+        bannerWatch.withLock { $0.pid = pid }
+    }
+
+    private func removeBannerObserver() {
+        guard Thread.isMainThread else { return }
+        if let bannerAX {
+            let pid = bannerWatch.withLock { $0.pid }
+            if pid != 0 {
+                let element = AXUIElementCreateApplication(pid)
+                AXObserverRemoveNotification(bannerAX, element, kAXWindowCreatedNotification as CFString)
+            }
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(bannerAX), .commonModes)
+        }
+        bannerAX = nil
+        bannerWatch.withLock { $0.pid = 0 }
+    }
+
+    /// 손쉬운 사용이 나중에 켜지거나 알림 센터가 다시 떠도, 관찰을 한 번만 다시 건다.
+    private func ensureBannerObserver(pid: pid_t) {
+        let now = Date().timeIntervalSinceReferenceDate
+        let should = bannerWatch.withLock { state -> Bool in
+            guard pid != state.pid, now >= state.retryAt else { return false }
+            state.retryAt = now + 5
+            return true
+        }
+        guard should else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.installBannerObserver()
+        }
+    }
+
+    private static let bannerAXCallback: AXObserverCallback = { _, _, _, refcon in
+        guard let refcon else { return }
+        let watcher = Unmanaged<NotificationWatcher>.fromOpaque(refcon).takeUnretainedValue()
+        watcher.queue.async {
+            watcher.noteBannerWindow()
+        }
+    }
+
     /// 오른쪽 위 배너의 글. 데이터베이스보다 먼저 있다.
     private func readBanners() -> [SystemNotice] {
         guard AXIsProcessTrusted() else {
@@ -402,6 +522,7 @@ final class NotificationWatcher {
         }
         let apps = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.notificationcenterui")
         guard let app = apps.first else { return [] }
+        ensureBannerObserver(pid: app.processIdentifier)
         let element = AXUIElementCreateApplication(app.processIdentifier)
         var windows: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXWindowsAttribute as CFString, &windows) == .success,
