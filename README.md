@@ -1,12 +1,14 @@
-<p align="center">
-  <b>한국어</b> · <a href="docs/README.en.md">English</a> · <a href="docs/README.ja.md">日本語</a> · <a href="docs/README.zh.md">中文</a>
-</p>
+
 
 <p align="center">
   <img src="docs/images/icon.png" width="128" alt="Mochinotch 아이콘">
 </p>
 
 <h3 align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/title-dark.png"><img src="docs/images/headings/title-light.png" alt="もちノッチ(Mochinotch)" width="287" height="46"></picture></h3>
+
+<p align="center">
+  <b>한국어</b> · <a href="docs/README.en.md">English</a> · <a href="docs/README.ja.md">日本語</a> · <a href="docs/README.zh.md">中文</a>
+</p>
 
 <p align="center">
   맥북 노치를 말랑한 다이나믹 아일랜드로.<br>
