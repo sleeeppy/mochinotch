@@ -116,7 +116,7 @@ final class AppModel {
     /// 파일을 끌고 노치 근처에 와 있을 때.
     private(set) var fileDrag: FileDragPhase?
     private var fileDragEndTask: Task<Void, Never>?
-    /// 노치에 맡겨 둔 파일. 사진 끝이 아래로 삐져나오고, 경로는 앱을 꺼도 남는다.
+    /// 노치에 맡겨 둔 파일. 노치 아래로 사진 끝이 삐져나와 보인다.
     private(set) var shelf: [ShelfItem] = []
     /// 맡긴 파일 위에 마우스가 있어 부채꼴로 벌어진 상태.
     private(set) var shelfOpen = false
@@ -289,7 +289,6 @@ final class AppModel {
         }
         controller.start()
         panel = controller
-        restoreShelf()
 
         power.onEvent = { [weak self] event in
             self?.handlePower(event)
@@ -1865,28 +1864,18 @@ struct ReleaseNotes: Equatable {
     }
 
     /// 세 개까지만 맡는다. 넘치게 놓으면 앞에서부터 들어갈 만큼만 받고, 꽉 차 있으면 받지 않아 제자리로 돌아간다.
-    /// 임시 파일은 드래그가 끝나 지워지기 전에, 이 자리에서 바로 복사한다.
     private func addToShelf(_ files: [URL]) -> Bool {
-        let fresh = files.filter { !shelfHas($0) }
+        let fresh = files.filter { url in !shelf.contains { $0.url == url } }
         guard !fresh.isEmpty else { return true }
         let room = ShelfLayout.maxCards - shelf.count
         if fresh.count > room {
             refuseShelf()
         }
         guard room > 0 else { return false }
-        var items: [ShelfItem] = []
-        for url in fresh.prefix(room) {
-            guard let kept = ShelfStore.adopt(url) else { continue }
-            if shelfHas(kept) || items.contains(where: { ShelfStore.identity($0.url) == ShelfStore.identity(kept) }) {
-                continue
-            }
-            items.append(ShelfItem(url: kept.standardizedFileURL))
-        }
-        guard !items.isEmpty else { return false }
+        let items = fresh.prefix(room).map { ShelfItem(url: $0) }
         withAnimation(.spring(response: 0.42, dampingFraction: 0.62)) {
             shelf.append(contentsOf: items)
         }
-        storeShelf()
         items.forEach(loadThumbnail)
         panel?.updateMouse()
         return true
@@ -1937,7 +1926,6 @@ struct ReleaseNotes: Equatable {
                 self.shelf.removeAll { ids.contains($0.id) }
                 if self.shelf.isEmpty { self.shelfOpen = false }
             }
-            self.storeShelf()
             self.panel?.updateMouse()
         }
     }
@@ -1949,27 +1937,7 @@ struct ReleaseNotes: Equatable {
             shelfApproach = 0
             shelfFocus = nil
         }
-        storeShelf()
         panel?.updateMouse()
-    }
-
-    /// 없어진 경로는 빼 둔다. 임시 파일에서 만든 복사본만 노치 폴더에 남긴다.
-    private func restoreShelf() {
-        let items = ShelfStore.retained().prefix(ShelfLayout.maxCards).map { ShelfItem(url: $0) }
-        shelf = Array(items)
-        storeShelf()
-        items.forEach(loadThumbnail)
-        panel?.updateMouse()
-    }
-
-    private func storeShelf() {
-        ShelfStore.save(shelf.map(\.url.path))
-        ShelfStore.sweep(keeping: shelf.map(\.url))
-    }
-
-    private func shelfHas(_ url: URL) -> Bool {
-        let path = ShelfStore.identity(url)
-        return shelf.contains { ShelfStore.identity($0.url) == path }
     }
 
     /// 노치 아래에 있으면 사진을 조금씩 내리고, 가로로 가장 가까운 장을 고른다.
