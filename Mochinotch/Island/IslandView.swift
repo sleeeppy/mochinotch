@@ -102,8 +102,8 @@ private struct ShelfTuck: View {
         let baseScale = 1 + approach * 0.14 + (open ? 0.06 : 0)
         let card = ShelfLayout.card
         let tilt = open ? 1.6 : 1 + approach * 0.4
-        // 접혀 있으면 노치 모서리가 아니라 삐져나온 사진의 오른쪽 아래. 벌리면 사진 옆 가운데로 나온다.
-        let badgeY = open ? card / 2 - ShelfBadge.size / 2 : card - ShelfBadge.size / 2
+        // 배지는 보이는 아랫단에 걸치고, 벌리면 사진 옆 가운데로 내려온다.
+        let badgeY = open ? card / 2 - ShelfBadge.size / 2 : card - reach / 2 - 6
         // 기울어진 사진은 각도만큼 옆으로 넓어진다. 양쪽 배지가 같은 틈을 두도록 바깥 사진의 실제 끝에서 잰다.
         let leftEdge = items.count > 1
             ? -Self.fan[1].x * spread + Self.halfWidth(card, degrees: Self.fan[1].angle * tilt)
@@ -127,11 +127,8 @@ private struct ShelfTuck: View {
             }
             if model.shelf.count > 1 {
                 ShelfBadge(text: "\(model.shelf.count)")
-                    // 접혀 있을 때는 사진 오른쪽 아래 모서리에 걸친다.
-                    .offset(
-                        x: open ? rightEdge + gap + ShelfBadge.size / 2 : rightEdge - ShelfBadge.size / 4,
-                        y: badgeY
-                    )
+                    // 접혀 있을 때는 사진 끝에 반쯤 걸친다.
+                    .offset(x: open ? rightEdge + gap + ShelfBadge.size / 2 : rightEdge, y: badgeY)
                     .gesture(drag(model.shelf.map(\.id)))
             }
             ShelfClearButton()
