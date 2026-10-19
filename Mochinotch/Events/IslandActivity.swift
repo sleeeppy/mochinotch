@@ -24,7 +24,7 @@ enum FileDropTarget: Equatable, Hashable {
     case shelf
 }
 
-/// 노치에 잠깐 맡겨 둔 파일. 앱을 끄면 비운다.
+/// 노치에 맡겨 둔 파일. 제자리 파일은 경로만, 임시 파일은 노치 폴더의 복사본을 가리킨다.
 struct ShelfItem: Identifiable, Equatable {
     let id = UUID()
     let url: URL
