@@ -23,7 +23,22 @@ struct NotchInfo: Equatable {
     }
 }
 
+extension Notification.Name {
+    /// 화면이 붙거나 떨어졌다. 그 화면에 묶어 둔 시계는 다시 걸어야 한다.
+    static let notchDisplaysChanged = Notification.Name("dev.sleeeppy.mochinotch.displaysChanged")
+}
+
 enum NotchGeometry {
+    /// 내장 화면이 하드웨어로는 있는데 덮개 때문에 꺼져 있으면 참. 내장 화면이 없는 맥은 거짓.
+    static var builtInIsAsleep: Bool {
+        var ids = [CGDirectDisplayID](repeating: 0, count: 16)
+        var count: UInt32 = 0
+        guard CGGetOnlineDisplayList(16, &ids, &count) == .success else { return false }
+        let builtins = ids.prefix(Int(count)).filter { CGDisplayIsBuiltin($0) != 0 }
+        guard !builtins.isEmpty else { return false }
+        return builtins.allSatisfy { CGDisplayIsActive($0) == 0 }
+    }
+
     static func current() -> NotchInfo {
         let screens = NSScreen.screens
         if let notched = screens.first(where: { detect(screen: $0).hasNotch }) {

@@ -111,6 +111,35 @@ final class IslandPanelController {
         ExposeShield.attach(to: panel)
     }
 
+    func hide() {
+        panel.orderOut(nil)
+    }
+
+    /// 덮개를 닫았다 열면 투명 창의 그림 버퍼가 검은 사각형으로 남는다. 자리를 유지한 채 버퍼만 다시 만든다.
+    func revive(frame: CGRect) {
+        guard frame.width > 2, frame.height > 2 else {
+            hide()
+            return
+        }
+        panel.orderOut(nil)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.alphaValue = 1
+        let view = hosting
+        panel.contentView = nil
+        view.wantsLayer = true
+        view.layer?.isOpaque = false
+        view.layer?.backgroundColor = NSColor.clear.cgColor
+        panel.contentView = view
+        // 같은 프레임이면 새 버퍼를 안 만든다. 한 점 옮겼다가 제자리로 둔다.
+        panel.setFrame(frame.offsetBy(dx: 0, dy: -1), display: false)
+        panel.setFrame(frame, display: true)
+        panel.orderFrontRegardless()
+        ExposeShield.attach(to: panel)
+        updateMouse()
+    }
+
     /// 창이 커도 보이는 모양 위에서만 클릭을 막는다.
     func updateMouse() {
         let point = NSEvent.mouseLocation
