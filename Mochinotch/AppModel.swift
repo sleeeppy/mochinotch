@@ -12,14 +12,19 @@ private final class IntroClock: NSObject {
     private var link: CADisplayLink?
     private var onFrame: ((CFTimeInterval) -> Void)?
 
+    override init() {
+        super.init()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(displaysChanged),
+            name: .notchDisplaysChanged,
+            object: nil
+        )
+    }
+
     func start(_ onFrame: @escaping (CFTimeInterval) -> Void) {
-        stop()
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
         self.onFrame = onFrame
-        let link = screen.displayLink(target: self, selector: #selector(tick(_:)))
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
-        link.add(to: .main, forMode: .common)
-        self.link = link
+        retargetScreen()
     }
 
     func stop() {
@@ -28,8 +33,54 @@ private final class IntroClock: NSObject {
         onFrame = nil
     }
 
+    /// 덮개를 열면 예전 화면에 묶인 시계는 프레임을 주지 않는다. 콜백은 유지한 채 지금 화면에 다시 건다.
+    @objc private func displaysChanged() {
+        guard onFrame != nil else { return }
+        retargetScreen()
+    }
+
+    private func retargetScreen() {
+        link?.invalidate()
+        link = nil
+        guard let onFrame, let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        self.onFrame = onFrame
+        let link = screen.displayLink(target: self, selector: #selector(tick(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
     @objc private func tick(_ link: CADisplayLink) {
         onFrame?(link.targetTimestamp)
+    }
+}
+
+/// 덮개가 열리고 닫히는 것은 화면 목록 알림보다 먼저 온다. 콘솔에 돌아오면 노치 창을 다시 그린다.
+private enum DisplayRepair {
+    static var handler: (@MainActor () -> Void)?
+    private static var registered = false
+
+    static func start(_ handler: @escaping @MainActor () -> Void) {
+        self.handler = handler
+        guard !registered else { return }
+        registered = CGDisplayRegisterReconfigurationCallback(displayReconfigured, nil) == .success
+    }
+}
+
+private func displayReconfigured(
+    _ display: CGDirectDisplayID,
+    _ flags: CGDisplayChangeSummaryFlags,
+    _ userInfo: UnsafeMutableRawPointer?
+) {
+    let watched: CGDisplayChangeSummaryFlags = [
+        .addFlag, .removeFlag, .enabledFlag, .disabledFlag,
+        .setMainFlag, .movedFlag, .setModeFlag, .desktopShapeChangedFlag
+    ]
+    guard !flags.intersection(watched).isEmpty else { return }
+    DispatchQueue.main.async {
+        Task { @MainActor in
+            DisplayRepair.handler?()
+        }
     }
 }
 
@@ -379,9 +430,21 @@ final class AppModel {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.notch = NotchGeometry.current()
-                self?.refreshPanel()
+                self?.noteScreensChanged()
             }
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.screensDidWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.noteScreensChanged()
+            }
+        }
+        // 덮개를 닫으면 내장 화면이 콘솔에서 빠진다. AppKit 알림만으로는 다시 열릴 때 창이 그대로다.
+        DisplayRepair.start { [weak self] in
+            self?.noteScreensChanged()
         }
 
         refreshPanel()
@@ -2134,6 +2197,36 @@ struct ReleaseNotes: Equatable {
             }
         }
         refreshPanel()
+    }
+
+    private var screenRepair: Task<Void, Never>?
+
+    /// 화면이 바뀌는 동안은 알림이 여러 번 온다. 마지막 것만 보고, 덮개가 닫혀 있으면 창을 숨긴다.
+    private func noteScreensChanged() {
+        screenRepair?.cancel()
+        if NotchGeometry.builtInIsAsleep {
+            panel?.hide()
+        } else {
+            repairPanel()
+        }
+        screenRepair = Task { @MainActor in
+            // 콘솔에 돌아온 직후에는 그림 갱신이 거절된다. 화면이 앉은 뒤에 한 번 더 그린다.
+            for pause in [250, 700] {
+                try? await Task.sleep(for: .milliseconds(pause))
+                guard !Task.isCancelled else { return }
+                repairPanel()
+            }
+        }
+    }
+
+    private func repairPanel() {
+        notch = NotchGeometry.current()
+        NotificationCenter.default.post(name: .notchDisplaysChanged, object: nil)
+        guard !NotchGeometry.builtInIsAsleep else {
+            panel?.hide()
+            return
+        }
+        panel?.revive(frame: IslandMetrics.canvas(notch: notch))
     }
 
     private func refreshPanel() {

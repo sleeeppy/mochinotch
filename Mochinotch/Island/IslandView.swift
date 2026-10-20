@@ -571,8 +571,25 @@ private final class MorphTicker: NSObject {
     private var link: CADisplayLink?
     var isRunning: Bool { link != nil }
 
+    override init() {
+        super.init()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(displaysChanged),
+            name: .notchDisplaysChanged,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        link?.invalidate()
+    }
+
     func start() {
-        guard link == nil, let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        // 이미 도는 시계도 지금 화면에 다시 건다. 꺼진 화면에 남은 시계는 프레임을 주지 않는다.
+        stop()
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
         let link = screen.displayLink(target: self, selector: #selector(tick(_:)))
         link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
         link.add(to: .main, forMode: .common)
@@ -582,6 +599,11 @@ private final class MorphTicker: NSObject {
     func stop() {
         link?.invalidate()
         link = nil
+    }
+
+    @objc private func displaysChanged() {
+        guard link != nil else { return }
+        start()
     }
 
     @objc private func tick(_ link: CADisplayLink) {
