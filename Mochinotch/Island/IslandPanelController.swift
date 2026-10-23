@@ -63,6 +63,7 @@ final class IslandPanelController {
         self.hosting = hosting
         hosting.canDrop = { [weak self] in self?.canDropFiles() ?? false }
         hosting.onDrop = { [weak self] urls in self?.onDropFiles(urls) ?? false }
+        keepSurfacesSeparate()
     }
 
     func start() {
@@ -81,12 +82,16 @@ final class IslandPanelController {
 
         let workspace = NSWorkspace.shared.notificationCenter
         workspace.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            guard let self else { return }
-            self.panel.orderFrontRegardless()
-            ExposeShield.attach(to: self.panel)
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.panel.orderFrontRegardless()
+                ExposeShield.attach(to: self.panel)
+                self.keepSurfacesSeparate()
+            }
         }
         panel.orderFrontRegardless()
         ExposeShield.attach(to: panel)
+        keepSurfacesSeparate()
     }
 
     func stop() {
@@ -109,6 +114,16 @@ final class IslandPanelController {
         updateMouse()
         panel.orderFrontRegardless()
         ExposeShield.attach(to: panel)
+        keepSurfacesSeparate()
+    }
+
+    /// 스와이프와 미션 컨트롤은 레이어를 한 장으로 눌러, 투명 창의 검정까지 비치게 만든다.
+    private func keepSurfacesSeparate() {
+        let selector = NSSelectorFromString("_setShouldAutoFlattenLayerTree:")
+        guard panel.responds(to: selector) else { return }
+        typealias SetFlag = @convention(c) (AnyObject, Selector, Bool) -> Void
+        let set = unsafeBitCast(panel.method(for: selector), to: SetFlag.self)
+        set(panel, selector, false)
     }
 
     func hide() {
@@ -137,6 +152,7 @@ final class IslandPanelController {
         panel.setFrame(frame, display: true)
         panel.orderFrontRegardless()
         ExposeShield.attach(to: panel)
+        keepSurfacesSeparate()
         updateMouse()
     }
 
@@ -315,20 +331,29 @@ private final class FileDragSource: NSObject, NSDraggingSource {
     }
 }
 
-/// 바탕화면 보기(모서리)가 일반 창을 밀어낼 때 노치 창은 그 자리에 둔다.
+/// 미션 컨트롤은 투명 창의 레이어를 한 장으로 눌러, 검은 판까지 비치게 만든다.
+/// 메뉴 막대와 같이 그 합치기를 건너뛴다. 아래 32비트 7번은 다른 창에 붙는 표시라 같이 흐려진다.
 private enum ExposeShield {
-    private static let ignoreForExpose: Int32 = 1 << 7
+    /// 아래 32비트. 다른 창에 붙어 그 창과 같이 흐려진다.
+    private static let attached = Int32(1 << 7)
+    /// 위 32비트의 23번. 전체 55번으로, 스와이프 중에 레이어를 한 장으로 합치지 않는다.
+    private static let neverFlatten = Int32(1 << 23)
 
     static func attach(to window: NSWindow) {
         guard window.windowNumber > 0 else { return }
         typealias Connection = @convention(c) () -> Int32
-        typealias SetTags = @convention(c) (Int32, UInt32, UnsafePointer<Int32>, Int) -> Int32
+        typealias Tags = @convention(c) (Int32, UInt32, UnsafePointer<Int32>, Int) -> Int32
         let coreGraphics = dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", RTLD_LAZY)
         guard let connectionSymbol = dlsym(coreGraphics, "CGSMainConnectionID"),
-              let setTagsSymbol = dlsym(coreGraphics, "CGSSetWindowTags") else { return }
+              let setSymbol = dlsym(coreGraphics, "CGSSetWindowTags"),
+              let clearSymbol = dlsym(coreGraphics, "CGSClearWindowTags") else { return }
         let connection = unsafeBitCast(connectionSymbol, to: Connection.self)
-        let setTags = unsafeBitCast(setTagsSymbol, to: SetTags.self)
-        var tags = [ignoreForExpose, Int32(0)]
-        _ = setTags(connection(), UInt32(window.windowNumber), &tags, 64)
+        let setTags = unsafeBitCast(setSymbol, to: Tags.self)
+        let clearTags = unsafeBitCast(clearSymbol, to: Tags.self)
+        let wid = UInt32(window.windowNumber)
+        var clearMask = [attached, Int32(0)]
+        _ = clearTags(connection(), wid, &clearMask, 64)
+        var setMask = [Int32(0), neverFlatten]
+        _ = setTags(connection(), wid, &setMask, 64)
     }
 }
