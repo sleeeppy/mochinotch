@@ -1,5 +1,3 @@
-
-
 <p align="center">
   <img src="docs/images/icon.png" width="128" alt="Mochinotch 아이콘">
 </p>
