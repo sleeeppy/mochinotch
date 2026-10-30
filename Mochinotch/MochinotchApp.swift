@@ -12,7 +12,9 @@ enum Launcher {
         case "--install-hooks":
             exit(installHooks())
         case "--self-test":
-            exit(NotificationWatcherSelfTest.run())
+            let notices = NotificationWatcherSelfTest.run()
+            let security = SecuritySelfTest.run()
+            exit(notices == 0 && security == 0 ? 0 : 1)
         default:
             MochinotchApp.main()
         }

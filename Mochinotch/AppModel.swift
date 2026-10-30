@@ -518,6 +518,7 @@ final class AppModel {
         func query(_ name: String) -> String? {
             items.first(where: { $0.name == name })?.value
         }
+        guard let token = query("token"), EventToken.accepts(token) else { return }
         let success = query("success").map { value in
             value != "0" && value.lowercased() != "false"
         }
@@ -712,7 +713,7 @@ final class AppModel {
         releaseNotes = ReleaseNotes(
             version: version,
             body: Self.plainNotes(stored["body"] ?? ""),
-            page: stored["page"].flatMap(URL.init(string:))
+            page: AppUpdater.githubPage(stored["page"])
         )
     }
 
@@ -852,7 +853,7 @@ struct ReleaseNotes: Equatable {
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let tag = json["tag_name"] as? String
         else { return .failed }
-        let page = (json["html_url"] as? String).flatMap(URL.init(string:))
+        let page = AppUpdater.githubPage(json["html_url"] as? String)
             ?? URL(string: "https://github.com/sleeeppy/mochinotch/releases/latest")!
         guard isNewerRelease(tag, than: local) else { return .current }
         return .newer(AppUpdater.release(from: json, tag: tag, page: page))
@@ -896,21 +897,11 @@ struct ReleaseNotes: Equatable {
     }
 
     private static func isNewerRelease(_ remote: String, than local: String) -> Bool {
-        let remoteParts = versionParts(remote)
-        let localParts = versionParts(local)
-        guard !remoteParts.isEmpty, !localParts.isEmpty else { return false }
-        for index in 0..<max(remoteParts.count, localParts.count) {
-            let remotePart = index < remoteParts.count ? remoteParts[index] : 0
-            let localPart = index < localParts.count ? localParts[index] : 0
-            if remotePart != localPart { return remotePart > localPart }
-        }
-        return false
+        ReleaseVersion.isNewer(remote, than: local)
     }
 
     private static func versionParts(_ text: String) -> [Int] {
-        text.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
-            .split(separator: ".")
-            .compactMap { Int($0) }
+        ReleaseVersion.parse(text)?.numbers ?? []
     }
 
     // MARK: 권한과 AI 연결
@@ -1471,9 +1462,9 @@ struct ReleaseNotes: Equatable {
         let indexes = activities.indices.filter { index in
             let activity = activities[index]
             guard !activity.hidesPeek, !activity.staysOnLeft,
-                  case .notice(_, let storedTitle, let storedBody, _) = activity.payload else {
-                return false
-            }
+                  case .notice(_, let storedTitle, let storedBody, let storedBundle) = activity.payload,
+                  storedBundle?.caseInsensitiveCompare(bundleID) == .orderedSame
+            else { return false }
             return storedTitle == title && storedBody == body
         }
         guard !indexes.isEmpty else { return }

@@ -248,8 +248,10 @@ enum HookRelay {
         guard let url = URL(string: "http://127.0.0.1:\(MochinotchConfig.port)/event"),
               let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
         var request = URLRequest(url: url, timeoutInterval: 1.5)
+        guard let token = EventToken.current() else { return }
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(token, forHTTPHeaderField: EventToken.headerName)
         request.httpBody = body
         let done = DispatchSemaphore(value: 0)
         URLSession.shared.dataTask(with: request) { _, _, _ in done.signal() }.resume()

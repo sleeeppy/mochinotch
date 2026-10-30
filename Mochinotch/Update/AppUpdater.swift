@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import Security
 
@@ -27,14 +28,28 @@ enum AppUpdater {
 
     static func release(from json: [String: Any], tag: String, page: URL) -> Release {
         let assets = json["assets"] as? [[String: Any]] ?? []
-        let dmg = assets.first { ($0["name"] as? String)?.lowercased().hasSuffix(".dmg") == true }
-        let url = (dmg?["browser_download_url"] as? String).flatMap(URL.init(string:))
-        let digest = (dmg?["digest"] as? String).flatMap { value -> String? in
-            guard value.hasPrefix("sha256:") else { return nil }
-            return String(value.dropFirst("sha256:".count)).lowercased()
-        }
+        let chosen = chooseDownload(from: assets)
         let notes = json["body"] as? String ?? ""
-        return Release(version: tag, page: page, notes: notes, dmg: url, sha256: digest)
+        let safePage = githubPage(page.absoluteString)
+            ?? URL(string: "https://github.com/sleeeppy/mochinotch/releases/latest")!
+        return Release(version: tag, page: safePage, notes: notes, dmg: chosen?.url, sha256: chosen?.sha256)
+    }
+
+    /// 릴리즈 페이지는 GitHub HTTPS만 연다.
+    static func githubPage(_ string: String?) -> URL? {
+        guard let string, let url = URL(string: string),
+              url.scheme?.lowercased() == "https",
+              url.host?.lowercased() == "github.com"
+        else { return nil }
+        return url
+    }
+
+    /// 받는 주소는 GitHub의 HTTPS만 허용한다.
+    static func isAllowedDownload(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "https", let host = url.host?.lowercased() else { return false }
+        if host == "github.com" || host.hasSuffix(".github.com") { return true }
+        if host == "githubusercontent.com" || host.hasSuffix(".githubusercontent.com") { return true }
+        return false
     }
 
     /// DMG 안에서 바로 켰거나 macOS가 격리한 사본이면 바꿀 자리가 없다.
@@ -51,7 +66,7 @@ enum AppUpdater {
     static func prepare(_ release: Release, progress: @escaping (Double) -> Void) async throws {
         let target = Bundle.main.bundleURL
         guard canReplace(target) else { throw Failure.notReplaceable }
-        guard let source = release.dmg else { throw Failure.noDownload }
+        guard let source = release.dmg, isAllowedDownload(source) else { throw Failure.noDownload }
         let manager = FileManager.default
         let work = manager.temporaryDirectory
             .appendingPathComponent("mochinotch-update-\(UUID().uuidString)", isDirectory: true)
@@ -63,6 +78,7 @@ enum AppUpdater {
             try verifyChecksum(dmg, expected: release.sha256)
             let staged = try extractApp(dmg, into: work)
             try verify(staged, version: release.version)
+            clearQuarantine(staged)
             try launchSwap(staged: staged, target: target, work: work)
             log("ready \(release.version)")
         } catch {
@@ -76,10 +92,13 @@ enum AppUpdater {
     private static func download(_ url: URL, to destination: URL, progress: @escaping (Double) -> Void) async throws {
         var request = URLRequest(url: url, timeoutInterval: 60)
         request.setValue("Mochinotch", forHTTPHeaderField: "User-Agent")
+        let gate = DownloadGate()
+        let session = URLSession(configuration: .ephemeral, delegate: gate, delegateQueue: nil)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             var observation: NSKeyValueObservation?
-            let task = URLSession.shared.downloadTask(with: request) { file, response, error in
+            let task = session.downloadTask(with: request) { file, response, error in
                 observation?.invalidate()
+                defer { session.finishTasksAndInvalidate() }
                 guard let file, error == nil, (response as? HTTPURLResponse)?.statusCode == 200 else {
                     continuation.resume(throwing: error ?? Failure.download)
                     return
@@ -123,9 +142,53 @@ enum AppUpdater {
         guard let app = items.first(where: { $0.pathExtension == "app" }) else { throw Failure.missingApp }
         let staged = work.appendingPathComponent(app.lastPathComponent)
         guard run("/usr/bin/ditto", [app.path, staged.path]) else { throw Failure.missingApp }
-        // 받은 파일에 격리 표시가 붙어 있으면 다시 켤 때 확인되지 않은 개발자 경고가 뜬다.
-        run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", staged.path])
         return staged
+    }
+
+    /// 서명이 맞는 앱에서만 격리 표시를 지운다. 심볼릭 링크는 따라가지 않는다.
+    static func clearQuarantine(_ root: URL) {
+        let manager = FileManager.default
+        guard let enumerator = manager.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isSymbolicLinkKey],
+            options: []
+        ) else { return }
+        for case let url as URL in enumerator {
+            let link = (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true
+            if link {
+                enumerator.skipDescendants()
+                continue
+            }
+            removeQuarantine(url)
+        }
+        removeQuarantine(root)
+    }
+
+    private static func removeQuarantine(_ url: URL) {
+        url.withUnsafeFileSystemRepresentation { path in
+            guard let path else { return }
+            removexattr(path, "com.apple.quarantine", XATTR_NOFOLLOW)
+        }
+    }
+
+    private static func chooseDownload(from assets: [[String: Any]]) -> (url: URL, sha256: String?)? {
+        let dmgs = assets.filter { ($0["name"] as? String)?.lowercased().hasSuffix(".dmg") == true }
+        let preferred = dmgs.filter { ($0["name"] as? String)?.lowercased().contains("mochinotch") == true }
+        let rest = dmgs.filter { ($0["name"] as? String)?.lowercased().contains("mochinotch") != true }
+        for asset in preferred + rest {
+            guard let url = (asset["browser_download_url"] as? String).flatMap(URL.init(string:)),
+                  isAllowedDownload(url) else { continue }
+            return (url, sha256Digest(asset["digest"] as? String))
+        }
+        return nil
+    }
+
+    private static func sha256Digest(_ value: String?) -> String? {
+        guard let lowered = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              lowered.hasPrefix("sha256:") else { return nil }
+        let hex = String(lowered.dropFirst("sha256:".count))
+        guard hex.count == 64, hex.allSatisfy(\.isHexDigit) else { return nil }
+        return hex
     }
 
     /// 같은 앱, 받으려던 버전, 지금 앱과 같은 서명인지 본다.
@@ -211,5 +274,22 @@ enum AppUpdater {
         } else {
             try? Data(line.utf8).write(to: url)
         }
+    }
+}
+
+/// GitHub가 다른 호스트로 보내면 받지 않는다.
+private final class DownloadGate: NSObject, URLSessionTaskDelegate {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        guard let url = request.url, AppUpdater.isAllowedDownload(url) else {
+            completionHandler(nil)
+            return
+        }
+        completionHandler(request)
     }
 }

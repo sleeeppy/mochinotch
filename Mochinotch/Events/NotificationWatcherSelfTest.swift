@@ -17,7 +17,10 @@ enum NotificationWatcherSelfTest {
             ("글자 UUID가 목록에서 빠지면 지운다", testDismissStringUUID),
             ("목록에 한 번도 없던 기록은 남겨 둔다", testKeepUntilListedOnce),
             ("기록 행이 사라지면 지운다", testDismissWhenRowDeleted),
-            ("WAL에만 있는 기록을 읽는다", testReadsWalOnlyRecord)
+            ("WAL에만 있는 기록을 읽는다", testReadsWalOnlyRecord),
+            ("같은 앱의 같은 글은 한 번만 알린다", testDuplicateTextSameApp),
+            ("다른 앱의 같은 글은 각각 알린다", testDuplicateTextOtherApp),
+            ("중복 판정이 지나면 같은 글도 다시 알린다", testDuplicateTextExpires)
         ]
         var failed = 0
         for (name, test) in tests {
@@ -173,6 +176,46 @@ enum NotificationWatcherSelfTest {
         }
     }
 
+    private static func testDuplicateTextSameApp() throws {
+        try withFixture { fixture, watcher, box in
+            watcher.checkOnce()
+            try fixture.insert(id: 1, mark: 0xD0, title: "빌드 성공", body: "같은 글", fresh: true, listed: false)
+            try fixture.insert(id: 2, mark: 0xD1, title: "빌드 성공", body: "같은 글", fresh: true, listed: false)
+            watcher.checkOnce()
+            flushMain()
+            try expect(box.notices.count == 1, "알림 \(box.notices.count)개")
+        }
+    }
+
+    private static func testDuplicateTextOtherApp() throws {
+        try withFixture { fixture, watcher, box in
+            watcher.checkOnce()
+            try fixture.insert(id: 1, mark: 0xD2, title: "사진", body: "첨부", fresh: true, listed: false, bundle: "com.example.a")
+            try fixture.insert(id: 2, mark: 0xD3, title: "사진", body: "첨부", fresh: true, listed: false, bundle: "com.example.b")
+            watcher.checkOnce()
+            flushMain()
+            try expect(box.notices.count == 2, "알림 \(box.notices.count)개")
+        }
+    }
+
+    private static func testDuplicateTextExpires() throws {
+        let previous = NotificationWatcher.dedupeWindow
+        NotificationWatcher.dedupeWindow = 45
+        defer { NotificationWatcher.dedupeWindow = previous }
+        try withFixture { fixture, watcher, box in
+            watcher.checkOnce()
+            try fixture.insert(id: 1, mark: 0xD4, title: "다시", body: "같은", fresh: true, listed: false)
+            watcher.checkOnce()
+            flushMain()
+            try expect(box.notices.count == 1, "첫 알림이 없다")
+            NotificationWatcher.dedupeWindow = -1
+            try fixture.insert(id: 2, mark: 0xD5, title: "다시", body: "같은", fresh: true, listed: false)
+            watcher.checkOnce()
+            flushMain()
+            try expect(box.notices.count == 2, "만료 뒤 \(box.notices.count)개")
+        }
+    }
+
     private static func testReadsWalOnlyRecord() throws {
         try withFixture { fixture, watcher, box in
             try fixture.insert(id: 1, mark: 0xC0, title: "기준", body: "이전", fresh: false, listed: false)
@@ -279,10 +322,10 @@ private final class Fixture {
     }
 
     @discardableResult
-    func insert(id: Int64, mark: UInt8, title: String, body: String, fresh: Bool, listed: Bool) throws -> Data {
+    func insert(id: Int64, mark: UInt8, title: String, body: String, fresh: Bool, listed: Bool, bundle: String = Fixture.bundleID) throws -> Data {
         let raw = NotificationWatcherSelfTest.uuid(mark)
         let plist: [String: Any] = [
-            "app": Self.bundleID,
+            "app": bundle,
             "req": ["titl": title, "body": body]
         ]
         let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0)

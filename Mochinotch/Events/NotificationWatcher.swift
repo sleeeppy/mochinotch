@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Darwin
 import Foundation
 import os
 import SQLite3
@@ -121,6 +122,8 @@ final class NotificationWatcher {
     /// 테스트에서는 배너 탐색과 로그를 끈다.
     static var readsBanners = true
     static var writesLog = true
+    /// 배너와 데이터베이스가 같은 글을 잇달아 줘도 한 번만 보여 주는 시간.
+    static var dedupeWindow: TimeInterval = 45
     /// 사본을 두는 폴더. 테스트는 따로 지정한다.
     static var snapshotRoot = FileManager.default.temporaryDirectory
         .appendingPathComponent("mochinotch-noted", isDirectory: true)
@@ -130,7 +133,7 @@ final class NotificationWatcher {
             for notice in readBanners() where accept(notice) {
                 let shown = Self.storedText(notice)
                 pending.append((notice.bundleID, shown.title, shown.body, Date()))
-                Self.log("banner \(notice.bundleID) \(notice.title)")
+                Self.log("banner \(notice.bundleID)")
                 deliver(notice)
             }
         }
@@ -138,7 +141,6 @@ final class NotificationWatcher {
         guard FileManager.default.isReadableFile(atPath: source.path) else {
             let listable = (try? FileManager.default.contentsOfDirectory(atPath: source.deletingLastPathComponent().path)) != nil
             report(listable ? .missingDatabase : .denied)
-            Self.log("open denied listable=\(listable)")
             return
         }
         let stamp = Self.databaseStamp(source)
@@ -165,9 +167,7 @@ final class NotificationWatcher {
         }
         for record in readNew(db) {
             let stored = Self.storedText(record.notice)
-            let key = "\(record.notice.bundleID)|\(record.notice.title)|\(record.notice.body)"
-            let loose = "\(record.notice.title)|\(record.notice.body)"
-            let known = recentKeys[key] != nil || recentKeys[loose] != nil
+            let known = isRecent(record.notice)
             // 알림센터를 열면 지난 기록 번호가 다시 보인다. 방금 온 것이거나, 이미 배너로 본 것만 따라간다.
             guard known || Self.isFresh(record.delivered) else { continue }
             tracked[record.id] = TrackedNotice(
@@ -177,7 +177,7 @@ final class NotificationWatcher {
                 uuid: record.uuid
             )
             guard !known, accept(record.notice) else { continue }
-            Self.log("notice \(record.notice.bundleID) \(stored.title)")
+            Self.log("notice \(record.notice.bundleID)")
             deliver(record.notice)
         }
         linkPending(db)
@@ -419,18 +419,29 @@ final class NotificationWatcher {
         }
     }
 
-    /// 같은 배너가 떠 있는 동안, 그리고 데이터베이스가 뒤늦게 같은 글을 줄 때 한 번만 반영한다.
+    /// 같은 앱의 같은 글은 잠깐만 한 번으로 친다. 다른 앱이거나 시간이 지나면 다시 보여 준다.
     private func accept(_ notice: SystemNotice) -> Bool {
-        let key = "\(notice.bundleID)|\(notice.title)|\(notice.body)"
-        if recentKeys[key] != nil { return false }
+        if isRecent(notice) { return false }
+        recentKeys[Self.dedupeKey(notice)] = Date()
         let now = Date()
-        recentKeys[key] = now
-        recentKeys["\(notice.title)|\(notice.body)"] = now
-        if recentKeys.count > 300 {
-            let oldest = recentKeys.sorted { $0.value < $1.value }.prefix(100).map(\.key)
-            for key in oldest { recentKeys.removeValue(forKey: key) }
+        if recentKeys.count > 100 {
+            recentKeys = recentKeys.filter { now.timeIntervalSince($0.value) <= Self.dedupeWindow }
         }
         return true
+    }
+
+    private func isRecent(_ notice: SystemNotice) -> Bool {
+        let key = Self.dedupeKey(notice)
+        guard let seen = recentKeys[key] else { return false }
+        if Date().timeIntervalSince(seen) > Self.dedupeWindow {
+            recentKeys.removeValue(forKey: key)
+            return false
+        }
+        return true
+    }
+
+    private static func dedupeKey(_ notice: SystemNotice) -> String {
+        "\(notice.bundleID)|\(notice.title)|\(notice.body)"
     }
 
     /// 배너 창이 만들어지는 순간에만 부른다. 창이 비어 있으면 잠시 뒤 한 번 더 읽는다.
@@ -661,7 +672,6 @@ final class NotificationWatcher {
         guard FileManager.default.isReadableFile(atPath: source.path) else {
             let listable = (try? FileManager.default.contentsOfDirectory(atPath: source.deletingLastPathComponent().path)) != nil
             report(listable ? .missingDatabase : .denied)
-            Self.log("open denied listable=\(listable)")
             return nil
         }
         if let snapshot = snapshotDatabase(source), let handle = openDatabase(at: snapshot.path, reportErrors: false) {
@@ -690,7 +700,6 @@ final class NotificationWatcher {
             sqlite3_close(handle)
             if reportErrors {
                 report(message.contains("authorization") ? .denied : .failed(message))
-                Self.log("open failed \(message)")
             }
             return nil
         }
@@ -744,6 +753,13 @@ final class NotificationWatcher {
     private func report(_ next: NotificationAccess) {
         guard access != next else { return }
         access = next
+        switch next {
+        case .denied: Self.log("open denied")
+        case .missingDatabase: Self.log("database missing")
+        case .failed(let message): Self.log("open failed \(message)")
+        case .watching: Self.log("watching")
+        case .starting: break
+        }
         DispatchQueue.main.async { [onAccessChange] in
             onAccessChange?(next)
         }
@@ -899,24 +915,31 @@ final class NotificationWatcher {
         value as? String
     }
 
+    private static var didRemoveWorldLog = false
+
+    /// 알림 제목은 남기지 않는다. `/tmp`에도 쓰지 않는다.
     private static func log(_ message: String) {
         guard writesLog else { return }
+        if !didRemoveWorldLog {
+            didRemoveWorldLog = true
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: "/tmp/mochinotch-notices.log"))
+        }
         let line = "\(ISO8601DateFormatter().string(from: Date())) \(message)\n"
         guard let data = line.data(using: .utf8) else { return }
-        let targets = [
-            URL(fileURLWithPath: "/tmp/mochinotch-notices.log"),
-            FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Library/Logs/Mochinotch/notifications.log")
-        ]
-        for url in targets {
-            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            if FileManager.default.fileExists(atPath: url.path), let handle = try? FileHandle(forWritingTo: url) {
-                handle.seekToEndOfFile()
-                handle.write(data)
-                try? handle.close()
-            } else {
-                try? data.write(to: url)
-            }
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/Mochinotch/notifications.log")
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let fd = url.path.withCString { Darwin.open($0, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW, 0o600) }
+        guard fd >= 0 else { return }
+        defer { Darwin.close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { return }
+        _ = fchmod(fd, 0o600)
+        if info.st_size > 200_000 {
+            _ = ftruncate(fd, 0)
+        }
+        data.withUnsafeBytes { buffer in
+            _ = Darwin.write(fd, buffer.baseAddress, buffer.count)
         }
     }
 }

@@ -287,11 +287,13 @@ To connect from Terminal, and then relaunch any tool that’s already open:
 
 ### Send one yourself
 
-With the app running, this shows on the notch immediately. Scripts and other tools can use the same call.
+With the app running, this shows on the notch immediately. The token file is created then, and only this user can read it. Scripts and other tools can use the same call.
 
 ```bash
+TOKEN=$(cat "$HOME/Library/Application Support/Mochinotch/event.token")
 curl -s -X POST http://127.0.0.1:47321/event \
   -H 'Content-Type: application/json' \
+  -H "X-Mochinotch-Token: $TOKEN" \
   -d '{"tool":"claude","detail":"README done","kind":"completed"}'
 ```
 
@@ -305,7 +307,7 @@ curl -s -X POST http://127.0.0.1:47321/event \
 A URL works too.
 
 ```text
-mochinotch://event?tool=cursor&kind=completed&detail=build%20done
+mochinotch://event?token=TOKEN&tool=cursor&kind=completed&detail=build%20done
 ```
 
 ---
