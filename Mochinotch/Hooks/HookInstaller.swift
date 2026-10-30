@@ -80,7 +80,11 @@ enum HookInstaller {
     private static let claudeEvents = ["Stop", "Notification", "StopFailure", "PermissionRequest", "PreToolUse"]
     private static let cursorEvents = ["stop", "preToolUse", "postToolUse"]
 
+    /// 테스트가 사용자 홈 대신 임시 폴더를 보게 한다.
+    static var homeOverride: URL?
+
     static var home: URL {
+        if let homeOverride { return homeOverride }
         let path = ProcessInfo.processInfo.environment["HOME"].flatMap { $0.isEmpty ? nil : $0 } ?? NSHomeDirectory()
         return URL(fileURLWithPath: path, isDirectory: true)
     }
@@ -231,7 +235,7 @@ enum HookInstaller {
         case .claude: updated = try mergedClaude(existing)
         case .cursor: updated = try mergedCursor(existing)
         case .codex: updated = try mergedCodex(existing ?? "")
-        case .kiro: updated = kiroHook()
+        case .kiro: updated = mergedKiro(existing)
         }
         var changed = false
         if existing != updated {
@@ -254,9 +258,7 @@ enum HookInstaller {
     }
 
     private static func relayCommand(source: String) -> String {
-        let path = relayURL.path
-        let quoted = path.contains(" ") ? shellQuoted(path) : path
-        return "\(quoted) --source \(source)"
+        "\(shellQuoted(relayURL.path)) --source \(source)"
     }
 
     private static func mergedClaude(_ existing: String?) throws -> String {
@@ -299,6 +301,23 @@ enum HookInstaller {
         return root.text() + "\n"
     }
 
+    /// 사용자가 꺼 둔 훅은 그대로 둔다. 없으면 이 파일만 새로 쓴다.
+    private static func mergedKiro(_ existing: String?) -> String {
+        if let existing, keepsDisabledKiroHook(existing) {
+            return existing.hasSuffix("\n") ? existing : existing + "\n"
+        }
+        return kiroHook()
+    }
+
+    private static func keepsDisabledKiroHook(_ existing: String) -> Bool {
+        guard let root = try? jsonObject(existing),
+              let hooks = root["hooks"]?.arrayValue else { return false }
+        return hooks.contains { hook in
+            guard case .bool(false)? = hook["enabled"] else { return false }
+            return hasRelay(hook["action"], source: "kiro")
+        }
+    }
+
     /// Mochinotch만 쓰는 파일이라 통째로 쓴다.
     private static func kiroHook() -> String {
         let hook = OrderedJSON.object([
@@ -323,28 +342,58 @@ enum HookInstaller {
         return items
     }
 
-    /// notify는 맨 위 테이블 키라 첫 `[섹션]` 앞에서만 찾는다. 원래 명령은 `--chain`으로 넘겨 그대로 이어서 실행한다.
+    /// 원래 명령은 `--chain`으로 넘겨 그대로 이어서 실행한다.
+    /// 테이블 안에 있던 `notify`는 뿌리로 옮긴다. 같은 키가 두 개 생기지 않게 한다.
     private static func mergedCodex(_ existing: String) throws -> String {
-        let headEnd = firstTableHeader(in: existing) ?? existing.endIndex
-        let head = existing[..<headEnd]
-        let tail = existing[headEnd...]
         var command = [relayURL.path, "--source", "codex"]
-        if let found = try TOMLNotify.find(in: head) {
-            if found.values.contains(where: { $0.contains("mochinotch-notify") }) {
-                return existing
-            }
-            if !found.values.isEmpty {
-                command += ["--chain", OrderedJSON.array(found.values.map(OrderedJSON.string)).text(indent: nil)]
-            }
+        let found: TOMLNotify.Found?
+        do {
+            found = try TOMLNotify.find(in: Substring(existing))
+        } catch {
+            let headEnd = firstTableHeader(in: existing) ?? existing.endIndex
+            if existing[..<headEnd].contains("notify") { throw error }
+            return prependNotify(existing, command: command)
+        }
+        guard let found else {
+            return prependNotify(existing, command: command)
+        }
+        if found.values.contains(where: { $0.contains("mochinotch-notify") }) {
+            return existing
+        }
+        if !found.values.isEmpty {
+            command += ["--chain", OrderedJSON.array(found.values.map(OrderedJSON.string)).text(indent: nil)]
+        }
+        let headEnd = firstTableHeader(in: existing) ?? existing.endIndex
+        if found.range.lowerBound < headEnd {
             var updated = existing
             updated.replaceSubrange(found.range, with: "notify = " + TOMLNotify.array(command))
             return updated
         }
-        var prefix = String(head)
+        var stripped = existing
+        stripped.replaceSubrange(found.range, with: "")
+        return prependNotify(stripped, command: command)
+    }
+
+    private static func prependNotify(_ existing: String, command: [String]) -> String {
+        let headEnd = firstTableHeader(in: existing) ?? existing.endIndex
+        var prefix = String(existing[..<headEnd])
         if !prefix.isEmpty, !prefix.hasSuffix("\n") { prefix += "\n" }
         prefix += "# Mochinotch\nnotify = \(TOMLNotify.array(command))\n"
+        let tail = existing[headEnd...]
         if !tail.isEmpty { prefix += "\n" }
         return prefix + tail
+    }
+
+    static func previewCodex(_ existing: String) throws -> String {
+        try mergedCodex(existing)
+    }
+
+    static func previewClaude(_ existing: String?) throws -> String {
+        try mergedClaude(existing)
+    }
+
+    static func previewKiro(_ existing: String?) -> String {
+        mergedKiro(existing)
     }
 
     /// 완료 알림용 `notify`와 따로, 승인을 물어볼 때만 부르는 hook이다. 결정은 하지 않는다.

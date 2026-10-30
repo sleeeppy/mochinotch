@@ -290,11 +290,13 @@ hook은 `~/.local/bin/mochinotch-notify`를 부르고, 이 파일이 앱을 불�
 
 ### 직접 보내 보기
 
-앱이 켜져 있을 때 터미널에서 보내면 노치에 바로 뜹니다. 내 스크립트나 다른 도구에서도 이렇게 쓸 수 있어요.
+앱이 켜져 있을 때 터미널에서 보내면 노치에 바로 뜹니다. 토큰 파일은 그때 만들어지고, 이 사용자만 읽을 수 있어요. 내 스크립트나 다른 도구에서도 이렇게 쓸 수 있어요.
 
 ```bash
+TOKEN=$(cat "$HOME/Library/Application Support/Mochinotch/event.token")
 curl -s -X POST http://127.0.0.1:47321/event \
   -H 'Content-Type: application/json' \
+  -H "X-Mochinotch-Token: $TOKEN" \
   -d '{"tool":"claude","detail":"README 정리 끝","kind":"completed"}'
 ```
 
@@ -308,7 +310,7 @@ curl -s -X POST http://127.0.0.1:47321/event \
 URL로도 보낼 수 있습니다.
 
 ```text
-mochinotch://event?tool=cursor&kind=completed&detail=빌드%20끝
+mochinotch://event?token=TOKEN&tool=cursor&kind=completed&detail=빌드%20끝
 ```
 
 ---

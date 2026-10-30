@@ -287,11 +287,13 @@ hook 会调用 `~/.local/bin/mochinotch-notify`，再由这个文件通知应用
 
 ### 自己发一条
 
-应用开着的时候，从终端发出去会马上出现在刘海。自己的脚本或其他工具也可以这样用。
+应用开着的时候，从终端发出去会马上出现在刘海。令牌文件会在这时生成，只有当前用户能读。自己的脚本或其他工具也可以这样用。
 
 ```bash
+TOKEN=$(cat "$HOME/Library/Application Support/Mochinotch/event.token")
 curl -s -X POST http://127.0.0.1:47321/event \
   -H 'Content-Type: application/json' \
+  -H "X-Mochinotch-Token: $TOKEN" \
   -d '{"tool":"claude","detail":"README 整理完了","kind":"completed"}'
 ```
 
@@ -305,7 +307,7 @@ curl -s -X POST http://127.0.0.1:47321/event \
 也可以用 URL 发送。
 
 ```text
-mochinotch://event?tool=cursor&kind=completed&detail=build%20done
+mochinotch://event?token=TOKEN&tool=cursor&kind=completed&detail=build%20done
 ```
 
 ---

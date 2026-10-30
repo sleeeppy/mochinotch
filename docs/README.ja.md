@@ -287,11 +287,13 @@ hook は `~/.local/bin/mochinotch-notify` を呼び、このファイルがア�
 
 ### 自分で送ってみる
 
-アプリが起動しているとき、ターミナルから送るとノッチにすぐ出ます。自分のスクリプトや別のツールからも同じように使えます。
+アプリが起動しているとき、ターミナルから送るとノッチにすぐ出ます。トークンファイルはそのとき作られ、このユーザーだけが読めます。自分のスクリプトや別のツールからも同じように使えます。
 
 ```bash
+TOKEN=$(cat "$HOME/Library/Application Support/Mochinotch/event.token")
 curl -s -X POST http://127.0.0.1:47321/event \
   -H 'Content-Type: application/json' \
+  -H "X-Mochinotch-Token: $TOKEN" \
   -d '{"tool":"claude","detail":"README を整理した","kind":"completed"}'
 ```
 
@@ -305,7 +307,7 @@ curl -s -X POST http://127.0.0.1:47321/event \
 URL でも送れます。
 
 ```text
-mochinotch://event?tool=cursor&kind=completed&detail=build%20done
+mochinotch://event?token=TOKEN&tool=cursor&kind=completed&detail=build%20done
 ```
 
 ---
