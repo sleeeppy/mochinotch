@@ -547,6 +547,7 @@ private struct UpdateButton: View {
 /// 새 버전이 없을 때 그 자리에 있는 확인 버튼. 보는 동안 화살표가 돌고, 결과를 잠깐 보여 주고 돌아온다.
 private struct CheckUpdateButton: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var status: AppModel.UpdateCheckStatus?
     var action: () -> Void
     @State private var hovered = false
@@ -584,9 +585,9 @@ private struct CheckUpdateButton: View {
         ZStack {
             switch status {
             case .checking:
-                TimelineView(.animation) { context in
+                TimelineView(.animation(paused: reduceMotion)) { context in
                     Image(systemName: "arrow.counterclockwise")
-                        .rotationEffect(.degrees(-(context.date.timeIntervalSinceReferenceDate * 400).truncatingRemainder(dividingBy: 360)))
+                        .rotationEffect(.degrees(reduceMotion ? 0 : -(context.date.timeIntervalSinceReferenceDate * 400).truncatingRemainder(dividingBy: 360)))
                 }
                 .transition(.opacity)
             case .current:
@@ -615,8 +616,8 @@ private struct CheckUpdateButton: View {
 private struct PressableButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.94 : 1)
-            .animation(.spring(response: 0.22, dampingFraction: 0.6), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }
 

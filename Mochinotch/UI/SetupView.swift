@@ -241,6 +241,7 @@ private struct SetupPill: View {
 }
 
 private struct SetupSpinner: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var spinning = false
 
     var body: some View {
@@ -248,8 +249,11 @@ private struct SetupSpinner: View {
             .trim(from: 0.18, to: 1)
             .stroke(IslandColor.secondary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
             .frame(width: 14, height: 14)
-            .rotationEffect(.degrees(spinning ? 360 : 0))
-            .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: spinning)
-            .onAppear { spinning = true }
+            .rotationEffect(.degrees(reduceMotion ? 0 : (spinning ? 360 : 0)))
+            .animation(
+                reduceMotion ? nil : .linear(duration: 0.9).repeatForever(autoreverses: false),
+                value: spinning
+            )
+            .onAppear { spinning = !reduceMotion }
     }
 }

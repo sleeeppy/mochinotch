@@ -1570,6 +1570,13 @@ struct ReleaseNotes: Equatable {
                 if quietOnly { self.finishLaunchIntro() }
                 return
             }
+            // 긴 출렁임은 움직임을 줄인 사람에게 전정 자극이 된다. 인사만 건너뛰고 뒤 설정은 그대로 연다.
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                self.introTask = nil
+                self.presentSetupIfPending()
+                if quietOnly { self.finishLaunchIntro() }
+                return
+            }
             self.startIntro(IntroScript.make(study), afterLaunch: quietOnly)
         }
     }

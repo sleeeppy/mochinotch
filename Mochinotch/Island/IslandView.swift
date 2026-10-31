@@ -52,7 +52,7 @@ struct IslandRootView: View {
                 }
                 // 판만 늘어나고 글자는 그대로 둔다. 1보다 작아지면 하드웨어 노치 바닥이 드러난다.
                 .keyframeAnimator(initialValue: 1.0, trigger: model.boingToken) { plate, stretch in
-                    plate.scaleEffect(x: 1, y: max(1, stretch), anchor: .top)
+                    plate.scaleEffect(x: 1, y: reduceMotion ? 1 : max(1, stretch), anchor: .top)
                 } keyframes: { _ in
                     LinearKeyframe(1.0, duration: 0.08)
                     CubicKeyframe(1.2, duration: 0.17)
@@ -69,7 +69,7 @@ struct IslandRootView: View {
             .offset(x: shown.shift)
         }
         .keyframeAnimator(initialValue: Shake(), trigger: model.shakeToken) { content, value in
-            content.offset(x: value.x)
+            content.offset(x: reduceMotion ? 0 : value.x)
         } keyframes: { _ in
             KeyframeTrack(\.x) {
                 CubicKeyframe(7.0, duration: 0.08)
@@ -85,6 +85,7 @@ struct IslandRootView: View {
 /// 노치 아래로 삐져나온 맡긴 파일. 마우스를 올리면 더 내려와 부채꼴로 벌어지고, 사진마다 끌어낼 수 있다.
 private struct ShelfTuck: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// 맨 앞 사진부터. 뒤로 갈수록 좌우로 어긋나 겹친다.
     private static let fan: [(x: CGFloat, angle: Double)] = [(0, -3), (-9, -10), (9, 8)]
@@ -137,7 +138,7 @@ private struct ShelfTuck: View {
             .allowsHitTesting(open)
         }
         .keyframeAnimator(initialValue: Shake(), trigger: model.shelfRefusalToken) { content, value in
-            content.offset(x: value.x)
+            content.offset(x: reduceMotion ? 0 : value.x)
         } keyframes: { _ in
             KeyframeTrack(\.x) {
                 CubicKeyframe(6.0, duration: 0.07)
@@ -159,15 +160,20 @@ private struct ShelfTuck: View {
         .padding(.top, model.metrics.height - ShelfLayout.card + reach)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .opacity(visible ? 1 : 0)
-        .animation(.spring(response: 0.34, dampingFraction: 0.66), value: open)
-        .animation(.spring(response: 0.32, dampingFraction: 0.74), value: model.shelfApproach)
-        .animation(.spring(response: 0.28, dampingFraction: 0.7), value: model.shelfFocus)
-        .animation(.spring(response: 0.42, dampingFraction: 0.72), value: visible)
+        .animation(shelfMove, value: open)
+        .animation(shelfMove, value: model.shelfApproach)
+        .animation(shelfMove, value: model.shelfFocus)
+        .animation(shelfMove, value: visible)
     }
 
     private static func halfWidth(_ side: CGFloat, degrees: Double) -> CGFloat {
         let radians = abs(degrees) * .pi / 180
         return side * (cos(radians) + sin(radians)) / 2
+    }
+
+    /// 손가락이 던진 게 아니라 마우스가 다가온 것이다. 동작 줄이기면 튀지 않고 짧게 앉는다.
+    private var shelfMove: Animation {
+        reduceMotion ? .easeOut(duration: 0.16) : .spring(response: 0.34, dampingFraction: 0.72)
     }
 
     private func drag(_ ids: [ShelfItem.ID]) -> some Gesture {
@@ -402,10 +408,10 @@ private final class MorphPlayback {
         from = origin
         goal = target
         let shrinking = target.height + 4 < origin.height || target.width + 8 < origin.width
-        if shrinking {
+        if reduceMotion {
+            curve = .ease(0.16)
+        } else if shrinking {
             curve = .settle
-        } else if reduceMotion {
-            curve = .ease(0.18)
         } else {
             curve = .morph
         }
@@ -657,6 +663,7 @@ private struct PeekContent: View {
 /// 오른쪽 알림 아이콘. 방금 온 알림이면 노치 밑에서 옆으로 쏙 나와 눌렸다 튀어 서고, 배지가 뒤따라 붙는다.
 /// 같은 앱 알림이 더 오면 아이콘이 톡 튀고 숫자가 바뀐다. 펼쳤다 접은 뒤 다시 보일 때는 튀지 않는다.
 private struct PeekNoticeIcon: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let group: NoticeGroup
     @State private var waiting: Bool
     @State private var arrivals = 0
@@ -728,16 +735,17 @@ private struct PeekNoticeIcon: View {
             .onAppear {
                 guard waiting else { return }
                 waiting = false
-                arrivals += 1
+                if !reduceMotion { arrivals += 1 }
             }
             .onChange(of: group.latest.id) {
-                bumps += 1
+                if !reduceMotion { bumps += 1 }
             }
     }
 }
 
 /// 왼쪽 아이콘 뒤의 옅은 빛. 아이콘과 같은 둥근 사각형이고, 아주 조금 숨 쉰다.
 private struct AgentAura: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var size: CGFloat
     var color: Color
 
@@ -746,7 +754,7 @@ private struct AgentAura: View {
             .fill(color.opacity(0.7))
             .frame(width: size * 0.94, height: size * 0.94)
             .blur(radius: 1.4)
-            .phaseAnimator([false, true]) { content, inhaling in
+            .phaseAnimator(reduceMotion ? [false] : [false, true]) { content, inhaling in
                 content
                     .scaleEffect(inhaling ? 1.018 : 0.988)
                     .opacity(inhaling ? 1 : 0.78)
@@ -832,6 +840,7 @@ private struct IslandFace: View {
 /// 파일을 끌고 노치에 다가오면 보이는 놓을 자리. 왼쪽은 AirDrop, 오른쪽은 맡기기.
 private struct DropZoneContent: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let metrics: IslandMetrics
     let target: FileDropTarget?
     @State private var refusals = 0
@@ -891,7 +900,7 @@ private struct DropZoneContent: View {
                 }
             }
             .keyframeAnimator(initialValue: Shake(), trigger: refusals) { content, value in
-                content.offset(x: value.x)
+                content.offset(x: reduceMotion ? 0 : value.x)
             } keyframes: { _ in
                 KeyframeTrack(\.x) {
                     CubicKeyframe(7.0, duration: 0.07)
@@ -1601,11 +1610,12 @@ struct UpdateProgressBar: View {
 
 /// 접힌 노치 귀에 들어가는 작은 원. 다 받고 나면 짧은 호가 돈다.
 struct UpdateRing: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var progress: Double
 
     var body: some View {
-        TimelineView(.animation(paused: progress < 1)) { context in
-            let spin = progress < 1
+        TimelineView(.animation(paused: progress < 1 || reduceMotion)) { context in
+            let spin = progress < 1 || reduceMotion
                 ? 0
                 : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9 * 360
             ZStack {
