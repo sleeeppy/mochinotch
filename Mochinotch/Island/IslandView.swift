@@ -1477,7 +1477,7 @@ private struct ActivityRow: View {
                     }
                     Spacer(minLength: 8)
                     TimelineView(.periodic(from: .now, by: 30)) { context in
-                        Text(Self.relative.localizedString(for: activity.createdAt, relativeTo: context.date))
+                        Text(Self.timeLabel(for: activity.createdAt, now: context.date, locale: model.language.locale))
                             .font(.system(size: 11, weight: .medium, design: .rounded))
                             .foregroundStyle(IslandColor.secondary)
                             .monospacedDigit()
@@ -1517,12 +1517,20 @@ private struct ActivityRow: View {
         .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 
-    private static let relative: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.locale = Locale(identifier: "ko_KR")
-        formatter.unitsStyle = .short
-        return formatter
-    }()
+    /// 일주일 안은 `2분`, 그다음부터는 `10월 8일`. 해가 다르면 해도 붙인다.
+    private static func timeLabel(for date: Date, now: Date, locale: Locale) -> String {
+        if now.timeIntervalSince(date) < 7 * 24 * 60 * 60 {
+            let relative = RelativeDateTimeFormatter()
+            relative.locale = locale
+            relative.unitsStyle = .short
+            return relative.localizedString(for: date, relativeTo: now)
+        }
+        let absolute = DateFormatter()
+        absolute.locale = locale
+        let sameYear = Calendar.current.isDate(date, equalTo: now, toGranularity: .year)
+        absolute.setLocalizedDateFormatFromTemplate(sameYear ? "MMMd" : "yMMMd")
+        return absolute.string(from: date)
+    }
 }
 
 /// 인앱 업데이트가 끝난 뒤 다시 켜지면 보이는 패치 노트. 닫기 전에는 접히지 않는다.
