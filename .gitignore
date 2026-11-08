@@ -1,6 +1,8 @@
 .DS_Store
 build/
 DerivedData/
+windows/**/bin/
+windows/**/obj/
 *.xcodeproj
 xcuserdata/
 *.xcuserstate
