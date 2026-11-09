@@ -148,8 +148,9 @@ final class AppModel {
     private var featuredID: UUID?
     private var noticesSeenAt = Date.distantPast
     private var isHovering = false
-    /// 끄는 중에는 노치를 다시 펼치지 않는다.
-    private var isQuitting = false
+    /// 끄는 중에는 노치를 다시 펼치지 않는다. 설정 종료와 재실행만 이 값을 켠다.
+    /// `linkd`가 보낸 quit은 이 값이 꺼져 있어 거절한다.
+    private(set) var isQuitting = false
     private var hoverTask: Task<Void, Never>?
     private var leaveTask: Task<Void, Never>?
     private var dismissTask: Task<Void, Never>?
