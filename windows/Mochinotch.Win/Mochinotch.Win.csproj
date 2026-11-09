@@ -11,6 +11,10 @@
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
   </PropertyGroup>
   <ItemGroup>
+    <Content Include="..\..\Assets\MochinotchIcon.png" Link="MochinotchIcon.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\Mochinotch\ToolIcons\*.png" Link="ToolIcons\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\Mochinotch.Win.Core\Mochinotch.Win.Core.csproj" />
     <PackageReference Include="Avalonia" Version="11.3.6" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.6" />

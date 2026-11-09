@@ -29,8 +29,20 @@ static class WindowChrome
     {
         var handle = window.TryGetPlatformHandle()?.Handle ?? 0;
         if (handle == 0) return;
-        if (OperatingSystem.IsWindows())
-            SetExStyle(handle, Tool | NoActivate);
+        if (!OperatingSystem.IsWindows()) return;
+        SetExStyle(handle, Tool | NoActivate);
+        Bare(window);
+    }
+
+    /// <summary>Windows 11이 테두리 없는 창에도 그리는 둥근 모서리와 1px 테두리를 끈다.</summary>
+    public static void Bare(Window window)
+    {
+        var handle = window.TryGetPlatformHandle()?.Handle ?? 0;
+        if (handle == 0 || !OperatingSystem.IsWindows()) return;
+        var square = 1;
+        DwmSetWindowAttribute(handle, 33, ref square, sizeof(int));
+        var none = unchecked((int)0xFFFFFFFE);
+        DwmSetWindowAttribute(handle, 34, ref none, sizeof(int));
     }
 
     public static void ClickThrough(Window window)
@@ -65,6 +77,9 @@ static class WindowChrome
             // 클릭이 한동안 막히면 연출이 끝날 때 창을 숨긴다.
         }
     }
+
+    [DllImport("dwmapi.dll")]
+    static extern int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     static extern nint GetWindowLongPtr(nint hwnd, int index);

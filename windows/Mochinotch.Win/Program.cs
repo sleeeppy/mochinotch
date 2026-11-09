@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -78,8 +79,16 @@ public static class Program
 
 public class App : Application
 {
+    readonly Stopwatch clock = Stopwatch.StartNew();
     IslandModel? model;
     EventServer? server;
+    EdgeWindow? edge;
+    ToastWindow? toast;
+    SettingsWindow? settings;
+    TrayIcon? tray;
+    NoticeWatch? notices;
+    AppUpdate? updates;
+    DispatcherTimer? timer;
 
     public override void Initialize()
     {
@@ -94,26 +103,97 @@ public class App : Application
         {
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             model = new IslandModel();
-            var edge = new EdgeWindow();
-            var toast = new ToastWindow(model);
-            var island = new IslandWindow(model, edge, toast);
-            island.Quit = () => desktop.Shutdown();
-            edge.Raised = () =>
-            {
-                island.KeepAbove();
-                toast.KeepAbove();
-            };
+            edge = new EdgeWindow();
+            toast = new ToastWindow(model, () => clock.Elapsed.TotalSeconds);
+            toast.Prepare();
+            settings = new SettingsWindow(model);
+            updates = new AppUpdate();
+            settings.Updates = updates;
+            updates.Changed += () => settings.ShowUpdate();
+            updates.Start();
+            settings.Quit = () => desktop.Shutdown();
+            settings.LanguageChanged = RefreshTray;
+            var icon = LoadIcon();
+            if (icon != null) settings.Icon = icon;
+            edge.Raised = () => toast.KeepAbove();
             server = new EventServer(Launch.Port);
             server.OnEvent += incoming => Dispatcher.UIThread.Post(() =>
             {
-                if (model != null) model.Ingest(incoming, island.Now);
+                if (model == null) return;
+                model.Ingest(incoming, clock.Elapsed.TotalSeconds);
+                OnTick();
             });
             server.Start();
             if (server.Failure != null) model.ServerFailure = server.Failure;
-            desktop.Exit += (_, _) => server?.Dispose();
-            island.Show();
-            desktop.MainWindow = island;
+            notices = new NoticeWatch(incoming => Dispatcher.UIThread.Post(() =>
+            {
+                if (model == null) return;
+                model.Ingest(incoming, clock.Elapsed.TotalSeconds);
+                OnTick();
+            }));
+            notices.Start();
+            AttachTray(icon);
+            desktop.Exit += (_, _) =>
+            {
+                timer?.Stop();
+                notices?.Dispose();
+                updates?.Dispose();
+                server?.Dispose();
+                tray?.Dispose();
+            };
+            timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
+            timer.Tick += (_, _) => OnTick();
+            timer.Start();
         }
         base.OnFrameworkInitializationCompleted();
+    }
+
+    void OnTick()
+    {
+        if (model == null || timer == null) return;
+        var now = clock.Elapsed.TotalSeconds;
+        model.Tick(now);
+        edge?.Sync(model);
+        toast?.Wake();
+        settings?.Sync();
+        var busy = model.EdgeVisible || model.Toasts(now).Count > 0 || toast?.Active == true;
+        timer.Interval = TimeSpan.FromMilliseconds(busy ? 16 : 200);
+    }
+
+    void AttachTray(WindowIcon? icon)
+    {
+        if (settings == null) return;
+        tray = new TrayIcon
+        {
+            Icon = icon,
+            ToolTipText = "Mochinotch",
+            IsVisible = true,
+        };
+        tray.Clicked += (_, _) => Dispatcher.UIThread.Post(settings.Toggle);
+        RefreshTray();
+        TrayIcon.SetIcons(this, new TrayIcons { tray });
+    }
+
+    void RefreshTray()
+    {
+        if (tray == null || model == null || settings == null) return;
+        var menu = new NativeMenu();
+        var open = new NativeMenuItem { Header = Copy.Get(Phrase.Settings, model.Language) };
+        open.Click += (_, _) => Dispatcher.UIThread.Post(settings.Open);
+        var exit = new NativeMenuItem { Header = Copy.Get(Phrase.Quit, model.Language) };
+        exit.Click += (_, _) => Dispatcher.UIThread.Post(() =>
+        {
+            if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+                desktop.Shutdown();
+        });
+        menu.Items.Add(open);
+        menu.Items.Add(exit);
+        tray.Menu = menu;
+    }
+
+    static WindowIcon? LoadIcon()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "MochinotchIcon.png");
+        return File.Exists(path) ? new WindowIcon(path) : null;
     }
 }

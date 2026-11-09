@@ -106,3 +106,33 @@ public static class EdgeMotion
         return smooth * smooth * (3 - 2 * smooth);
     }
 }
+
+/// <summary>
+/// 화면마다 다른 해상도·비율에 맞춘 가장자리 범위.
+/// 위아래는 높이 비율, 좌우는 그 두께를 따르되 가로가 길다고 같이 두꺼워지지 않는다.
+/// </summary>
+public readonly record struct EdgeFrame(double BandX, double BandY, double Corner)
+{
+    public static EdgeFrame Measure(double width, double height)
+    {
+        width = Math.Max(1, width);
+        height = Math.Max(1, height);
+        var wide = EdgeMotion.SmootherStep(1.2, 3.2, width / height);
+        var tall = EdgeMotion.SmootherStep(1.2, 2.4, height / width);
+        var bandY = Math.Min(height * (0.064 - 0.016 * wide + 0.014 * tall), height * 0.2);
+        var bandX = Math.Clamp(
+            bandY * (1.15 - 0.28 * wide + 0.2 * tall),
+            width * 0.012,
+            Math.Min(width * 0.07, width * 0.2));
+        var corner = Math.Clamp(Math.Min(width, height) * 0.018, 8, Math.Min(width, height) * 0.045);
+        return new EdgeFrame(bandX, bandY, corner);
+    }
+
+    /// <summary>위쪽 가운데가 0, 아래 모서리가 1. 가로세로가 달라도 같은 진행으로 끝에 닿는다.</summary>
+    public static double Span(double x, double y, double width, double height)
+    {
+        var nx = (x - width / 2) / (width / 2);
+        var ny = y / height;
+        return Math.Sqrt(nx * nx + ny * ny) / Math.Sqrt(2);
+    }
+}

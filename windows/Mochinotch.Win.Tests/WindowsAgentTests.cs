@@ -29,6 +29,49 @@ public class EdgeMotionTests
     }
 }
 
+public class EdgeFrameTests
+{
+    [Fact]
+    public void Same_aspect_grows_the_band_with_resolution()
+    {
+        var hd = EdgeFrame.Measure(1920, 1080);
+        var uhd = EdgeFrame.Measure(3840, 2160);
+        Assert.Equal(hd.BandY / 1080, uhd.BandY / 2160, 3);
+        Assert.True(uhd.BandY > hd.BandY * 1.9);
+        Assert.True(uhd.BandX > hd.BandX * 1.9);
+    }
+
+    [Fact]
+    public void Ultrawide_sides_stay_near_the_shorter_side()
+    {
+        var normal = EdgeFrame.Measure(2560, 1440);
+        var ultra = EdgeFrame.Measure(5120, 1440);
+        Assert.True(ultra.BandY < normal.BandY);
+        Assert.True(ultra.BandX < normal.BandX * 1.15);
+        Assert.True(ultra.BandX / 5120 < normal.BandX / 2560);
+    }
+
+    [Fact]
+    public void Portrait_uses_a_different_fraction_than_landscape()
+    {
+        var landscape = EdgeFrame.Measure(1920, 1080);
+        var portrait = EdgeFrame.Measure(1080, 1920);
+        Assert.NotEqual(Math.Round(landscape.BandY / 1080, 3), Math.Round(portrait.BandY / 1920, 3));
+        Assert.True(portrait.BandX / 1080 > landscape.BandX / 1920);
+    }
+
+    [Fact]
+    public void Pour_reaches_the_far_corner_on_every_aspect()
+    {
+        foreach (var (width, height) in new[] { (1920d, 1080d), (5120d, 1440d), (1080d, 1920d), (1600d, 1200d) })
+        {
+            Assert.Equal(0, EdgeFrame.Span(width / 2, 0, width, height), 3);
+            Assert.Equal(1, EdgeFrame.Span(0, height, width, height), 2);
+            Assert.Equal(1, EdgeFrame.Span(width, height, width, height), 2);
+        }
+    }
+}
+
 public class IslandModelTests
 {
     [Fact]
@@ -46,10 +89,13 @@ public class IslandModelTests
         model.Tick(6);
         Assert.Equal(Presentation.Idle, model.Presentation);
         Assert.False(model.EdgeVisible);
-        Assert.Empty(model.Toasts(6));
+        Assert.Single(model.Toasts(6));
         var icons = model.LeftIcons();
         Assert.Single(icons);
         Assert.Equal(AgentTool.Cursor, icons[0].Tool);
+        model.NoteForeground(AgentTool.Cursor, 7);
+        Assert.Empty(model.Toasts(7));
+        Assert.Empty(model.LeftIcons());
     }
 
     [Fact]
@@ -71,10 +117,19 @@ public class IslandModelTests
         var model = new IslandModel(persist: false);
         model.Ingest(new IncomingEvent { Tool = "cursor", Kind = "cancelled" }, 0);
         Assert.False(model.EdgeVisible);
-        Assert.Single(model.Toasts(0));
+        Assert.Empty(model.Toasts(0));
         model.Tick(4);
         Assert.Empty(model.Toasts(4));
         Assert.Empty(model.LeftIcons());
+    }
+
+    [Fact]
+    public void Failed_work_does_not_overlay()
+    {
+        var model = new IslandModel(persist: false);
+        model.Ingest(new IncomingEvent { Tool = "cursor", Kind = "failed" }, 0);
+        Assert.False(model.EdgeVisible);
+        Assert.Empty(model.Toasts(0));
     }
 
     [Fact]
@@ -85,6 +140,26 @@ public class IslandModelTests
         model.Ingest(incoming, 0);
         model.Ingest(incoming, 1);
         Assert.Single(model.Notes);
+    }
+
+    [Fact]
+    public void Open_question_toast_survives_a_later_completion()
+    {
+        var model = new IslandModel(persist: false);
+        model.Ingest(new IncomingEvent { Id = "toast:1", Tool = "cursor", Kind = "needsInput" }, 0);
+        model.Ingest(new IncomingEvent { Tool = "cursor", Kind = "completed" }, 3);
+        Assert.Equal(AgentOutcome.NeedsInput, model.Toasts(3)[0].Outcome);
+        model.NoteForeground(AgentTool.Cursor, 4);
+        Assert.Empty(model.Toasts(4));
+    }
+
+    [Fact]
+    public void Hook_question_closes_when_the_work_finishes()
+    {
+        var model = new IslandModel(persist: false);
+        model.Ingest(new IncomingEvent { Tool = "claude", Kind = "needsInput" }, 0);
+        model.Ingest(new IncomingEvent { Tool = "claude", Kind = "completed" }, 3);
+        Assert.DoesNotContain(model.Notes, note => note.Outcome == AgentOutcome.NeedsInput);
     }
 
     [Fact]
@@ -124,6 +199,83 @@ public class IslandModelTests
         var model = new IslandModel(persist: false);
         model.Ingest(new IncomingEvent { Kind = "update", Title = "9.9.9" }, 0);
         Assert.Empty(model.Notes);
+    }
+}
+
+public class WinUpdateTests
+{
+    const string Page = "https://github.com/sleeeppy/mochinotch/releases/tag/v0.9.0";
+    const string Exe = "https://github.com/sleeeppy/mochinotch/releases/download/v0.9.0/Mochinotch-win-x64.exe";
+
+    [Fact]
+    public void Newer_windows_asset_is_offered()
+    {
+        var release = WinUpdate.FromLatest(ReleaseJson("v0.9.0", includeWindows: true), "0.6.12");
+        Assert.Equal("0.9.0", release?.Version);
+        Assert.Equal(Exe, release?.Download);
+        Assert.Equal(Page, release?.Page);
+    }
+
+    [Fact]
+    public void Mac_only_release_is_not_a_windows_update()
+    {
+        Assert.Null(WinUpdate.FromLatest(ReleaseJson("v0.9.0", includeWindows: false), "0.6.12"));
+    }
+
+    [Fact]
+    public void Same_or_older_release_is_ignored()
+    {
+        Assert.Null(WinUpdate.FromLatest(ReleaseJson("v0.6.12", includeWindows: true), "0.6.12"));
+        Assert.Null(WinUpdate.FromLatest(ReleaseJson("v0.6.1", includeWindows: true), "0.6.12"));
+    }
+
+    [Fact]
+    public void Download_outside_github_is_rejected()
+    {
+        var json = """
+            {"tag_name":"v1.0.0","html_url":"https://github.com/sleeeppy/mochinotch/releases/tag/v1.0.0",
+             "assets":[{"name":"Mochinotch-win-x64.exe","browser_download_url":"https://evil.example/app.exe"}]}
+            """;
+        Assert.Null(WinUpdate.FromLatest(json, "0.6.12"));
+    }
+
+    static string ReleaseJson(string tag, bool includeWindows)
+    {
+        var windows = includeWindows
+            ? $$""",{"name":"Mochinotch-win-x64.exe","browser_download_url":"{{Exe}}","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"""
+            : "";
+        return $$"""
+            {"tag_name":"{{tag}}","html_url":"{{Page}}","assets":[
+              {"name":"Mochinotch.dmg","browser_download_url":"https://github.com/sleeeppy/mochinotch/releases/download/{{tag}}/Mochinotch.dmg"}{{windows}}
+            ]}
+            """;
+    }
+}
+
+public class AgentNoticeTests
+{
+    [Fact]
+    public void Cursor_input_needed_toast_is_a_confirmation()
+    {
+        var incoming = AgentNotices.Interpret(
+            "Anysphere.Cursor",
+            "Input needed • \"배포할까요?\"",
+            "Open Cursor to answer the agent's questions.");
+        Assert.Equal("cursor", incoming?.Tool);
+        Assert.Equal("needsInput", incoming?.Kind);
+        Assert.Equal("배포할까요?", incoming?.Detail);
+    }
+
+    [Fact]
+    public void Cursor_done_toast_is_left_to_the_hook()
+    {
+        Assert.Null(AgentNotices.Interpret("Anysphere.Cursor", "Done • Win branch deployment", "Open Cursor to view the agent's output."));
+    }
+
+    [Fact]
+    public void Other_apps_are_ignored()
+    {
+        Assert.Null(AgentNotices.Interpret("Microsoft.Todos", "Input needed • 오늘", ""));
     }
 }
 

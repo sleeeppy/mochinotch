@@ -12,12 +12,16 @@ public sealed class AgentNote
     public string Detail { get; init; } = "";
     public DateTime Created { get; init; } = DateTime.Now;
     public double Arrived { get; init; }
-    /// <summary>null이면 답이 올 때까지 오버레이에 둔다.</summary>
+    /// <summary>null이면 직접 확인할 때까지 오버레이에 둔다.</summary>
     public double? Until { get; init; }
+    /// <summary>그 탭을 앞으로 가져와 완료를 확인했다.</summary>
+    public bool Checked { get; set; }
+    /// <summary>알림이 왔을 때 그 에이전트 창이 이미 앞에 있었다.</summary>
+    public bool AlreadyFocused { get; init; }
     public bool HidesPeek { get; set; }
     public bool StaysOnLeft => AgentPalette.PlaysEdge(Tool) && Outcome != AgentOutcome.Cancelled;
 
-    public bool OnOverlay(double now) => Until == null || Until > now;
+    public bool OnOverlay(double now) => !Checked && (Until == null || Until > now);
 }
 
 public sealed class IslandSettings
@@ -73,6 +77,8 @@ public sealed class IslandModel
     double boingStart = double.NegativeInfinity;
     double shakeStart = double.NegativeInfinity;
     double nextFocus;
+    AgentTool? latchedForeground;
+    bool foregroundLatched;
     AgentNote? featured;
 
     public IslandModel(bool persist = true)
@@ -114,9 +120,13 @@ public sealed class IslandModel
     public double ShakeX { get; private set; }
     public string? ServerFailure { get; set; }
 
-    /// <summary>스팀 친구 알림처럼 화면 구석에 띄울 카드. 최신이 앞이다.</summary>
+    /// <summary>확인 요청과 완료만 화면 위에 띄운다. 확인이 완료보다 앞이다.</summary>
     public IReadOnlyList<AgentNote> Toasts(double now)
-        => notes.Where(note => note.OnOverlay(now)).Take(3).ToList();
+        => notes.Where(note => note.OnOverlay(now) && note.Outcome is AgentOutcome.Completed or AgentOutcome.NeedsInput)
+            .OrderBy(note => note.Outcome == AgentOutcome.NeedsInput ? 0 : 1)
+            .ThenByDescending(note => note.Arrived)
+            .Take(2)
+            .ToList();
 
     public IReadOnlyList<AgentNote> LeftIcons()
     {
@@ -151,10 +161,10 @@ public sealed class IslandModel
         if (recent.ContainsKey(dedupe)) return;
         recent[dedupe] = now + (string.IsNullOrEmpty(incoming.Id) ? 2 : 60);
         if (outcome != AgentOutcome.NeedsInput)
-            RemoveWaiting(tool);
+            RemoveWaiting(tool, keepToasts: true);
         var seconds = outcome switch
         {
-            AgentOutcome.NeedsInput => (double?)null,
+            AgentOutcome.NeedsInput or AgentOutcome.Completed => (double?)null,
             AgentOutcome.Failed => 6.2,
             AgentOutcome.Cancelled => 3.2,
             _ => 5.4,
@@ -168,14 +178,16 @@ public sealed class IslandModel
             Detail = detail,
             Arrived = now,
             Until = seconds is { } stay ? now + stay : null,
+            AlreadyFocused = ForegroundAgent.Current() == tool,
         };
         notes.Insert(0, note);
         if (notes.Count > 30) notes.RemoveRange(30, notes.Count - 30);
         featured = note;
-        if (AgentPalette.PlaysEdge(tool) && outcome is not (AgentOutcome.Cancelled or AgentOutcome.NeedsInput))
+        if (outcome == AgentOutcome.Completed && AgentPalette.PlaysEdge(tool))
+        {
             StartEdge(tool, outcome, now);
-        if (outcome == AgentOutcome.Failed) shakeStart = now;
-        else if (outcome == AgentOutcome.Completed && AgentPalette.PlaysEdge(tool)) boingStart = now;
+            boingStart = now;
+        }
         if (hovering || ShowSettings)
             SetPresentation(Presentation.Expanded, now);
         else
@@ -240,15 +252,10 @@ public sealed class IslandModel
         Revision++;
     }
 
-    public void CycleLanguage()
+    public void SetLanguage(Lang lang)
     {
-        Language = Language switch
-        {
-            Lang.Ko => Lang.Ja,
-            Lang.Ja => Lang.En,
-            Lang.En => Lang.Zh,
-            _ => Lang.Ko,
-        };
+        if (Language == lang) return;
+        Language = lang;
         Save();
         Revision++;
     }
@@ -265,7 +272,13 @@ public sealed class IslandModel
         var changed = false;
         foreach (var note in notes)
         {
-            if (note.HidesPeek || !note.StaysOnLeft || note.Tool != tool) continue;
+            if (note.Tool != tool) continue;
+            if (note.Outcome is AgentOutcome.Completed or AgentOutcome.NeedsInput && !note.Checked)
+            {
+                note.Checked = true;
+                changed = true;
+            }
+            if (note.HidesPeek || !note.StaysOnLeft) continue;
             note.HidesPeek = true;
             changed = true;
         }
@@ -330,7 +343,17 @@ public sealed class IslandModel
         if (OperatingSystem.IsWindows() && now >= nextFocus)
         {
             nextFocus = now + 0.4;
-            NoteForeground(ForegroundAgent.Current(), now);
+            var current = ForegroundAgent.Current();
+            if (!foregroundLatched)
+            {
+                foregroundLatched = true;
+                latchedForeground = current;
+            }
+            else if (current != latchedForeground)
+            {
+                latchedForeground = current;
+                NoteForeground(current, now);
+            }
         }
     }
 
@@ -352,15 +375,19 @@ public sealed class IslandModel
     void ResolveWaiting(AgentTool tool, double now)
     {
         var was = featured?.Tool == tool && featured.Outcome == AgentOutcome.NeedsInput;
-        if (!RemoveWaiting(tool)) return;
+        if (!RemoveWaiting(tool, keepToasts: false)) return;
         if (was && !hovering && !ShowSettings)
             SetPresentation(Presentation.Idle, now);
         Revision++;
     }
 
-    bool RemoveWaiting(AgentTool tool)
+    /// <param name="keepToasts">알림 센터에 아직 떠 있는 확인은 작업이 끝나도 남긴다.</param>
+    bool RemoveWaiting(AgentTool tool, bool keepToasts)
     {
-        var removed = notes.RemoveAll(note => note.Tool == tool && note.Outcome == AgentOutcome.NeedsInput);
+        var removed = notes.RemoveAll(note =>
+            note.Tool == tool
+            && note.Outcome == AgentOutcome.NeedsInput
+            && !(keepToasts && note.Dedupe != null && note.Dedupe.StartsWith("toast:", StringComparison.Ordinal)));
         if (removed > 0 && featured?.Tool == tool && featured.Outcome == AgentOutcome.NeedsInput)
             featured = notes.FirstOrDefault();
         return removed > 0;

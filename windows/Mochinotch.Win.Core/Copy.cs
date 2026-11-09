@@ -43,6 +43,9 @@ public enum Phrase
     Hours,
     Launch,
     Language,
+    OverlayHint,
+    UpdateReady,
+    Updating,
 }
 
 public static class Copy
@@ -117,10 +120,10 @@ public static class Copy
         [(Phrase.EffectOn, Lang.Ja)] = "画面の縁まで光ります",
         [(Phrase.EffectOn, Lang.En)] = "Glow reaches the screen edge",
         [(Phrase.EffectOn, Lang.Zh)] = "光会亮到屏幕边缘",
-        [(Phrase.EffectOff, Lang.Ko)] = "알약 테두리만 빛나요",
-        [(Phrase.EffectOff, Lang.Ja)] = "島の縁だけ光ります",
-        [(Phrase.EffectOff, Lang.En)] = "Only the island edge glows",
-        [(Phrase.EffectOff, Lang.Zh)] = "只有岛的边缘发光",
+        [(Phrase.EffectOff, Lang.Ko)] = "화면은 그대로 둬요",
+        [(Phrase.EffectOff, Lang.Ja)] = "画面はそのままです",
+        [(Phrase.EffectOff, Lang.En)] = "The screen stays still",
+        [(Phrase.EffectOff, Lang.Zh)] = "屏幕保持原样",
         [(Phrase.Connect, Lang.Ko)] = "연결",
         [(Phrase.Connect, Lang.Ja)] = "接続",
         [(Phrase.Connect, Lang.En)] = "Connect",
@@ -173,6 +176,18 @@ public static class Copy
         [(Phrase.Language, Lang.Ja)] = "言語",
         [(Phrase.Language, Lang.En)] = "Language",
         [(Phrase.Language, Lang.Zh)] = "语言",
+        [(Phrase.OverlayHint, Lang.Ko)] = "확인과 완료만 화면 위에 작게 떠요.",
+        [(Phrase.OverlayHint, Lang.Ja)] = "確認と完了だけ、画面の上に小さく出ます。",
+        [(Phrase.OverlayHint, Lang.En)] = "Confirms and finished work appear small at the top.",
+        [(Phrase.OverlayHint, Lang.Zh)] = "只有确认和完成会在屏幕上方小幅出现。",
+        [(Phrase.UpdateReady, Lang.Ko)] = "{0} 업데이트가 나왔어요",
+        [(Phrase.UpdateReady, Lang.Ja)] = "{0} のアップデートがあります",
+        [(Phrase.UpdateReady, Lang.En)] = "{0} is ready to install",
+        [(Phrase.UpdateReady, Lang.Zh)] = "{0} 可以更新了",
+        [(Phrase.Updating, Lang.Ko)] = "업데이트 받는 중",
+        [(Phrase.Updating, Lang.Ja)] = "アップデートを受け取り中",
+        [(Phrase.Updating, Lang.En)] = "Downloading update",
+        [(Phrase.Updating, Lang.Zh)] = "正在下载更新",
     };
 
     public static Lang Detect()
