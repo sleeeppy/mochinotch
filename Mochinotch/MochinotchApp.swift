@@ -61,7 +61,19 @@ struct MochinotchApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        // 보이는 창이 없는 상주 앱을 유휴 종료 대상으로 올리지 않는다.
+        ProcessInfo.processInfo.disableAutomaticTermination("menu-bar-resident")
+        ProcessInfo.processInfo.disableSuddenTermination()
         AppModel.shared.start()
+    }
+
+    /// 사용자가 종료를 누르거나, 업데이트·권한 재실행이 `quit()`을 호출한 뒤에만 꺼진다.
+    /// Apple Intelligence가 화면을 조회하면 `linkd`가 이미 떠 있는 프로세스에도 quit을 보낸다.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if AppModel.shared.isQuitting || Self.sessionIsEnding {
+            return .terminateNow
+        }
+        return .terminateCancel
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -69,4 +81,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AppModel.shared.handleIncomingURL(url)
         }
     }
+
+    /// 로그아웃, 재시동, 시스템 종료, 모두 종료. 거절하면 세션이 끝나지 않는다.
+    private static var sessionIsEnding: Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent,
+              event.eventID == kAEQuitApplication else { return false }
+        let reason = event.paramDescriptor(forKeyword: kAEQuitReason)
+            ?? event.attributeDescriptor(forKeyword: kAEQuitReason)
+        guard let reason else { return false }
+        let code = reason.descriptorType == typeEnumerated ? reason.enumCodeValue : reason.typeCodeValue
+        return sessionEndingReasons.contains(code)
+    }
+
+    private static let sessionEndingReasons: Set<OSType> = [
+        OSType(kAELogOut),
+        OSType(kAEReallyLogOut),
+        OSType(kAERestart),
+        OSType(kAEShutDown),
+        OSType(kAEQuitAll),
+    ]
 }
