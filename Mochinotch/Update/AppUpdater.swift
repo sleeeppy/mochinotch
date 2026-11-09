@@ -92,6 +92,10 @@ enum AppUpdater {
     private static func download(_ url: URL, to destination: URL, progress: @escaping (Double) -> Void) async throws {
         var request = URLRequest(url: url, timeoutInterval: 60)
         request.setValue("Mochinotch", forHTTPHeaderField: "User-Agent")
+        // 자산 API는 이 헤더가 있어야 파일로 넘어간다. 없으면 JSON 설명만 온다.
+        if url.host?.lowercased() == "api.github.com" {
+            request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
+        }
         let gate = DownloadGate()
         let session = URLSession(configuration: .ephemeral, delegate: gate, delegateQueue: nil)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -176,9 +180,19 @@ enum AppUpdater {
         let preferred = dmgs.filter { ($0["name"] as? String)?.lowercased().contains("mochinotch") == true }
         let rest = dmgs.filter { ($0["name"] as? String)?.lowercased().contains("mochinotch") != true }
         for asset in preferred + rest {
-            guard let url = (asset["browser_download_url"] as? String).flatMap(URL.init(string:)),
-                  isAllowedDownload(url) else { continue }
+            guard let url = downloadURL(from: asset) else { continue }
             return (url, sha256Digest(asset["digest"] as? String))
+        }
+        return nil
+    }
+
+    /// `releases/download`는 한국 엣지에서 504가 난다. 자산 API는
+    /// `release-assets.githubusercontent.com`으로 넘어가고, 그 주소는 받을 수 있다.
+    private static func downloadURL(from asset: [String: Any]) -> URL? {
+        let candidates = [asset["url"] as? String, asset["browser_download_url"] as? String]
+        for string in candidates {
+            guard let url = string.flatMap(URL.init(string:)), isAllowedDownload(url) else { continue }
+            return url
         }
         return nil
     }
