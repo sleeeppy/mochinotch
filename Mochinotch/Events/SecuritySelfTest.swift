@@ -12,6 +12,7 @@ enum SecuritySelfTest {
             ("같은 숫자의 출시 전 태그는 정식보다 낮다", testPrereleaseOlderThanRelease),
             ("순수 버전 비교는 그대로다", testPlainVersions),
             ("http DMG와 대문자 SHA256를 가른다", testDownloadChoice),
+            ("504가 나는 공개 주소 대신 자산 API를 고른다", testPrefersAssetAPI),
             ("격리 해제는 바깥 심볼릭 링크를 따라가지 않는다", testQuarantineSkipsSymlink),
             ("테이블 뒤의 Codex notify는 하나로 감싼다", testCodexNotifyAfterTable),
             ("Codex notify를 두 번 넣지 않는다", testCodexNotifyIdempotent),
@@ -96,6 +97,31 @@ enum SecuritySelfTest {
         try expect(release.dmg?.host == "github.com", "host \(release.dmg?.host ?? "nil")")
         try expect(release.sha256 == String(repeating: "ab", count: 32), "digest \(release.sha256 ?? "nil")")
         try expect(release.page.host == "github.com", "page \(release.page.host ?? "nil")")
+    }
+
+    private static func testPrefersAssetAPI() throws {
+        let page = URL(string: "https://github.com/sleeeppy/mochinotch/releases/tag/v9")!
+        let api = "https://api.github.com/repos/sleeeppy/mochinotch/releases/assets/1"
+        let browser = "https://github.com/sleeeppy/mochinotch/releases/download/v9/Mochinotch.dmg"
+        let preferred: [String: Any] = [
+            "assets": [[
+                "name": "Mochinotch.dmg",
+                "url": api,
+                "browser_download_url": browser
+            ]]
+        ]
+        let chosen = AppUpdater.release(from: preferred, tag: "v9.0.0", page: page)
+        try expect(chosen.dmg?.absoluteString == api, "url \(chosen.dmg?.absoluteString ?? "nil")")
+
+        let fallback: [String: Any] = [
+            "assets": [[
+                "name": "Mochinotch.dmg",
+                "url": "http://evil.example/asset",
+                "browser_download_url": browser
+            ]]
+        ]
+        let rescued = AppUpdater.release(from: fallback, tag: "v9.0.0", page: page)
+        try expect(rescued.dmg?.absoluteString == browser, "fallback \(rescued.dmg?.absoluteString ?? "nil")")
     }
 
     private static func testQuarantineSkipsSymlink() throws {
