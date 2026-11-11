@@ -90,7 +90,9 @@ enum HookRelay {
             source = "cursor"
             log(options.source, stdinEvent, "send as cursor")
         } else {
-            log(options.source, stdinEvent, "send")
+            // Codex 본문은 인자로 온다. stdin만 적으면 종류가 빈 줄로 남는다.
+            let logged = options.source == "codex" && !argEvent.isEmpty ? argEvent : stdinEvent
+            log(options.source, logged, "send")
         }
 
         var tool = options.tool
@@ -171,19 +173,26 @@ enum HookRelay {
             if detail.isEmpty { detail = folderName(stdinEvent["cwd"] as? String) }
         case "codex":
             let event = argEvent.isEmpty ? stdinEvent : argEvent
-            if (event["hook_event_name"] as? String) == "PermissionRequest" {
+            let type = event["type"] as? String ?? ""
+            let hookName = event["hook_event_name"] as? String ?? ""
+            // 답변 시작, 일반 알림, 종류가 비어 있는 호출은 완료가 아니다.
+            // 종류가 없으면 예전에는 완료로 올려서, 시작할 때마다 노치가 떴다.
+            if hookName == "PermissionRequest" {
+                let ask = permissionDetail(event)
+                guard !(event["tool_name"] as? String ?? "").isEmpty || !ask.isEmpty else { return false }
                 if tool.isEmpty { tool = "codex" }
                 if kind.isEmpty { kind = "needsInput" }
                 if title.isEmpty { title = "Codex 확인 필요" }
-                if detail.isEmpty { detail = permissionDetail(event) }
-            } else {
-                if let type = event["type"] as? String, type != "agent-turn-complete" { return false }
+                if detail.isEmpty { detail = ask }
+            } else if type == "agent-turn-complete" {
                 if let turn = (event["turn-id"] as? String).nonEmpty { dedupeID = "codex:\(turn)" }
                 if tool.isEmpty { tool = "codex" }
                 if kind.isEmpty { kind = "completed" }
                 if title.isEmpty { title = "Codex 작업 완료" }
                 if detail.isEmpty { detail = firstLine(event["last-assistant-message"] as? String) }
                 if detail.isEmpty { detail = folderName(event["cwd"] as? String) }
+            } else {
+                return false
             }
         default:
             if tool.isEmpty { tool = "custom" }
