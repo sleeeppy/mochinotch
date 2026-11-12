@@ -173,27 +173,14 @@ enum HookRelay {
             if detail.isEmpty { detail = folderName(stdinEvent["cwd"] as? String) }
         case "codex":
             let event = argEvent.isEmpty ? stdinEvent : argEvent
-            let type = event["type"] as? String ?? ""
-            let hookName = event["hook_event_name"] as? String ?? ""
             // 답변 시작, 일반 알림, 종류가 비어 있는 호출은 완료가 아니다.
             // 종류가 없으면 예전에는 완료로 올려서, 시작할 때마다 노치가 떴다.
-            if hookName == "PermissionRequest" {
-                let ask = permissionDetail(event)
-                guard !(event["tool_name"] as? String ?? "").isEmpty || !ask.isEmpty else { return false }
-                if tool.isEmpty { tool = "codex" }
-                if kind.isEmpty { kind = "needsInput" }
-                if title.isEmpty { title = "Codex 확인 필요" }
-                if detail.isEmpty { detail = ask }
-            } else if type == "agent-turn-complete" {
-                if let turn = (event["turn-id"] as? String).nonEmpty { dedupeID = "codex:\(turn)" }
-                if tool.isEmpty { tool = "codex" }
-                if kind.isEmpty { kind = "completed" }
-                if title.isEmpty { title = "Codex 작업 완료" }
-                if detail.isEmpty { detail = firstLine(event["last-assistant-message"] as? String) }
-                if detail.isEmpty { detail = folderName(event["cwd"] as? String) }
-            } else {
-                return false
-            }
+            guard let notice = Self.codexNotice(event) else { return false }
+            if tool.isEmpty { tool = "codex" }
+            if kind.isEmpty { kind = notice.kind }
+            if title.isEmpty { title = notice.title }
+            if detail.isEmpty { detail = notice.detail }
+            if dedupeID == nil { dedupeID = notice.dedupeID }
         default:
             if tool.isEmpty { tool = "custom" }
             if kind.isEmpty { kind = options.success == false ? "failed" : "completed" }
@@ -217,6 +204,40 @@ enum HookRelay {
         if let dedupeID { payload["id"] = dedupeID }
         post(payload)
         return source == "cursor" && kind != "needsInput" && kind != "resolved"
+    }
+
+    /// Codex hook이 노치에 올릴 내용. 올릴 게 없으면 nil.
+    struct CodexNotice {
+        var kind: String
+        var title: String
+        var detail: String
+        var dedupeID: String?
+    }
+
+    static func codexNotice(_ event: [String: Any]) -> CodexNotice? {
+        let type = event["type"] as? String ?? ""
+        let hookName = event["hook_event_name"] as? String ?? ""
+        if hookName == "PermissionRequest" {
+            // 스레드로 띄운 서브에이전트는 명령마다 이 hook이 온다.
+            // 사용자 앞에 승인 창이 열린 것이 아니고, 가디언이 곧 처리할 요청도 들어 있다.
+            // 건마다 확인을 열면 그 턴 내내 노치가 확인으로 다시 펼쳐진다.
+            if (event["agent_id"] as? String).nonEmpty != nil { return nil }
+            let ask = permissionDetail(event)
+            guard !(event["tool_name"] as? String ?? "").isEmpty || !ask.isEmpty else { return nil }
+            return CodexNotice(kind: "needsInput", title: "Codex 확인 필요", detail: ask, dedupeID: nil)
+        }
+        if type == "agent-turn-complete" {
+            let turn = (event["turn-id"] as? String).nonEmpty
+            var detail = firstLine(event["last-assistant-message"] as? String)
+            if detail.isEmpty { detail = folderName(event["cwd"] as? String) }
+            return CodexNotice(
+                kind: "completed",
+                title: "Codex 작업 완료",
+                detail: detail,
+                dedupeID: turn.map { "codex:\($0)" }
+            )
+        }
+        return nil
     }
 
     private static func isUserQuestion(_ name: String) -> Bool {
