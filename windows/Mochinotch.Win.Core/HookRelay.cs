@@ -182,26 +182,13 @@ public static class HookRelay
                 break;
             case "codex":
                 var codex = argEvent.Count > 0 ? argEvent : stdinEvent;
-                if (Str(codex, "hook_event_name") == "PermissionRequest")
-                {
-                    if (tool.Length == 0) tool = "codex";
-                    if (kind.Length == 0) kind = "needsInput";
-                    if (title.Length == 0) title = "Codex 확인 필요";
-                    if (detail.Length == 0) detail = PermissionDetail(codex);
-                }
-                else
-                {
-                    var type = Str(codex, "type");
-                    if (type.Length > 0 && type != "agent-turn-complete")
-                        return new RelayResult(false, null);
-                    var turn = Str(codex, "turn-id");
-                    if (turn.Length > 0) dedupe = "codex:" + turn;
-                    if (tool.Length == 0) tool = "codex";
-                    if (kind.Length == 0) kind = "completed";
-                    if (title.Length == 0) title = "Codex 작업 완료";
-                    if (detail.Length == 0) detail = FirstLine(Str(codex, "last-assistant-message"));
-                    if (detail.Length == 0) detail = FolderName(Str(codex, "cwd"));
-                }
+                var notice = CodexNoticeOf(codex);
+                if (notice == null) return new RelayResult(false, null);
+                if (tool.Length == 0) tool = "codex";
+                if (kind.Length == 0) kind = notice.Value.Kind;
+                if (title.Length == 0) title = notice.Value.Title;
+                if (detail.Length == 0) detail = notice.Value.Detail;
+                if (dedupe == null) dedupe = notice.Value.Dedupe;
                 break;
             default:
                 if (tool.Length == 0) tool = "custom";
@@ -299,6 +286,30 @@ public static class HookRelay
         var input = Child(ev, "tool_input");
         var title = FirstLine(NonEmpty(Str(input, "title")) ?? Str(input, "prompt"));
         return title.Length == 0 ? "답변을 기다리고 있어요" : title;
+    }
+
+    /// <summary>Codex hook이 노치에 올릴 내용. 올릴 게 없으면 null.</summary>
+    readonly record struct CodexNotice(string Kind, string Title, string Detail, string? Dedupe);
+
+    static CodexNotice? CodexNoticeOf(Dictionary<string, JsonElement> ev)
+    {
+        var type = Str(ev, "type");
+        if (Str(ev, "hook_event_name") == "PermissionRequest")
+        {
+            // 스레드로 띄운 서브에이전트는 명령마다 이 hook이 온다. 사용자 앞의 승인 창이 아니다.
+            if (Str(ev, "agent_id").Length > 0) return null;
+            var ask = PermissionDetail(ev);
+            if (Str(ev, "tool_name").Length == 0 && ask.Length == 0) return null;
+            return new CodexNotice("needsInput", "Codex 확인 필요", ask, null);
+        }
+        if (type == "agent-turn-complete")
+        {
+            var turn = Str(ev, "turn-id");
+            var detail = FirstLine(Str(ev, "last-assistant-message"));
+            if (detail.Length == 0) detail = FolderName(Str(ev, "cwd"));
+            return new CodexNotice("completed", "Codex 작업 완료", detail, turn.Length > 0 ? "codex:" + turn : null);
+        }
+        return null;
     }
 
     static string WaitingDetail(Dictionary<string, JsonElement> ev)

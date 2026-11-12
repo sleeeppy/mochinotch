@@ -206,13 +206,15 @@ public class WinUpdateTests
 {
     const string Page = "https://github.com/sleeeppy/mochinotch/releases/tag/v0.9.0";
     const string Exe = "https://github.com/sleeeppy/mochinotch/releases/download/v0.9.0/Mochinotch-win-x64.exe";
+    const string Api = "https://api.github.com/repos/sleeeppy/mochinotch/releases/assets/1";
 
     [Fact]
     public void Newer_windows_asset_is_offered()
     {
         var release = WinUpdate.FromLatest(ReleaseJson("v0.9.0", includeWindows: true), "0.6.12");
         Assert.Equal("0.9.0", release?.Version);
-        Assert.Equal(Exe, release?.Download);
+        Assert.Equal(Api, release?.Download);
+        Assert.Equal("Mochinotch-win-x64.exe", release?.FileName);
         Assert.Equal(Page, release?.Page);
     }
 
@@ -242,7 +244,7 @@ public class WinUpdateTests
     static string ReleaseJson(string tag, bool includeWindows)
     {
         var windows = includeWindows
-            ? $$""",{"name":"Mochinotch-win-x64.exe","browser_download_url":"{{Exe}}","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"""
+            ? $$""",{"name":"Mochinotch-win-x64.exe","url":"{{Api}}","browser_download_url":"{{Exe}}","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"""
             : "";
         return $$"""
             {"tag_name":"{{tag}}","html_url":"{{Page}}","assets":[
@@ -350,6 +352,48 @@ public class HookRelayTests
         Assert.Equal("completed", result.Event?.Kind);
         Assert.Equal("codex:t1", result.Event?.Id);
         Assert.Equal("demo", result.Event?.Detail);
+    }
+
+    [Fact]
+    public void Codex_subagent_permission_stays_quiet()
+    {
+        var child = HookRelay.Relay(
+            HookRelay.Options.Parse(["--source", "codex", """{"hook_event_name":"PermissionRequest","tool_name":"Bash","agent_id":"child-thread","tool_input":{"command":"ls"}}"""]),
+            "",
+            new Dictionary<string, string>());
+        Assert.Null(child.Event);
+        var blank = HookRelay.Relay(
+            HookRelay.Options.Parse(["--source", "codex", """{"hook_event_name":"PermissionRequest","tool_name":"Bash","agent_id":"","tool_input":{"command":"ls"}}"""]),
+            "",
+            new Dictionary<string, string>());
+        Assert.Equal("needsInput", blank.Event?.Kind);
+        Assert.Equal("Bash · ls", blank.Event?.Detail);
+    }
+
+    [Fact]
+    public void Codex_parent_permission_and_only_finished_turns_notify()
+    {
+        var ask = HookRelay.Relay(
+            HookRelay.Options.Parse(["--source", "codex", """{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"ls"}}"""]),
+            "",
+            new Dictionary<string, string>());
+        Assert.Equal("needsInput", ask.Event?.Kind);
+        Assert.Equal("Bash · ls", ask.Event?.Detail);
+        var empty = HookRelay.Relay(
+            HookRelay.Options.Parse(["--source", "codex", """{"hook_event_name":"PermissionRequest"}"""]),
+            "",
+            new Dictionary<string, string>());
+        Assert.Null(empty.Event);
+        var start = HookRelay.Relay(
+            HookRelay.Options.Parse(["--source", "codex", """{"type":"agent-turn-start"}"""]),
+            "",
+            new Dictionary<string, string>());
+        Assert.Null(start.Event);
+        var blank = HookRelay.Relay(
+            HookRelay.Options.Parse(["--source", "codex", "{}"]),
+            "",
+            new Dictionary<string, string>());
+        Assert.Null(blank.Event);
     }
 
     [Fact]

@@ -121,12 +121,19 @@ sealed class AppUpdate : IDisposable
     async Task<string?> Save(WinRelease offer)
     {
         if (offer.Download == null) return null;
-        var name = Path.GetFileName(new Uri(offer.Download).LocalPath);
+        var name = string.IsNullOrEmpty(offer.FileName)
+            ? Path.GetFileName(new Uri(offer.Download).LocalPath)
+            : offer.FileName;
         if (string.IsNullOrEmpty(name)) return null;
         var directory = Path.Combine(Path.GetTempPath(), "mochinotch-update");
         Directory.CreateDirectory(directory);
         var destination = Path.Combine(directory, name);
-        await using (var input = await download.GetStreamAsync(offer.Download))
+        using var request = new HttpRequestMessage(HttpMethod.Get, offer.Download);
+        if (request.RequestUri?.Host.Equals("api.github.com", StringComparison.OrdinalIgnoreCase) == true)
+            request.Headers.Accept.ParseAdd("application/octet-stream");
+        using var response = await download.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+        response.EnsureSuccessStatusCode();
+        await using (var input = await response.Content.ReadAsStreamAsync())
         await using (var output = File.Create(destination))
             await input.CopyToAsync(output);
         if (offer.Sha256 != null)

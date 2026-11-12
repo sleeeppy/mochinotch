@@ -1,5 +1,6 @@
 .DS_Store
 build/
+artifacts/
 DerivedData/
 windows/**/bin/
 windows/**/obj/
