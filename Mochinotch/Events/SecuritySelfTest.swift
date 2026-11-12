@@ -18,7 +18,9 @@ enum SecuritySelfTest {
             ("Codex notify를 두 번 넣지 않는다", testCodexNotifyIdempotent),
             ("훅 경로는 항상 셸 따옴표로 감싼다", testShellQuote),
             ("꺼 둔 Kiro 훅은 유지한다", testDisabledKiroHook),
-            ("이벤트 토큰이 다르면 거절한다", testEventToken)
+            ("이벤트 토큰이 다르면 거절한다", testEventToken),
+            ("Codex 서브에이전트 승인은 확인으로 올리지 않는다", testCodexSubagentPermissionIsQuiet),
+            ("Codex 본인 승인과 작업 완료는 그대로 올린다", testCodexParentStillNotifies)
         ]
         var failed = 0
         for (name, test) in tests {
@@ -211,6 +213,47 @@ enum SecuritySelfTest {
         try expect(!EventToken.accepts(token + "x"), "다른 토큰을 받았다")
         let mode = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
         try expect((mode?.intValue ?? 0) & 0o077 == 0, "모드 \(String(mode?.intValue ?? 0, radix: 8))")
+    }
+
+    private static func testCodexSubagentPermissionIsQuiet() throws {
+        let event: [String: Any] = [
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Bash",
+            "agent_id": "child-thread",
+            "agent_type": "worker",
+            "tool_input": ["command": "ls"],
+        ]
+        try expect(HookRelay.codexNotice(event) == nil, "서브에이전트 승인을 올렸다")
+        let blank: [String: Any] = [
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Bash",
+            "agent_id": "",
+            "tool_input": ["command": "ls"],
+        ]
+        try expect(HookRelay.codexNotice(blank)?.kind == "needsInput", "빈 agent_id를 서브에이전트로 봤다")
+    }
+
+    private static func testCodexParentStillNotifies() throws {
+        let ask: [String: Any] = [
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Bash",
+            "tool_input": ["command": "ls"],
+        ]
+        let notice = HookRelay.codexNotice(ask)
+        try expect(notice?.kind == "needsInput", "kind \(notice?.kind ?? "nil")")
+        try expect(notice?.detail == "Bash · ls", "detail \(notice?.detail ?? "nil")")
+        try expect(HookRelay.codexNotice(["hook_event_name": "PermissionRequest"]) == nil, "빈 승인을 올렸다")
+
+        let done: [String: Any] = [
+            "type": "agent-turn-complete",
+            "turn-id": "turn-1",
+            "last-assistant-message": "끝",
+        ]
+        let finished = HookRelay.codexNotice(done)
+        try expect(finished?.kind == "completed", "완료 kind \(finished?.kind ?? "nil")")
+        try expect(finished?.dedupeID == "codex:turn-1", "id \(finished?.dedupeID ?? "nil")")
+        try expect(finished?.detail == "끝", "detail \(finished?.detail ?? "nil")")
+        try expect(HookRelay.codexNotice(["type": "agent-turn-start"]) == nil, "시작을 완료로 봤다")
     }
 
     private static func withHome(_ path: String, _ body: () throws -> Void) throws {
