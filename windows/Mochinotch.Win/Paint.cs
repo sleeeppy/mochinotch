@@ -1,6 +1,39 @@
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 
 namespace Mochinotch.Win;
+
+/// 배포는 exe 하나라서 그림은 exe 안에 넣어 둔다.
+static class Bundled
+{
+    public static Stream? Open(string path)
+    {
+        var uri = new Uri($"avares://Mochinotch/{path}");
+        try
+        {
+            return AssetLoader.Exists(uri) ? AssetLoader.Open(uri) : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    public static Bitmap? Image(string path)
+    {
+        using var stream = Open(path);
+        if (stream == null) return null;
+        try
+        {
+            return new Bitmap(stream);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+}
 
 static class AppFont
 {

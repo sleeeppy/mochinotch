@@ -78,19 +78,7 @@ sealed class AppIcon : Control
     static Bitmap? Load(AgentTool tool)
     {
         if (Cache.TryGetValue(tool, out var cached)) return cached;
-        Bitmap? image = null;
-        var path = Path.Combine(AppContext.BaseDirectory, "ToolIcons", AgentPalette.Wire(tool) + ".png");
-        if (File.Exists(path))
-        {
-            try
-            {
-                image = new Bitmap(path);
-            }
-            catch (Exception)
-            {
-                image = null;
-            }
-        }
+        var image = Bundled.Image($"ToolIcons/{AgentPalette.Wire(tool)}.png");
         Cache[tool] = image;
         return image;
     }
