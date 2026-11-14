@@ -304,12 +304,55 @@ public static class HookRelay
         }
         if (type == "agent-turn-complete")
         {
+            // 제안 목록, 제외 목록, 가디언 판정은 사용자 답이 아니다.
+            if (IsMachineResult(Str(ev, "last-assistant-message"))) return null;
+            if (IsInternalPrompt(ev)) return null;
             var turn = Str(ev, "turn-id");
             var detail = FirstLine(Str(ev, "last-assistant-message"));
             if (detail.Length == 0) detail = FolderName(Str(ev, "cwd"));
             return new CodexNotice("completed", "Codex 작업 완료", detail, turn.Length > 0 ? "codex:" + turn : null);
         }
         return null;
+    }
+
+    /// <summary>앱이 숨겨 둔 작업의 결과. 키 전체가 이 집합일 때만 거른다.</summary>
+    static bool IsMachineResult(string text)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Length == 0 || trimmed[0] != '{') return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(trimmed);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return false;
+            var count = 0;
+            foreach (var property in doc.RootElement.EnumerateObject())
+            {
+                count++;
+                if (property.Name is not ("suggestions" or "exclude" or "risk_level" or "user_authorization" or "outcome" or "rationale"))
+                    return false;
+            }
+            return count > 0;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    static bool IsInternalPrompt(Dictionary<string, JsonElement> ev)
+    {
+        if (!ev.TryGetValue("input-messages", out var inputs) || inputs.ValueKind != JsonValueKind.Array) return false;
+        foreach (var item in inputs.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String) continue;
+            var text = item.GetString() ?? "";
+            if (text.Contains("Use your image generation tool", StringComparison.Ordinal)
+                || text.Contains("Do NOT draw it with code", StringComparison.Ordinal)
+                || text.Contains("APPROVAL REQUEST", StringComparison.Ordinal)
+                || text.Contains("planned coding-agent action", StringComparison.Ordinal))
+                return true;
+        }
+        return false;
     }
 
     static string WaitingDetail(Dictionary<string, JsonElement> ev)
