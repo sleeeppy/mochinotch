@@ -241,6 +241,57 @@ public class WinUpdateTests
         Assert.Null(WinUpdate.FromLatest(json, "0.6.12"));
     }
 
+    [Fact]
+    public void Install_target_is_the_running_executable()
+    {
+        var running = Path.Combine("C", "Apps", "Mochinotch-win-x64.exe");
+        Assert.Equal(running, WinUpdate.InstallTarget(running, Path.Combine("C", "Apps")));
+    }
+
+    [Fact]
+    public void Install_target_falls_back_when_the_process_path_is_missing()
+    {
+        var directory = Path.Combine("C", "Apps");
+        Assert.Equal(
+            Path.Combine(directory, "Mochinotch.exe"),
+            WinUpdate.InstallTarget("  ", directory + Path.DirectorySeparatorChar));
+    }
+
+    [Fact]
+    public void Swap_script_replaces_the_running_file_and_starts_it_again()
+    {
+        var destination = Path.Combine("D", "Apps", "Mochinotch-win-x64.exe");
+        var staged = Path.Combine("C", "temp", "new.exe");
+        var script = WinUpdate.SwapScript(42, staged, destination);
+        Assert.Contains("Wait-Process -Id 42", script);
+        Assert.Contains($"-Destination '{destination}'", script);
+        Assert.Contains($"-FilePath '{destination}'", script);
+        Assert.DoesNotContain("Mochinotch.exe", script);
+    }
+
+    [Fact]
+    public void Swap_script_escapes_quotes()
+    {
+        var destination = Path.Combine("C", "O'Brien", "Mochinotch.exe");
+        var script = WinUpdate.SwapScript(1, destination, destination);
+        Assert.Contains($"'{destination.Replace("'", "''")}'", script);
+    }
+
+    [Fact]
+    public void A_writable_folder_can_be_replaced()
+    {
+        var directory = Directory.CreateTempSubdirectory("mn-update").FullName;
+        try
+        {
+            Assert.True(WinUpdate.CanReplace(Path.Combine(directory, "Mochinotch-win-x64.exe")));
+            Assert.False(WinUpdate.CanReplace(Path.Combine(directory, "missing", "app.exe")));
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
     static string ReleaseJson(string tag, bool includeWindows)
     {
         var windows = includeWindows

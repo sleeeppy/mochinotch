@@ -5,9 +5,16 @@ using Avalonia.Threading;
 
 namespace Mochinotch.Win;
 
+enum UpdateLook
+{
+    Checking,
+    Current,
+    Failed,
+}
+
 /// <summary>
-/// GitHub 최신 릴리즈에 윈도우 파일이 있으면 설정에서 받을 수 있게 한다.
-/// 설치 파일이면 실행하고, 압축이면 이 앱이 꺼진 뒤 같은 자리에 덮어쓰고 다시 연다.
+/// GitHub 최신 릴리즈에 윈도우 파일이 있으면 설정에서 확인하고 받을 수 있다.
+/// 받기가 끝나면 지금 실행 중인 exe를 같은 자리에 덮어쓰고 다시 연다.
 /// </summary>
 sealed class AppUpdate : IDisposable
 {
@@ -18,6 +25,10 @@ sealed class AppUpdate : IDisposable
     readonly bool arm;
     Timer? timer;
     int checking;
+    int manualRequest;
+    int requestSerial;
+    int statusGeneration;
+    long checkStarted;
 
     public AppUpdate()
     {
@@ -31,6 +42,9 @@ sealed class AppUpdate : IDisposable
 
     public WinRelease? Offer { get; private set; }
     public bool Busy { get; private set; }
+    public double? Progress { get; private set; }
+    public bool ProgressKnown { get; private set; }
+    public UpdateLook? Status { get; private set; }
     public event Action? Changed;
 
     public void Start()
@@ -45,6 +59,20 @@ sealed class AppUpdate : IDisposable
         _ = Read();
     }
 
+    /// <summary>설정의 업데이트 확인. 간격과 상관없이 바로 보고, 결과를 잠깐 보여 준다.</summary>
+    public void CheckNow()
+    {
+        if (Busy || Status == UpdateLook.Checking) return;
+        Interlocked.Increment(ref statusGeneration);
+        checkStarted = Environment.TickCount64;
+        manualRequest = Interlocked.Increment(ref requestSerial);
+        Status = UpdateLook.Checking;
+        Progress = null;
+        ProgressKnown = false;
+        Publish();
+        Check();
+    }
+
     public async Task Install(Action quit)
     {
         var offer = Offer;
@@ -55,7 +83,10 @@ sealed class AppUpdate : IDisposable
             return;
         }
         Busy = true;
+        Progress = 0;
+        ProgressKnown = false;
         Publish();
+        var swapped = false;
         try
         {
             var file = await Save(offer);
@@ -64,19 +95,22 @@ sealed class AppUpdate : IDisposable
                 Open(offer.Page);
                 return;
             }
+            Progress = 1;
+            Publish();
             var name = Path.GetFileName(file).ToLowerInvariant();
             if (name.EndsWith(".msi") || name.Contains("setup") || name.Contains("install"))
             {
                 Process.Start(new ProcessStartInfo(file) { UseShellExecute = true });
                 quit();
+                swapped = true;
                 return;
             }
             if (name.EndsWith(".zip"))
             {
-                StageZip(file, quit);
+                swapped = StageZip(file, quit);
                 return;
             }
-            StageFile(file, quit);
+            swapped = StageFile(file, quit);
         }
         catch (Exception)
         {
@@ -84,8 +118,13 @@ sealed class AppUpdate : IDisposable
         }
         finally
         {
-            Busy = false;
-            Publish();
+            if (!swapped)
+            {
+                Busy = false;
+                Progress = null;
+                ProgressKnown = false;
+                Publish();
+            }
         }
     }
 
@@ -98,15 +137,13 @@ sealed class AppUpdate : IDisposable
 
     async Task Read()
     {
+        WinRelease? found = null;
+        var ok = false;
         try
         {
             var json = await http.GetStringAsync(Latest);
-            var found = WinUpdate.FromLatest(json, local, arm);
-            if (found?.Version != Offer?.Version || found?.Download != Offer?.Download)
-            {
-                Offer = found;
-                Publish();
-            }
+            found = WinUpdate.FromLatest(json, local, arm);
+            ok = true;
         }
         catch (Exception)
         {
@@ -116,6 +153,51 @@ sealed class AppUpdate : IDisposable
         {
             Interlocked.Exchange(ref checking, 0);
         }
+
+        var clicked = Volatile.Read(ref manualRequest);
+        var answered = clicked != 0 && Interlocked.CompareExchange(ref manualRequest, 0, clicked) == clicked;
+        var wait = 600 - (Environment.TickCount64 - checkStarted);
+        if (answered && wait > 0) await Task.Delay((int)wait);
+        var release = found;
+        var reached = ok;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (reached && (release?.Version != Offer?.Version || release?.Download != Offer?.Download))
+                Offer = release;
+            if (!answered)
+            {
+                if (reached && release != null) Status = null;
+                Changed?.Invoke();
+                return;
+            }
+            if (!reached) Hold(UpdateLook.Failed);
+            else if (release == null) Hold(UpdateLook.Current);
+            else
+            {
+                Status = null;
+                Changed?.Invoke();
+            }
+        });
+    }
+
+    void Hold(UpdateLook look)
+    {
+        var generation = Interlocked.Increment(ref statusGeneration);
+        Status = look;
+        Changed?.Invoke();
+        _ = Clear(generation);
+    }
+
+    async Task Clear(int generation)
+    {
+        await Task.Delay(2400);
+        if (generation != Volatile.Read(ref statusGeneration)) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (generation != statusGeneration) return;
+            Status = null;
+            Changed?.Invoke();
+        });
     }
 
     async Task<string?> Save(WinRelease offer)
@@ -133,9 +215,27 @@ sealed class AppUpdate : IDisposable
             request.Headers.Accept.ParseAdd("application/octet-stream");
         using var response = await download.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
         response.EnsureSuccessStatusCode();
+        var total = response.Content.Headers.ContentLength ?? 0;
+        ProgressKnown = total > 0;
         await using (var input = await response.Content.ReadAsStreamAsync())
         await using (var output = File.Create(destination))
-            await input.CopyToAsync(output);
+        {
+            var buffer = new byte[81920];
+            long read = 0;
+            var shown = -1;
+            int count;
+            while ((count = await input.ReadAsync(buffer)) > 0)
+            {
+                await output.WriteAsync(buffer.AsMemory(0, count));
+                read += count;
+                if (total <= 0) continue;
+                var percent = (int)Math.Min(99, read * 100 / total);
+                if (percent == shown) continue;
+                shown = percent;
+                Progress = percent / 100d;
+                Publish();
+            }
+        }
         if (offer.Sha256 != null)
         {
             var hash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(destination))).ToLowerInvariant();
@@ -148,7 +248,7 @@ sealed class AppUpdate : IDisposable
         return destination;
     }
 
-    static void StageZip(string zip, Action quit)
+    static bool StageZip(string zip, Action quit)
     {
         var staged = Path.Combine(Path.GetTempPath(), "mochinotch-update", "staged");
         if (Directory.Exists(staged)) Directory.Delete(staged, true);
@@ -157,42 +257,41 @@ sealed class AppUpdate : IDisposable
         if (exe == null)
         {
             Open("https://github.com/sleeeppy/mochinotch/releases/latest");
-            return;
+            return false;
         }
-        Swap(Path.GetDirectoryName(exe)!, quit);
+        return Replace(exe, quit);
     }
 
-    static void StageFile(string file, Action quit)
+    static bool StageFile(string file, Action quit)
     {
         if (!file.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
         {
             Process.Start(new ProcessStartInfo(file) { UseShellExecute = true });
             quit();
-            return;
+            return true;
         }
-        var folder = Path.Combine(Path.GetTempPath(), "mochinotch-update", "staged");
-        Directory.CreateDirectory(folder);
-        var target = Path.Combine(folder, "Mochinotch.exe");
-        File.Copy(file, target, true);
-        Swap(folder, quit);
+        return Replace(file, quit);
     }
 
-    static void Swap(string staged, Action quit)
+    static bool Replace(string staged, Action quit)
     {
-        var dest = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
-        var script = Path.Combine(Path.GetTempPath(), "mochinotch-update", "apply.ps1");
-        File.WriteAllText(script, $$"""
-            Wait-Process -Id {{Environment.ProcessId}} -ErrorAction SilentlyContinue
-            Start-Sleep -Milliseconds 500
-            Copy-Item -Path '{{staged}}\*' -Destination '{{dest}}' -Recurse -Force
-            Start-Process -FilePath '{{Path.Combine(dest, "Mochinotch.exe")}}'
-            """);
+        var destination = WinUpdate.InstallTarget(Environment.ProcessPath, AppContext.BaseDirectory);
+        if (!WinUpdate.CanReplace(destination))
+        {
+            Open("https://github.com/sleeeppy/mochinotch/releases/latest");
+            return false;
+        }
+        var root = Path.Combine(Path.GetTempPath(), "mochinotch-update");
+        Directory.CreateDirectory(root);
+        var script = Path.Combine(root, "apply.ps1");
+        File.WriteAllText(script, WinUpdate.SwapScript(Environment.ProcessId, staged, destination));
         Process.Start(new ProcessStartInfo("powershell", $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\"")
         {
             UseShellExecute = false,
             CreateNoWindow = true,
         });
         quit();
+        return true;
     }
 
     static void Open(string page)
