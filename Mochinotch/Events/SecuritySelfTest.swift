@@ -254,6 +254,39 @@ enum SecuritySelfTest {
         try expect(finished?.dedupeID == "codex:turn-1", "id \(finished?.dedupeID ?? "nil")")
         try expect(finished?.detail == "끝", "detail \(finished?.detail ?? "nil")")
         try expect(HookRelay.codexNotice(["type": "agent-turn-start"]) == nil, "시작을 완료로 봤다")
+
+        let suggestions: [String: Any] = [
+            "type": "agent-turn-complete",
+            "turn-id": "suggest-1",
+            "last-assistant-message": #"{"suggestions":[{"title":"Bring the active Humanize Korean skill up to the project's v2.0"}]}"#,
+        ]
+        try expect(HookRelay.codexNotice(suggestions) == nil, "제안 JSON을 완료로 올렸다")
+        let emptySuggestions: [String: Any] = [
+            "type": "agent-turn-complete",
+            "last-assistant-message": #"{"suggestions":[]}"#,
+        ]
+        try expect(HookRelay.codexNotice(emptySuggestions) == nil, "빈 제안 목록을 올렸다")
+        let exclude: [String: Any] = [
+            "type": "agent-turn-complete",
+            "last-assistant-message": #"{"exclude":[]}"#,
+        ]
+        try expect(HookRelay.codexNotice(exclude) == nil, "제외 목록을 올렸다")
+        let guardian: [String: Any] = [
+            "type": "agent-turn-complete",
+            "last-assistant-message": #"{"risk_level":"low","user_authorization":"medium","outcome":"allow","rationale":"로컬"}"#,
+        ]
+        try expect(HookRelay.codexNotice(guardian) == nil, "가디언 판정을 올렸다")
+        let picture: [String: Any] = [
+            "type": "agent-turn-complete",
+            "input-messages": ["Use your image generation tool to create this image. Do NOT draw it with code."],
+            "last-assistant-message": "이미지를 저장했습니다.",
+        ]
+        try expect(HookRelay.codexNotice(picture) == nil, "이미지 생성 턴을 올렸다")
+        let userJson: [String: Any] = [
+            "type": "agent-turn-complete",
+            "last-assistant-message": #"{"path":"src/app.ts"}"#,
+        ]
+        try expect(HookRelay.codexNotice(userJson)?.detail == #"{"path":"src/app.ts"}"#, "사용자가 받은 JSON을 숨겼다")
     }
 
     private static func withHome(_ path: String, _ body: () throws -> Void) throws {

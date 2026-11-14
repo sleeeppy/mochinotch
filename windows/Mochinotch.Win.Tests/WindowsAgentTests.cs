@@ -445,6 +445,21 @@ public class HookRelayTests
             "",
             new Dictionary<string, string>());
         Assert.Null(blank.Event);
+        var suggestions = HookRelay.Relay(
+            HookRelay.Options.Parse(["--source", "codex", """{"type":"agent-turn-complete","last-assistant-message":"{\"suggestions\":[]}"}"""]),
+            "",
+            new Dictionary<string, string>());
+        Assert.Null(suggestions.Event);
+        var exclude = HookRelay.Relay(
+            HookRelay.Options.Parse(["--source", "codex", """{"type":"agent-turn-complete","last-assistant-message":"{\"exclude\":[]}"}"""]),
+            "",
+            new Dictionary<string, string>());
+        Assert.Null(exclude.Event);
+        var picture = HookRelay.Relay(
+            HookRelay.Options.Parse(["--source", "codex", """{"type":"agent-turn-complete","input-messages":["Use your image generation tool to create this image. Do NOT draw it with code."],"last-assistant-message":"이미지를 저장했습니다."}"""]),
+            "",
+            new Dictionary<string, string>());
+        Assert.Null(picture.Event);
     }
 
     [Fact]
