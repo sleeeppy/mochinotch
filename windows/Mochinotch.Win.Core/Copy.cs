@@ -46,6 +46,12 @@ public enum Phrase
     OverlayHint,
     UpdateReady,
     Updating,
+    Update,
+    Installing,
+    Checking,
+    Latest,
+    CheckFailed,
+    Receiving,
 }
 
 public static class Copy
@@ -188,6 +194,30 @@ public static class Copy
         [(Phrase.Updating, Lang.Ja)] = "アップデートを受け取り中",
         [(Phrase.Updating, Lang.En)] = "Downloading update",
         [(Phrase.Updating, Lang.Zh)] = "正在下载更新",
+        [(Phrase.Update, Lang.Ko)] = "업데이트",
+        [(Phrase.Update, Lang.Ja)] = "アップデート",
+        [(Phrase.Update, Lang.En)] = "Update",
+        [(Phrase.Update, Lang.Zh)] = "更新",
+        [(Phrase.Installing, Lang.Ko)] = "설치 중",
+        [(Phrase.Installing, Lang.Ja)] = "インストール中",
+        [(Phrase.Installing, Lang.En)] = "Installing",
+        [(Phrase.Installing, Lang.Zh)] = "正在安装",
+        [(Phrase.Checking, Lang.Ko)] = "확인 중",
+        [(Phrase.Checking, Lang.Ja)] = "確認中",
+        [(Phrase.Checking, Lang.En)] = "Checking",
+        [(Phrase.Checking, Lang.Zh)] = "正在检查",
+        [(Phrase.Latest, Lang.Ko)] = "최신 버전",
+        [(Phrase.Latest, Lang.Ja)] = "最新です",
+        [(Phrase.Latest, Lang.En)] = "Up to date",
+        [(Phrase.Latest, Lang.Zh)] = "已是最新",
+        [(Phrase.CheckFailed, Lang.Ko)] = "확인 실패",
+        [(Phrase.CheckFailed, Lang.Ja)] = "確認失敗",
+        [(Phrase.CheckFailed, Lang.En)] = "Check failed",
+        [(Phrase.CheckFailed, Lang.Zh)] = "检查失败",
+        [(Phrase.Receiving, Lang.Ko)] = "받는 중 · {0}%",
+        [(Phrase.Receiving, Lang.Ja)] = "受信中 · {0}%",
+        [(Phrase.Receiving, Lang.En)] = "Downloading · {0}%",
+        [(Phrase.Receiving, Lang.Zh)] = "正在下载 · {0}%",
     };
 
     public static Lang Detect()

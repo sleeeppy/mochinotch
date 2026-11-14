@@ -111,6 +111,41 @@ public static class WinUpdate
         return uri.AbsoluteUri;
     }
 
+    /// <summary>업데이트가 덮어쓸 파일. 받아 둔 이름이 달라도 지금 실행 중인 exe를 바꾼다.</summary>
+    public static string InstallTarget(string? processPath, string baseDirectory)
+    {
+        if (!string.IsNullOrWhiteSpace(processPath)) return processPath;
+        var directory = baseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return Path.Combine(directory, "Mochinotch.exe");
+    }
+
+    /// <summary>실행 중인 파일이 잠겨 있으므로, 앱이 꺼진 뒤에 같은 경로로 덮어쓰고 다시 연다.</summary>
+    public static string SwapScript(int processId, string staged, string destination)
+        => $"""
+            Wait-Process -Id {processId} -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 400
+            Copy-Item -LiteralPath {Quote(staged)} -Destination {Quote(destination)} -Force
+            Start-Process -FilePath {Quote(destination)}
+            """;
+
+    public static bool CanReplace(string destination)
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(destination);
+            if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory)) return false;
+            var probe = Path.Combine(directory, ".mochinotch-write-" + Environment.ProcessId);
+            using var stream = new FileStream(probe, FileMode.Create, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose);
+            return stream.CanWrite;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    static string Quote(string path) => "'" + path.Replace("'", "''") + "'";
+
     static bool Allowed(string? raw)
     {
         if (raw == null || !Uri.TryCreate(raw, UriKind.Absolute, out var uri)) return false;

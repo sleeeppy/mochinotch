@@ -34,8 +34,15 @@ sealed class SettingsWindow : Window
     readonly TranslateTransform languageShift = new(0, -8);
     readonly Dictionary<Lang, Border> languageItems = [];
     readonly StackPanel body = new() { Spacing = 12 };
-    readonly TextBlock updateText = new() { FontSize = 13, FontWeight = FontWeight.SemiBold, Foreground = Brushes.White };
-    readonly Border updateRow;
+    readonly TextBlock updateLabel = new() { FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
+    readonly TextBlock updateIcon;
+    readonly RotateTransform updateSpin = new();
+    readonly DispatcherTimer updateSpinTimer;
+    readonly Border updateFill;
+    readonly Border updateChip;
+    bool updateHovered;
+    double updateWidth;
+    static readonly Rgb UpdateOrange = new(1, 0.52, 0.22);
     Lang? paintedLanguage;
     readonly TextBlock agentsLabel = Caption();
     readonly TextBlock agentsStatus = Primary();
@@ -54,6 +61,60 @@ sealed class SettingsWindow : Window
     public SettingsWindow(IslandModel model)
     {
         this.model = model;
+        updateIcon = new TextBlock
+        {
+            FontSize = 11,
+            FontFamily = new FontFamily("Segoe UI Symbol, Segoe UI"),
+            VerticalAlignment = VerticalAlignment.Center,
+            RenderTransform = updateSpin,
+            RenderTransformOrigin = new RelativePoint(0.5, 0.5, RelativeUnit.Relative),
+        };
+        updateSpinTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(32) };
+        updateSpinTimer.Tick += (_, _) => updateSpin.Angle = (updateSpin.Angle + 24) % 360;
+        updateFill = new Border { HorizontalAlignment = HorizontalAlignment.Left, IsVisible = false };
+        updateChip = new Border
+        {
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center,
+            CornerRadius = new CornerRadius(11),
+            ClipToBounds = true,
+            Cursor = new Cursor(StandardCursorType.Hand),
+            Child = new Panel
+            {
+                Children =
+                {
+                    updateFill,
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 4,
+                        Margin = new Thickness(9, 3.5, 8, 3.5),
+                        Children = { updateLabel, updateIcon },
+                    },
+                },
+            },
+        };
+        updateChip.SizeChanged += (_, eventArgs) =>
+        {
+            updateWidth = eventArgs.NewSize.Width;
+            LayoutFill();
+        };
+        updateChip.PointerEntered += (_, _) =>
+        {
+            updateHovered = true;
+            ShowUpdate();
+        };
+        updateChip.PointerExited += (_, _) =>
+        {
+            updateHovered = false;
+            ShowUpdate();
+        };
+        updateChip.PointerPressed += (_, eventArgs) =>
+        {
+            if (!eventArgs.GetCurrentPoint(updateChip).Properties.IsLeftButtonPressed) return;
+            eventArgs.Handled = true;
+            PressUpdate();
+        };
         Title = "Mochinotch";
         Width = 340 + Gap * 2;
         SizeToContent = SizeToContent.Height;
@@ -92,8 +153,6 @@ sealed class SettingsWindow : Window
         failure.Margin = new Thickness(4, -4, 4, 0);
         body.Children.Add(linkMessage);
         body.Children.Add(failure);
-        updateRow = UpdateBanner();
-        body.Children.Add(updateRow);
         body.Children.Add(Footer());
         body.Transitions = [new DoubleTransition { Property = OpacityProperty, Duration = TimeSpan.FromSeconds(0.22), Easing = new CubicEaseOut() }];
 
@@ -202,10 +261,84 @@ sealed class SettingsWindow : Window
     {
         var offer = Updates?.Offer;
         var busy = Updates?.Busy == true;
-        updateRow.IsVisible = busy || offer != null;
-        updateText.Text = busy
-            ? Copy.Get(Phrase.Updating, model.Language)
-            : offer == null ? "" : Copy.Format(Phrase.UpdateReady, model.Language, offer.Version);
+        var status = Updates?.Status;
+        var installing = busy || offer != null;
+        updateLabel.Text = UpdateLabel(installing, busy, offer, status);
+        updateLabel.FontWeight = installing ? FontWeight.SemiBold : FontWeight.Medium;
+        if (installing)
+        {
+            updateIcon.IsVisible = false;
+            updateLabel.Foreground = Paint.Brush(UpdateOrange);
+            updateChip.Background = Paint.Brush(UpdateOrange, busy ? 0.16 : updateHovered ? 0.28 : 0.16);
+            updateChip.BorderThickness = new Thickness(0);
+            updateFill.Background = Paint.Brush(UpdateOrange, 0.3);
+        }
+        else
+        {
+            updateIcon.IsVisible = true;
+            updateIcon.Text = status switch
+            {
+                UpdateLook.Current => "✓",
+                UpdateLook.Failed => "!",
+                _ => "↻",
+            };
+            var lit = updateHovered && status == null;
+            updateLabel.Foreground = Paint.Brush(Rgb.White, lit ? 0.8 : 0.68);
+            updateIcon.Foreground = updateLabel.Foreground;
+            updateChip.Background = Paint.Brush(Rgb.White, lit ? 0.11 : 0.075);
+            updateChip.BorderBrush = Paint.Brush(Rgb.White, 0.05);
+            updateChip.BorderThickness = new Thickness(1);
+        }
+        if (status == UpdateLook.Checking && !installing)
+        {
+            if (!updateSpinTimer.IsEnabled) updateSpinTimer.Start();
+        }
+        else
+        {
+            updateSpinTimer.Stop();
+            updateSpin.Angle = 0;
+        }
+        LayoutFill();
+    }
+
+    string UpdateLabel(bool installing, bool busy, WinRelease? offer, UpdateLook? status)
+    {
+        var lang = model.Language;
+        if (installing)
+        {
+            var progress = Updates?.Progress;
+            if (progress is >= 1) return Copy.Get(Phrase.Installing, lang);
+            if (busy && Updates?.ProgressKnown == true)
+                return Copy.Format(Phrase.Receiving, lang, (int)Math.Clamp((progress ?? 0) * 100, 0, 99));
+            if (busy) return Copy.Get(Phrase.Updating, lang);
+            return offer == null ? Copy.Get(Phrase.Update, lang) : Copy.Format(Phrase.UpdateReady, lang, offer.Version);
+        }
+        return status switch
+        {
+            UpdateLook.Checking => Copy.Get(Phrase.Checking, lang),
+            UpdateLook.Current => Copy.Get(Phrase.Latest, lang),
+            UpdateLook.Failed => Copy.Get(Phrase.CheckFailed, lang),
+            _ => Copy.Get(Phrase.Update, lang),
+        };
+    }
+
+    void PressUpdate()
+    {
+        if (Updates == null || Updates.Busy || Updates.Status == UpdateLook.Checking) return;
+        if (Updates.Offer != null)
+            _ = Updates.Install(() => Quit?.Invoke());
+        else
+            Updates.CheckNow();
+        ShowUpdate();
+    }
+
+    void LayoutFill()
+    {
+        var progress = Updates?.Progress;
+        var show = Updates?.Busy == true && progress != null;
+        updateFill.IsVisible = show;
+        if (!show || updateWidth <= 0 || progress is not double amount) return;
+        updateFill.Width = Math.Max(updateChip.Bounds.Height, updateWidth * Math.Clamp(amount, 0, 1));
     }
 
     void FadeBody()
@@ -287,7 +420,15 @@ sealed class SettingsWindow : Window
         quit.HorizontalAlignment = HorizontalAlignment.Right;
         quit.PointerEntered += (_, _) => quitText.Foreground = Paint.Brush(Danger);
         quit.PointerExited += (_, _) => quitText.Foreground = Paint.Brush(Rgb.White, 0.62);
-        return quit;
+        var row = new Grid
+        {
+            ColumnDefinitions = { new ColumnDefinition(GridLength.Auto), new ColumnDefinition(GridLength.Star) },
+            Margin = new Thickness(2, 0, 0, 0),
+        };
+        row.Children.Add(updateChip);
+        Grid.SetColumn(quit, 1);
+        row.Children.Add(quit);
+        return row;
     }
 
     string AgentStatus(Lang lang)
@@ -446,28 +587,6 @@ sealed class SettingsWindow : Window
         languageShift.Y = -6;
         languageMenu.Opacity = 0;
         languageClip.Height = 0;
-    }
-
-    Border UpdateBanner()
-    {
-        var row = new Border
-        {
-            Padding = new Thickness(12, 9),
-            CornerRadius = new CornerRadius(11),
-            Background = Paint.Brush(new Rgb(0.204, 0.780, 0.349), 0.18),
-            Cursor = new Cursor(StandardCursorType.Hand),
-            Child = updateText,
-            IsVisible = false,
-        };
-        row.PointerPressed += (_, eventArgs) =>
-        {
-            if (!eventArgs.GetCurrentPoint(row).Properties.IsLeftButtonPressed) return;
-            eventArgs.Handled = true;
-            if (Updates == null || Updates.Busy) return;
-            _ = Updates.Install(() => Quit?.Invoke());
-            ShowUpdate();
-        };
-        return row;
     }
 
     Border Capsule(TextBlock text, Color rest, Color hover, Action click)
