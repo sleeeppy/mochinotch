@@ -244,7 +244,7 @@ sealed class SettingsWindow : Window
             ColumnDefinitions = { new ColumnDefinition(GridLength.Auto), new ColumnDefinition(GridLength.Star), new ColumnDefinition(GridLength.Auto) },
             Margin = new Thickness(2, 0, 0, 2),
         };
-        var path = Path.Combine(AppContext.BaseDirectory, "MochinotchIcon.png");
+        var image = Bundled.Image("MochinotchIcon.png");
         var logo = new Border
         {
             Width = 34,
@@ -252,7 +252,7 @@ sealed class SettingsWindow : Window
             CornerRadius = new CornerRadius(8),
             ClipToBounds = true,
             VerticalAlignment = VerticalAlignment.Top,
-            Child = File.Exists(path) ? new Image { Source = new Bitmap(path), Stretch = Stretch.UniformToFill } : null,
+            Child = image == null ? null : new Image { Source = image, Stretch = Stretch.UniformToFill },
         };
         grid.Children.Add(logo);
         var text = new StackPanel { Spacing = 2, Margin = new Thickness(11, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };

@@ -193,7 +193,7 @@ public class App : Application
 
     static WindowIcon? LoadIcon()
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "MochinotchIcon.png");
-        return File.Exists(path) ? new WindowIcon(path) : null;
+        using var stream = Bundled.Open("MochinotchIcon.png");
+        return stream == null ? null : new WindowIcon(stream);
     }
 }
