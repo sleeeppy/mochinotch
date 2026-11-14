@@ -364,15 +364,19 @@ sealed class ToastWindow : Window
             if (opacity <= 0.02) return;
             var (tail, head) = EdgeMotion.Streak(Travel);
             if (head <= tail + 0.001) return;
-            var inner = rect.Deflate(new Thickness(shoulder + radius * 0.6, 0));
-            var y = rect.Bottom - 1.2 * unit;
-            var x0 = inner.X + inner.Width * tail;
-            var x1 = inner.X + inner.Width * head;
-            var color = Paint.Color(GlowTint, 0.95 * opacity);
-            var soft = Paint.Color(GlowTint, 0.32 * opacity);
-            context.DrawRectangle(new SolidColorBrush(soft), null, new Rect(x0, y - 2.2, Math.Max(4, x1 - x0), 4.4), 2.2, 2.2);
-            context.DrawLine(new Pen(new SolidColorBrush(color), 1.2) { LineCap = PenLineCap.Round }, new Point(x0, y), new Point(x1, y));
+            var streak = PillPath.Trim(PillPath.Outline(rect, shoulder, radius), tail, head);
+            if (streak == null) return;
+            var core = 1.35 * unit;
+            foreach (var (spread, alpha) in new[] { (4.3, 0.1), (3.2, 0.16), (2.2, 0.26) })
+                context.DrawGeometry(null, Light(alpha * opacity, core * spread), streak);
+            context.DrawGeometry(null, Light(0.95 * opacity, core), streak);
         }
+
+        Pen Light(double alpha, double thickness) => new(new SolidColorBrush(Paint.Color(GlowTint, alpha)), thickness)
+        {
+            LineCap = PenLineCap.Round,
+            LineJoin = PenLineJoin.Round,
+        };
     }
 }
 
@@ -399,4 +403,77 @@ static class PillPath
         pen.EndFigure(true);
         return geometry;
     }
+
+    /// 왼쪽 위 끝에서 오른쪽 위 끝까지 윤곽을 펼친 점들. 윗변은 화면 끝이라 넣지 않는다.
+    public static List<Point> Outline(Rect rect, double shoulder, double radius)
+    {
+        var top = Math.Min(Math.Max(shoulder, 0), Math.Min(rect.Width / 4, rect.Height / 2));
+        var body = rect.Width - top * 2;
+        var bottom = Math.Min(Math.Max(radius, 0), Math.Min(body / 2, Math.Max(0, rect.Height - top)));
+        var left = rect.X + top;
+        var right = rect.Right - top;
+        var floor = rect.Bottom;
+        var points = new List<Point> { new(rect.X, rect.Y) };
+        Curve(points, new Point(rect.X, rect.Y), new Point(left, rect.Y), new Point(left, rect.Y + top));
+        points.Add(new Point(left, floor - bottom));
+        Curve(points, new Point(left, floor - bottom), new Point(left, floor), new Point(left + bottom, floor));
+        points.Add(new Point(right - bottom, floor));
+        Curve(points, new Point(right - bottom, floor), new Point(right, floor), new Point(right, floor - bottom));
+        points.Add(new Point(right, rect.Y + top));
+        Curve(points, new Point(right, rect.Y + top), new Point(right, rect.Y), new Point(rect.Right, rect.Y));
+        return points;
+    }
+
+    /// 윤곽 길이의 from..to 비율 구간만 잘라낸다.
+    public static StreamGeometry? Trim(List<Point> points, double from, double to)
+    {
+        from = Math.Clamp(from, 0, 1);
+        to = Math.Clamp(to, from, 1);
+        var lengths = new double[points.Count];
+        for (var i = 1; i < points.Count; i++)
+            lengths[i] = lengths[i - 1] + Distance(points[i - 1], points[i]);
+        var total = lengths[^1];
+        if (total <= 0 || (to - from) * total < 0.05) return null;
+        var start = from * total;
+        var end = to * total;
+        var geometry = new StreamGeometry();
+        using var pen = geometry.Open();
+        var begun = false;
+        for (var i = 1; i < points.Count; i++)
+        {
+            var a = lengths[i - 1];
+            var b = lengths[i];
+            if (b < start || b - a <= 0) continue;
+            if (!begun)
+            {
+                pen.BeginFigure(Along(points[i - 1], points[i], (start - a) / (b - a)), false);
+                begun = true;
+            }
+            if (b >= end)
+            {
+                pen.LineTo(Along(points[i - 1], points[i], (end - a) / (b - a)));
+                break;
+            }
+            pen.LineTo(points[i]);
+        }
+        if (begun) pen.EndFigure(false);
+        return begun ? geometry : null;
+    }
+
+    static void Curve(List<Point> points, Point from, Point control, Point to)
+    {
+        const int steps = 10;
+        for (var i = 1; i <= steps; i++)
+        {
+            var t = i / (double)steps;
+            var u = 1 - t;
+            points.Add(new Point(
+                u * u * from.X + 2 * u * t * control.X + t * t * to.X,
+                u * u * from.Y + 2 * u * t * control.Y + t * t * to.Y));
+        }
+    }
+
+    static double Distance(Point a, Point b) => Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+
+    static Point Along(Point a, Point b, double t) => new(a.X + (b.X - a.X) * t, a.Y + (b.Y - a.Y) * t);
 }
