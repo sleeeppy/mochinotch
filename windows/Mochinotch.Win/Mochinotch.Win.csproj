@@ -8,6 +8,10 @@
     <AssemblyName>Mochinotch</AssemblyName>
     <Version>0.6.16</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- 런타임은 넣지 않는다. 받는 PC에 .NET 10이 있어야 한다. -->
+    <SelfContained>false</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
   </PropertyGroup>
   <ItemGroup>
