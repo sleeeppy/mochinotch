@@ -226,9 +226,10 @@ Claude와 Codex가 승인 창이나 질문 카드를 띄우면 노치에 주황�
 
 **Windows**는 노치 없이, 확인과 완료만 화면 위쪽에 작게 뜹니다. 설정은 트레이 아이콘에서 엽니다.
 
-1. [Releases](https://github.com/sleeeppy/mochinotch/releases/latest)에서 `Mochinotch-win-x64.exe`를 받습니다.
-2. 원하는 폴더에 두고 실행합니다. .NET을 따로 설치하지 않아도 됩니다.
-3. 새 버전이 나오면 설정 아래에 **업데이트**가 생깁니다.
+1. [.NET 10 런타임](https://dotnet.microsoft.com/download/dotnet/10.0)(Windows x64)이 없으면 먼저 설치합니다.
+2. [Releases](https://github.com/sleeeppy/mochinotch/releases/latest)에서 `Mochinotch-win-x64.exe`를 받습니다.
+3. 원하는 폴더에 두고 실행합니다. 런타임이 없으면 설치 안내가 뜹니다.
+4. 새 버전이 나오면 설정 아래에 **업데이트**가 생깁니다.
 
 <br/>
 
