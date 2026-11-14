@@ -337,8 +337,8 @@ sealed class SettingsWindow : Window
         var progress = Updates?.Progress;
         var show = Updates?.Busy == true && progress != null;
         updateFill.IsVisible = show;
-        if (!show || updateWidth <= 0) return;
-        updateFill.Width = Math.Max(updateChip.Bounds.Height, updateWidth * Math.Clamp(progress.Value, 0, 1));
+        if (!show || updateWidth <= 0 || progress is not double amount) return;
+        updateFill.Width = Math.Max(updateChip.Bounds.Height, updateWidth * Math.Clamp(amount, 0, 1));
     }
 
     void FadeBody()
