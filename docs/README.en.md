@@ -3,10 +3,8 @@
 </p>
 
 <p align="center">
-  <img src="images/icon.png" width="128" alt="Mochinotch icon">
+  <img src="images/hero.png" alt="Mochinotch. The collapsed notch shows a finished Cursor task on the left and Slack and Messages badges on the right">
 </p>
-
-<h3 align="center">Mochinotch</h3>
 
 <p align="center">
   A soft Dynamic Island for the MacBook notch.<br>

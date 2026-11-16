@@ -3,10 +3,8 @@
 </p>
 
 <p align="center">
-  <img src="images/icon.png" width="128" alt="Mochinotch のアイコン">
+  <img src="images/hero.png" alt="Mochinotch。閉じたノッチの左に Cursor の作業完了、右に Slack とメッセージのバッジが出ている様子">
 </p>
-
-<h3 align="center">もちノッチ</h3>
 
 <p align="center">
   MacBook のノッチを、やわらかいダイナミックアイランドに。<br>
