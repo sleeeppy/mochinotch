@@ -3,10 +3,8 @@
 </p>
 
 <p align="center">
-  <img src="images/icon.png" width="128" alt="Mochinotch 图标">
+  <img src="images/hero.png" alt="Mochinotch。收起的刘海左边显示 Cursor 任务完成，右边显示 Slack 和信息的角标">
 </p>
-
-<h3 align="center">Mochinotch</h3>
 
 <p align="center">
   把 MacBook 的刘海变成柔软的灵动岛。<br>
