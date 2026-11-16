@@ -1,16 +1,9 @@
 <p align="center">
-  <img src="docs/images/icon.png" width="128" alt="Mochinotch 아이콘">
+  <img src="docs/images/hero.png" alt="Mochinotch. 맥북 노치를 말랑한 다이나믹 아일랜드로. 노치 왼쪽에 Cursor 작업 완료, 오른쪽에 Slack과 메시지 알림 배지가 떠 있는 모습">
 </p>
-
-<h3 align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/headings/title-dark.png"><img src="docs/images/headings/title-light.png" alt="もちノッチ(Mochinotch)" width="287" height="46"></picture></h3>
 
 <p align="center">
   <b>한국어</b> · <a href="docs/README.en.md">English</a> · <a href="docs/README.ja.md">日本語</a> · <a href="docs/README.zh.md">中文</a>
-</p>
-
-<p align="center">
-  맥북 노치를 말랑한 다이나믹 아일랜드로.<br>
-  충전, 알림, AI 에이전트 작업 완료를 노치에서 바로 봅니다.
 </p>
 
 ---
