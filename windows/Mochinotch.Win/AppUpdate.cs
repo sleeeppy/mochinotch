@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Net;
 using System.Security.Cryptography;
+using System.Text;
 using Avalonia.Threading;
 
 namespace Mochinotch.Win;
@@ -20,7 +22,7 @@ sealed class AppUpdate : IDisposable
 {
     const string Latest = "https://api.github.com/repos/sleeeppy/mochinotch/releases/latest";
     readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(12) };
-    readonly HttpClient download = new() { Timeout = TimeSpan.FromMinutes(4) };
+    readonly HttpClient download = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromMinutes(4) };
     readonly string local;
     readonly bool arm;
     Timer? timer;
@@ -202,18 +204,17 @@ sealed class AppUpdate : IDisposable
 
     async Task<string?> Save(WinRelease offer)
     {
-        if (offer.Download == null) return null;
-        var name = string.IsNullOrEmpty(offer.FileName)
-            ? Path.GetFileName(new Uri(offer.Download).LocalPath)
+        if (offer.Download == null || !WinUpdate.IsAllowedDownload(offer.Download)) return null;
+        var rawName = string.IsNullOrEmpty(offer.FileName)
+            ? new Uri(offer.Download).LocalPath
             : offer.FileName;
+        var name = Path.GetFileName(rawName);
         if (string.IsNullOrEmpty(name)) return null;
         var directory = Path.Combine(Path.GetTempPath(), "mochinotch-update");
         Directory.CreateDirectory(directory);
         var destination = Path.Combine(directory, name);
-        using var request = new HttpRequestMessage(HttpMethod.Get, offer.Download);
-        if (request.RequestUri?.Host.Equals("api.github.com", StringComparison.OrdinalIgnoreCase) == true)
-            request.Headers.Accept.ParseAdd("application/octet-stream");
-        using var response = await download.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+        using var response = await SendAllowed(new Uri(offer.Download));
+        if (response == null) return null;
         response.EnsureSuccessStatusCode();
         var total = response.Content.Headers.ContentLength ?? 0;
         ProgressKnown = total > 0;
@@ -248,11 +249,51 @@ sealed class AppUpdate : IDisposable
         return destination;
     }
 
+    /// <summary>리다이렉트가 걸려도 GitHub 호스트 밖으로는 따라가지 않는다.</summary>
+    async Task<HttpResponseMessage?> SendAllowed(Uri start)
+    {
+        var current = start;
+        for (var hop = 0; hop < 5; hop++)
+        {
+            if (!WinUpdate.IsAllowedDownload(current.AbsoluteUri)) return null;
+            using var request = new HttpRequestMessage(HttpMethod.Get, current);
+            if (current.Host.Equals("api.github.com", StringComparison.OrdinalIgnoreCase))
+                request.Headers.Accept.ParseAdd("application/octet-stream");
+            var response = await download.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+            if (response.StatusCode is HttpStatusCode.Moved or HttpStatusCode.Redirect or HttpStatusCode.RedirectMethod or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect)
+            {
+                var location = response.Headers.Location;
+                response.Dispose();
+                if (location == null) return null;
+                current = location.IsAbsoluteUri ? location : new Uri(current, location);
+                continue;
+            }
+            return response;
+        }
+        return null;
+    }
+
     static bool StageZip(string zip, Action quit)
     {
         var staged = Path.Combine(Path.GetTempPath(), "mochinotch-update", "staged");
         if (Directory.Exists(staged)) Directory.Delete(staged, true);
-        ZipFile.ExtractToDirectory(zip, staged);
+        Directory.CreateDirectory(staged);
+        var root = Path.GetFullPath(staged).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        using (var archive = ZipFile.OpenRead(zip))
+        {
+            foreach (var entry in archive.Entries)
+            {
+                if (string.IsNullOrEmpty(entry.Name)) continue;
+                var target = Path.GetFullPath(Path.Combine(staged, entry.FullName));
+                if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                {
+                    Open("https://github.com/sleeeppy/mochinotch/releases/latest");
+                    return false;
+                }
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                entry.ExtractToFile(target, overwrite: true);
+            }
+        }
         var exe = Directory.GetFiles(staged, "Mochinotch.exe", SearchOption.AllDirectories).FirstOrDefault();
         if (exe == null)
         {
@@ -284,7 +325,8 @@ sealed class AppUpdate : IDisposable
         var root = Path.Combine(Path.GetTempPath(), "mochinotch-update");
         Directory.CreateDirectory(root);
         var script = Path.Combine(root, "apply.ps1");
-        File.WriteAllText(script, WinUpdate.SwapScript(Environment.ProcessId, staged, destination));
+        // Windows PowerShell 5.1은 BOM 없는 UTF-8을 ANSI로 읽어 한글 경로가 깨진다.
+        File.WriteAllText(script, WinUpdate.SwapScript(Environment.ProcessId, staged, destination), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
         Process.Start(new ProcessStartInfo("powershell", $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\"")
         {
             UseShellExecute = false,

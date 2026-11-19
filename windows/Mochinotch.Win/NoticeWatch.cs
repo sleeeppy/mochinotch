@@ -38,7 +38,10 @@ sealed class NoticeWatch : IDisposable
         database ??= Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Microsoft", "Windows", "Notifications", "wpndatabase.db");
-        var full = Path.GetFullPath(database).Replace('\\', '/');
+        var full = Path.GetFullPath(database).Replace('\\', '/')
+            .Replace("%", "%25")
+            .Replace("?", "%3F")
+            .Replace("#", "%23");
         databaseUri = Encoding.UTF8.GetBytes("file:///" + full + "?mode=ro\0");
     }
 
@@ -78,7 +81,12 @@ sealed class NoticeWatch : IDisposable
                     Detail = parsed.Detail,
                 });
             }
-            var gone = open.Where(pair => !live.ContainsKey(pair.Key)).Select(pair => pair.Value).Distinct().ToList();
+            var stillOpen = new HashSet<string>(live.Values, StringComparer.OrdinalIgnoreCase);
+            var gone = open
+                .Where(pair => !live.ContainsKey(pair.Key) && !stillOpen.Contains(pair.Value))
+                .Select(pair => pair.Value)
+                .Distinct()
+                .ToList();
             primed = true;
             open.Clear();
             foreach (var pair in live) open[pair.Key] = pair.Value;
@@ -100,7 +108,10 @@ sealed class NoticeWatch : IDisposable
     List<ToastRow>? Read()
     {
         if (sqlite3_open_v2(databaseUri, out var db, OpenReadonly | OpenUri, 0) != 0)
+        {
+            if (db != 0) sqlite3_close(db);
             return null;
+        }
         try
         {
             sqlite3_busy_timeout(db, 200);

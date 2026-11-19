@@ -232,6 +232,24 @@ public class WinUpdateTests
     }
 
     [Fact]
+    public void Prerelease_versions_order_below_the_final_release()
+    {
+        Assert.True(WinUpdate.Newer("v0.6.18-rc1", "0.6.17"));
+        Assert.True(WinUpdate.Newer("v0.6.18", "0.6.18-rc1"));
+        Assert.False(WinUpdate.Newer("v0.6.18-rc1", "0.6.18"));
+        Assert.True(WinUpdate.Newer("v0.6.18-rc.2", "0.6.18-rc.1"));
+    }
+
+    [Fact]
+    public void Allowed_download_hosts_are_restricted_to_github_https()
+    {
+        Assert.True(WinUpdate.IsAllowedDownload("https://api.github.com/repos/sleeeppy/mochinotch/releases/assets/1"));
+        Assert.True(WinUpdate.IsAllowedDownload("https://release-assets.githubusercontent.com/file.exe"));
+        Assert.False(WinUpdate.IsAllowedDownload("http://github.com/sleeeppy/mochinotch/releases/download/v1/app.exe"));
+        Assert.False(WinUpdate.IsAllowedDownload("https://evil.example/app.exe"));
+    }
+
+    [Fact]
     public void Download_outside_github_is_rejected()
     {
         var json = """
@@ -490,7 +508,9 @@ public class HookInstallerTests
         Assert.False(HookInstaller.Install(home, exe, [HookTool.Cursor]).Changed.Contains(HookTool.Cursor) && !text.Contains(exe));
         Assert.True(HookInstaller.IsConnected(home, HookTool.Cursor, exe));
         var moved = @"D:\Apps\Mochinotch.exe";
+        Assert.False(HookInstaller.IsConnected(home, HookTool.Cursor, moved));
         Assert.Contains(HookTool.Cursor, HookInstaller.Install(home, moved, [HookTool.Cursor]).Changed);
+        Assert.True(HookInstaller.IsConnected(home, HookTool.Cursor, moved));
         var updated = File.ReadAllText(Path.Combine(home, ".cursor", "hooks.json"));
         Assert.Contains(moved.Replace("\\", "\\\\"), updated);
         Assert.DoesNotContain(exe.Replace("\\", "\\\\"), updated);
@@ -522,6 +542,39 @@ public class HookInstallerTests
         Assert.Contains("[model]", text);
         Assert.Contains("PermissionRequest", File.ReadAllText(Path.Combine(home, ".codex", "hooks.json")));
         Assert.True(HookInstaller.IsConnected(home, HookTool.Codex, "C:/Mochinotch.exe"));
+        Assert.False(HookInstaller.IsConnected(home, HookTool.Codex, "D:/Moved/Mochinotch.exe"));
+    }
+
+    [Fact]
+    public void Codex_notify_preserves_outer_wrapper_and_other_hook_flags()
+    {
+        var home = TempHome();
+        Directory.CreateDirectory(Path.Combine(home, ".codex"));
+        var wrapped = "notify = [\"wrapper.exe\", \"turn-ended\", \"--previous-notify\", \"[\\\"C:/Mochinotch.exe\\\",\\\"--hook\\\"]\"]\n";
+        File.WriteAllText(Path.Combine(home, ".codex", "config.toml"), wrapped);
+        HookInstaller.Install(home, "C:/Mochinotch.exe", [HookTool.Codex]);
+        Assert.Equal(wrapped, File.ReadAllText(Path.Combine(home, ".codex", "config.toml")));
+
+        var home2 = TempHome();
+        Directory.CreateDirectory(Path.Combine(home2, ".codex"));
+        File.WriteAllText(Path.Combine(home2, ".codex", "config.toml"), "notify = [\"other-tool.exe\", \"--hook\"]\n");
+        HookInstaller.Install(home2, "C:/Mochinotch.exe", [HookTool.Codex]);
+        var chained = File.ReadAllText(Path.Combine(home2, ".codex", "config.toml"));
+        Assert.Contains("--chain", chained);
+        Assert.Contains("other-tool.exe", chained);
+    }
+
+    [Fact]
+    public void Kiro_handles_non_boolean_enabled_field()
+    {
+        var home = TempHome();
+        Directory.CreateDirectory(Path.Combine(home, ".kiro", "hooks"));
+        File.WriteAllText(
+            Path.Combine(home, ".kiro", "hooks", "mochinotch.json"),
+            """{"version":"v1","hooks":[{"trigger":"Stop","enabled":"false","action":{"type":"command","command":"C:/Mochinotch.exe --hook --source kiro"}}]}""");
+        var result = HookInstaller.Install(home, "C:/Mochinotch.exe", [HookTool.Kiro]);
+        Assert.Empty(result.Failures);
+        Assert.True(HookInstaller.IsConnected(home, HookTool.Kiro, "C:/Mochinotch.exe"));
     }
 
     static string TempHome()

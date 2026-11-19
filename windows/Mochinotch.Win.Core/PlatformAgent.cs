@@ -13,7 +13,8 @@ public static class ForegroundAgent
         if (pid == 0) return null;
         try
         {
-            var name = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName;
+            using var proc = System.Diagnostics.Process.GetProcessById((int)pid);
+            var name = proc.ProcessName;
             return name.ToLowerInvariant() switch
             {
                 "cursor" => AgentTool.Cursor,
@@ -42,21 +43,29 @@ public static class ForegroundAgent
         };
         foreach (var name in names)
         {
-            var proc = System.Diagnostics.Process.GetProcessesByName(name)
-                .FirstOrDefault(item => item.MainWindowHandle != 0);
-            if (proc == null) continue;
-            var hwnd = proc.MainWindowHandle;
-            ShowWindow(hwnd, 9);
-            var foreground = GetForegroundWindow();
-            var foregroundThread = GetWindowThreadProcessId(foreground, out _);
-            var targetThread = GetWindowThreadProcessId(hwnd, out _);
-            var current = GetCurrentThreadId();
-            AttachThreadInput(current, foregroundThread, true);
-            AttachThreadInput(current, targetThread, true);
-            SetForegroundWindow(hwnd);
-            AttachThreadInput(current, targetThread, false);
-            AttachThreadInput(current, foregroundThread, false);
-            return;
+            var procs = System.Diagnostics.Process.GetProcessesByName(name);
+            try
+            {
+                var proc = procs.FirstOrDefault(item => item.MainWindowHandle != 0);
+                if (proc == null) continue;
+                var hwnd = proc.MainWindowHandle;
+                // 최소화돼 있을 때만 복원한다. 최대화된 창에 SW_RESTORE를 부르면 최대화가 풀린다.
+                if (IsIconic(hwnd)) ShowWindow(hwnd, 9);
+                var foreground = GetForegroundWindow();
+                var foregroundThread = foreground != 0 ? GetWindowThreadProcessId(foreground, out _) : 0;
+                var targetThread = GetWindowThreadProcessId(hwnd, out _);
+                var current = GetCurrentThreadId();
+                var attachedForeground = foregroundThread != 0 && foregroundThread != current && AttachThreadInput(current, foregroundThread, true);
+                var attachedTarget = targetThread != 0 && targetThread != current && targetThread != foregroundThread && AttachThreadInput(current, targetThread, true);
+                SetForegroundWindow(hwnd);
+                if (attachedTarget) AttachThreadInput(current, targetThread, false);
+                if (attachedForeground) AttachThreadInput(current, foregroundThread, false);
+                return;
+            }
+            finally
+            {
+                foreach (var item in procs) item.Dispose();
+            }
         }
     }
 
@@ -71,6 +80,9 @@ public static class ForegroundAgent
 
     [DllImport("user32.dll")]
     static extern bool ShowWindow(nint hwnd, int command);
+
+    [DllImport("user32.dll")]
+    static extern bool IsIconic(nint hwnd);
 
     [DllImport("user32.dll")]
     static extern bool AttachThreadInput(uint from, uint to, bool attach);

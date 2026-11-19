@@ -339,21 +339,27 @@ private enum ExposeShield {
     /// 위 32비트의 23번. 전체 55번으로, 스와이프 중에 레이어를 한 장으로 합치지 않는다.
     private static let neverFlatten = Int32(1 << 23)
 
-    static func attach(to window: NSWindow) {
-        guard window.windowNumber > 0 else { return }
-        typealias Connection = @convention(c) () -> Int32
-        typealias Tags = @convention(c) (Int32, UInt32, UnsafePointer<Int32>, Int) -> Int32
-        let coreGraphics = dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", RTLD_LAZY)
-        guard let connectionSymbol = dlsym(coreGraphics, "CGSMainConnectionID"),
+    private typealias Connection = @convention(c) () -> Int32
+    private typealias Tags = @convention(c) (Int32, UInt32, UnsafePointer<Int32>, Int) -> Int32
+
+    private static let symbols: (connection: Connection, set: Tags, clear: Tags)? = {
+        guard let coreGraphics = dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", RTLD_LAZY),
+              let connectionSymbol = dlsym(coreGraphics, "CGSMainConnectionID"),
               let setSymbol = dlsym(coreGraphics, "CGSSetWindowTags"),
-              let clearSymbol = dlsym(coreGraphics, "CGSClearWindowTags") else { return }
-        let connection = unsafeBitCast(connectionSymbol, to: Connection.self)
-        let setTags = unsafeBitCast(setSymbol, to: Tags.self)
-        let clearTags = unsafeBitCast(clearSymbol, to: Tags.self)
+              let clearSymbol = dlsym(coreGraphics, "CGSClearWindowTags") else { return nil }
+        return (
+            unsafeBitCast(connectionSymbol, to: Connection.self),
+            unsafeBitCast(setSymbol, to: Tags.self),
+            unsafeBitCast(clearSymbol, to: Tags.self)
+        )
+    }()
+
+    static func attach(to window: NSWindow) {
+        guard window.windowNumber > 0, let symbols else { return }
         let wid = UInt32(window.windowNumber)
         var clearMask = [attached, Int32(0)]
-        _ = clearTags(connection(), wid, &clearMask, 64)
+        _ = symbols.clear(symbols.connection(), wid, &clearMask, 64)
         var setMask = [Int32(0), neverFlatten]
-        _ = setTags(connection(), wid, &setMask, 64)
+        _ = symbols.set(symbols.connection(), wid, &setMask, 64)
     }
 }

@@ -43,7 +43,8 @@ final class NotificationWatcher {
     /// 원본 데이터베이스와 WAL의 수정 시각. 그대로면 복사와 조회를 건너뛴다.
     private var lastDatabaseStamp: DatabaseStamp?
     /// 배너는 떴는데 아직 데이터베이스 행과 연결하지 못한 알림.
-    private var pending: [(bundleID: String, title: String, body: String, at: Date)] = []
+    /// 배너가 뜬 시점의 기준 ID를 함께 들고 있어, 이후 `readNew`가 `lastID`를 올려도 새 행과 연결된다.
+    private var pending: [(bundleID: String, title: String, body: String, at: Date, floor: Int64)] = []
     private var bundleIDsByName: [String: String] = [:]
     private var didLogAccessibility = false
     private let ownBundleID = Bundle.main.bundleIdentifier ?? ""
@@ -130,9 +131,10 @@ final class NotificationWatcher {
 
     private func tick() {
         if Self.readsBanners {
+            let bannerFloor = lastID ?? 0
             for notice in readBanners() where accept(notice) {
                 let shown = Self.storedText(notice)
-                pending.append((notice.bundleID, shown.title, shown.body, Date()))
+                pending.append((notice.bundleID, shown.title, shown.body, Date(), bannerFloor))
                 Self.log("banner \(notice.bundleID)")
                 deliver(notice)
             }
@@ -228,9 +230,9 @@ final class NotificationWatcher {
     private func linkPending(_ db: OpaquePointer) {
         let now = Date()
         pending.removeAll { now.timeIntervalSince($0.at) > 45 }
-        var stillPending: [(bundleID: String, title: String, body: String, at: Date)] = []
+        var stillPending: [(bundleID: String, title: String, body: String, at: Date, floor: Int64)] = []
         for item in pending {
-            guard let row = newestRecord(db, bundleID: item.bundleID) else {
+            guard let row = newestRecord(db, bundleID: item.bundleID, floor: item.floor) else {
                 if Date().timeIntervalSince(item.at) > 2, loggedMissingLinks.insert(item.bundleID.lowercased()).inserted {
                     Self.log("no row \(item.bundleID)")
                     let bundleID = item.bundleID
@@ -295,7 +297,7 @@ final class NotificationWatcher {
     private var loggedMissingLinks = Set<String>()
 
     /// 앱 테이블이 아니라 기록 안의 번들로 찾는다. 기준 이후에 생긴 행만 배너에 붙인다.
-    private func newestRecord(_ db: OpaquePointer, bundleID: String) -> (id: Int64, uuid: Data)? {
+    private func newestRecord(_ db: OpaquePointer, bundleID: String, floor: Int64) -> (id: Int64, uuid: Data)? {
         let sql = """
             SELECT r.rec_id, r.uuid, r.data, r.request_date, a.identifier
             FROM record r LEFT JOIN app a ON a.app_id = r.app_id
@@ -304,7 +306,6 @@ final class NotificationWatcher {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(statement) }
-        let floor = lastID ?? 0
         while sqlite3_step(statement) == SQLITE_ROW {
             let id = sqlite3_column_int64(statement, 0)
             let dataLength = Int(sqlite3_column_bytes(statement, 2))
@@ -653,10 +654,18 @@ final class NotificationWatcher {
 
     private static func applicationNames(_ bundle: Bundle) -> [String] {
         var names: [String] = []
-        for key in ["CFBundleDisplayName", "CFBundleName"] {
-            if let name = bundle.object(forInfoDictionaryKey: key) as? String { names.append(name) }
+        for dictionary in [bundle.localizedInfoDictionary, bundle.infoDictionary] {
+            for key in ["CFBundleDisplayName", "CFBundleName"] {
+                if let name = dictionary?[key] as? String { names.append(name) }
+            }
         }
-        for language in ["ko", "en"] {
+        var languages = ["ko", "en", "ja", "zh-Hans", "zh-Hant", "zh_CN", "zh_TW"]
+        for preferred in Locale.preferredLanguages {
+            let short = String(preferred.prefix { $0 != "-" && $0 != "_" })
+            if !languages.contains(preferred) { languages.append(preferred) }
+            if !short.isEmpty, !languages.contains(short) { languages.append(short) }
+        }
+        for language in languages {
             guard let path = bundle.path(forResource: "InfoPlist", ofType: "strings", inDirectory: nil, forLocalization: language),
                   let dictionary = NSDictionary(contentsOfFile: path) else { continue }
             for key in ["CFBundleDisplayName", "CFBundleName"] {
@@ -694,7 +703,7 @@ final class NotificationWatcher {
         var handle: OpaquePointer?
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX
         // 사본은 우리만 쓴다. immutable로 열면 WAL이 무시돼서 방금 온 기록이 안 보인다.
-        let uri = "file:\(path)?mode=ro"
+        let uri = Self.sqliteReadOnlyURI(for: path)
         guard sqlite3_open_v2(uri, &handle, flags, nil) == SQLITE_OK, let handle else {
             let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
             sqlite3_close(handle)
@@ -709,6 +718,14 @@ final class NotificationWatcher {
 
     private static func snapshotDatabaseURL() -> URL {
         snapshotRoot.appendingPathComponent("db")
+    }
+
+    static func sqliteReadOnlyURI(for path: String) -> String {
+        let encoded = path
+            .replacingOccurrences(of: "%", with: "%25")
+            .replacingOccurrences(of: "?", with: "%3F")
+            .replacingOccurrences(of: "#", with: "%23")
+        return "file:\(encoded)?mode=ro"
     }
 
     /// 나노초 단위 수정 시각과 크기. 둘 다 같으면 내용이 그대로다.

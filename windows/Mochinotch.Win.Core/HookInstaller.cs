@@ -69,15 +69,14 @@ public static class HookInstaller
 
     public static bool IsConnected(string home, HookTool tool, string exe)
     {
-        _ = exe;
         try
         {
             return tool switch
             {
-                HookTool.Claude => EventsConnected(Read(Path.Combine(home, ".claude", "settings.json")), "hooks", ClaudeEvents, "claude"),
-                HookTool.Cursor => EventsConnected(Read(Path.Combine(home, ".cursor", "hooks.json")), "hooks", CursorEvents, "cursor"),
-                HookTool.Kiro => KiroConnected(Read(Path.Combine(home, ".kiro", "hooks", "mochinotch.json"))),
-                HookTool.Codex => CodexConnected(home),
+                HookTool.Claude => EventsConnected(Read(Path.Combine(home, ".claude", "settings.json")), "hooks", ClaudeEvents, "claude", exe),
+                HookTool.Cursor => EventsConnected(Read(Path.Combine(home, ".cursor", "hooks.json")), "hooks", CursorEvents, "cursor", exe),
+                HookTool.Kiro => KiroConnected(Read(Path.Combine(home, ".kiro", "hooks", "mochinotch.json")), exe),
+                HookTool.Codex => CodexConnected(home, exe),
                 _ => false,
             };
         }
@@ -87,16 +86,25 @@ public static class HookInstaller
         }
     }
 
-    static bool CodexConnected(string home)
+    static bool CodexConnected(string home, string exe)
     {
-        var config = File.Exists(Path.Combine(home, ".codex", "config.toml"))
-            ? File.ReadAllText(Path.Combine(home, ".codex", "config.toml"))
-            : "";
-        if (!config.Contains("mochinotch", StringComparison.OrdinalIgnoreCase)
-            && !config.Contains("--hook", StringComparison.Ordinal)
-            && !config.Contains("Mochinotch", StringComparison.Ordinal))
+        var configPath = Path.Combine(home, ".codex", "config.toml");
+        var config = File.Exists(configPath) ? File.ReadAllText(configPath) : "";
+        if (!config.Contains("mochinotch", StringComparison.OrdinalIgnoreCase))
             return false;
-        return EventsConnected(Read(Path.Combine(home, ".codex", "hooks.json")), "hooks", ["PermissionRequest"], "codex");
+        if (!string.IsNullOrEmpty(exe) && TomlNotify.TryFind(config, out var found) && found.Values.Count > 0)
+        {
+            if (IsMochinotch(found.Values[0]))
+            {
+                if (!string.Equals(found.Values[0], exe, StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+            else if (!found.Values.Any(value => value.Contains("mochinotch", StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+        }
+        return EventsConnected(Read(Path.Combine(home, ".codex", "hooks.json")), "hooks", ["PermissionRequest"], "codex", exe);
     }
 
     static bool Merge(string home, string exe, HookTool tool)
@@ -205,25 +213,30 @@ public static class HookInstaller
             return false;
         foreach (var hook in hooks)
         {
-            if (hook?["enabled"]?.GetValue<bool>() == false
-                && IsOurs(hook["action"]?["command"]?.GetValue<string>(), "kiro"))
+            if (IsDisabled(hook)
+                && IsOurs(hook?["action"]?["command"] is JsonValue cmd && cmd.TryGetValue<string>(out var text) ? text : null, "kiro"))
                 return true;
         }
         return false;
     }
 
-    static bool KiroConnected(string? text)
+    static bool KiroConnected(string? text, string exe)
     {
         if (text == null || JsonNode.Parse(text) is not JsonObject root || root["hooks"] is not JsonArray hooks)
             return false;
         foreach (var hook in hooks)
         {
-            if (hook?["enabled"]?.GetValue<bool>() == false) continue;
-            if (hook?["trigger"]?.GetValue<string>() == "Stop" && IsOurs(hook["action"]?["command"]?.GetValue<string>(), "kiro"))
+            if (IsDisabled(hook)) continue;
+            var trigger = hook?["trigger"] is JsonValue t && t.TryGetValue<string>(out var triggerText) ? triggerText : null;
+            var command = hook?["action"]?["command"] is JsonValue c && c.TryGetValue<string>(out var cmdText) ? cmdText : null;
+            if (trigger == "Stop" && MatchesOurs(command, "kiro", exe))
                 return true;
         }
         return false;
     }
+
+    static bool IsDisabled(JsonNode? hook)
+        => hook?["enabled"] is JsonValue flag && flag.TryGetValue<bool>(out var enabled) && !enabled;
 
     static bool MergeCodex(string home, string exe)
     {
@@ -237,12 +250,17 @@ public static class HookInstaller
                 throw new InvalidDataException("Codex 설정의 notify를 읽지 못했어요");
             updated = PrependNotify(existing, command);
         }
-        else if (found.Values.Any(IsMochinotch))
+        else if (found.Values.Count > 0 && IsMochinotch(found.Values[0]))
         {
             var rebuilt = new List<string> { exe, "--hook", "--source", "codex" };
             var chainAt = found.Values.IndexOf("--chain");
             if (chainAt >= 0) rebuilt.AddRange(found.Values.Skip(chainAt));
             updated = SameCommand(found.Values, rebuilt) ? existing : ReplaceNotify(existing, found, rebuilt);
+        }
+        else if (found.Values.Any(IsMochinotch))
+        {
+            // 다른 도구가 notify를 감싸 인자 안에 우리 명령을 넣어 둔 경우 그대로 둔다.
+            updated = existing;
         }
         else
         {
@@ -323,9 +341,7 @@ public static class HookInstaller
     }
 
     static bool IsMochinotch(string value)
-        => value.Contains("mochinotch", StringComparison.OrdinalIgnoreCase)
-           || value.Contains("Mochinotch", StringComparison.Ordinal)
-           || value.Contains("--hook", StringComparison.Ordinal);
+        => value.Contains("mochinotch", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>우리 명령을 새 경로로 바꾸고, 없으면 false.</summary>
     static bool Retarget(JsonNode? node, string source, string command)
@@ -361,35 +377,43 @@ public static class HookInstaller
         }
     }
 
-    static bool EventsConnected(string? text, string hooksKey, IReadOnlyList<string> events, string source)
+    static bool EventsConnected(string? text, string hooksKey, IReadOnlyList<string> events, string source, string exe)
     {
         if (text == null || JsonNode.Parse(text) is not JsonObject root || root[hooksKey] is not JsonObject hooks)
             return false;
-        return events.All(ev => ContainsOurs(hooks[ev], source));
+        return events.All(ev => ContainsOurs(hooks[ev], source, exe));
     }
 
-    static bool ContainsOurs(JsonNode? node, string source)
+    static bool ContainsOurs(JsonNode? node, string source, string exe)
     {
         switch (node)
         {
             case JsonObject obj:
                 foreach (var pair in obj)
                 {
-                    if (pair.Key == "command" && pair.Value is JsonValue value && value.TryGetValue<string>(out var text) && IsOurs(text, source))
+                    if (pair.Key == "command" && pair.Value is JsonValue value && value.TryGetValue<string>(out var text) && MatchesOurs(text, source, exe))
                         return true;
-                    if (ContainsOurs(pair.Value, source)) return true;
+                    if (ContainsOurs(pair.Value, source, exe)) return true;
                 }
                 return false;
             case JsonArray array:
-                return array.Any(item => ContainsOurs(item, source));
+                return array.Any(item => ContainsOurs(item, source, exe));
             default:
                 return false;
         }
     }
 
+    static bool MatchesOurs(string? command, string source, string exe)
+    {
+        if (!IsOurs(command, source)) return false;
+        if (string.IsNullOrEmpty(exe)) return true;
+        return string.Equals(command, Command(exe, source), StringComparison.OrdinalIgnoreCase);
+    }
+
     public static bool IsOurs(string? command, string source)
         => !string.IsNullOrEmpty(command)
            && command.Contains("--source " + source, StringComparison.Ordinal)
+           && command.Contains("mochinotch", StringComparison.OrdinalIgnoreCase)
            && (command.Contains("--hook", StringComparison.Ordinal)
                || command.Contains("mochinotch-notify", StringComparison.Ordinal));
 

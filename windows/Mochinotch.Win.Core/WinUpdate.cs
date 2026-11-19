@@ -34,15 +34,73 @@ public static class WinUpdate
     }
 
     public static bool Newer(string tag, string local)
-        => TryVersion(tag, out var remote) && TryVersion(local, out var here) && remote > here;
+        => TryParseVersion(tag, out var remote) && TryParseVersion(local, out var here) && CompareVersions(remote, here) > 0;
 
-    static bool TryVersion(string text, out Version version)
+    readonly record struct SemVersion(int[] Numbers, string[] Prerelease);
+
+    static bool TryParseVersion(string text, out SemVersion version)
     {
-        version = new Version(0, 0);
+        version = default;
         var clean = text.Trim().TrimStart('v', 'V');
-        var cut = clean.IndexOfAny(['-', '+']);
-        if (cut >= 0) clean = clean[..cut];
-        return Version.TryParse(clean, out version!);
+        if (clean.Length == 0) return false;
+        var plus = clean.IndexOf('+');
+        if (plus >= 0) clean = clean[..plus];
+        var dash = clean.IndexOf('-');
+        var core = dash >= 0 ? clean[..dash] : clean;
+        var preText = dash >= 0 ? clean[(dash + 1)..] : "";
+        if (core.Length == 0) return false;
+        var parts = core.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        var numbers = new List<int>(parts.Length);
+        foreach (var part in parts)
+        {
+            var digits = new string(part.TakeWhile(char.IsDigit).ToArray());
+            if (digits.Length == 0 || !int.TryParse(digits, out var number)) return false;
+            numbers.Add(number);
+        }
+        if (numbers.Count == 0) return false;
+        var prerelease = preText.Length > 0
+            ? preText.Split('.', StringSplitOptions.RemoveEmptyEntries)
+            : Array.Empty<string>();
+        version = new SemVersion(numbers.ToArray(), prerelease);
+        return true;
+    }
+
+    static int CompareVersions(SemVersion left, SemVersion right)
+    {
+        var count = Math.Max(left.Numbers.Length, right.Numbers.Length);
+        for (var index = 0; index < count; index++)
+        {
+            var a = index < left.Numbers.Length ? left.Numbers[index] : 0;
+            var b = index < right.Numbers.Length ? right.Numbers[index] : 0;
+            if (a != b) return a.CompareTo(b);
+        }
+        if (left.Prerelease.Length == 0 && right.Prerelease.Length == 0) return 0;
+        if (left.Prerelease.Length == 0) return 1;
+        if (right.Prerelease.Length == 0) return -1;
+        var identifiers = Math.Max(left.Prerelease.Length, right.Prerelease.Length);
+        for (var index = 0; index < identifiers; index++)
+        {
+            if (index >= left.Prerelease.Length) return -1;
+            if (index >= right.Prerelease.Length) return 1;
+            var a = left.Prerelease[index];
+            var b = right.Prerelease[index];
+            var aNum = int.TryParse(a, out var aInt);
+            var bNum = int.TryParse(b, out var bInt);
+            if (aNum && bNum)
+            {
+                if (aInt != bInt) return aInt.CompareTo(bInt);
+            }
+            else if (aNum != bNum)
+            {
+                return aNum ? -1 : 1;
+            }
+            else
+            {
+                var diff = string.CompareOrdinal(a, b);
+                if (diff != 0) return diff;
+            }
+        }
+        return 0;
     }
 
     static (string Url, string Name, string? Sha256)? Choose(JsonElement assets, bool arm)
@@ -121,11 +179,17 @@ public static class WinUpdate
 
     /// <summary>실행 중인 파일이 잠겨 있으므로, 앱이 꺼진 뒤에 같은 경로로 덮어쓰고 다시 연다.</summary>
     public static string SwapScript(int processId, string staged, string destination)
-        => $"""
-            Wait-Process -Id {processId} -ErrorAction SilentlyContinue
-            Start-Sleep -Milliseconds 400
-            Copy-Item -LiteralPath {Quote(staged)} -Destination {Quote(destination)} -Force
-            Start-Process -FilePath {Quote(destination)}
+        => $$"""
+            Wait-Process -Id {{processId}} -ErrorAction SilentlyContinue
+            for ($i = 0; $i -lt 10; $i++) {
+                Start-Sleep -Milliseconds 400
+                try {
+                    Copy-Item -LiteralPath {{Quote(staged)}} -Destination {{Quote(destination)}} -Force -ErrorAction Stop
+                    break
+                } catch {
+                }
+            }
+            Start-Process -FilePath {{Quote(destination)}}
             """;
 
     public static bool CanReplace(string destination)
@@ -146,7 +210,7 @@ public static class WinUpdate
 
     static string Quote(string path) => "'" + path.Replace("'", "''") + "'";
 
-    static bool Allowed(string? raw)
+    public static bool IsAllowedDownload(string? raw)
     {
         if (raw == null || !Uri.TryCreate(raw, UriKind.Absolute, out var uri)) return false;
         if (!string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase)) return false;
@@ -154,4 +218,6 @@ public static class WinUpdate
         return host == "github.com" || host.EndsWith(".github.com")
             || host == "githubusercontent.com" || host.EndsWith(".githubusercontent.com");
     }
+
+    static bool Allowed(string? raw) => IsAllowedDownload(raw);
 }

@@ -1539,54 +1539,56 @@ private struct ReleaseNotesView: View {
     @State private var pageHovered = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let notes = model.releaseNotes {
-                Text(model.text(.notesInstalled, notes.version))
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(IslandColor.primary)
-                if !notes.body.isEmpty {
-                    Text(notes.body)
-                        .font(.system(size: 12))
-                        .foregroundStyle(IslandColor.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                }
-                if notes.page != nil {
-                    Button {
-                        model.openReleaseNotesPage()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(model.text(.notesPage))
-                            Image(systemName: "arrow.up.right")
-                                .font(.system(size: 9, weight: .bold))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if let notes = model.releaseNotes {
+                    Text(model.text(.notesInstalled, notes.version))
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(IslandColor.primary)
+                    if !notes.body.isEmpty {
+                        Text(notes.body)
+                            .font(.system(size: 12))
+                            .foregroundStyle(IslandColor.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                    if notes.page != nil {
+                        Button {
+                            model.openReleaseNotesPage()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(model.text(.notesPage))
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.black.opacity(pageHovered ? 0.8 : 0.92))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule().fill(IslandColor.update.opacity(pageHovered ? 0.9 : 1))
+                            )
+                            .contentShape(Capsule())
                         }
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.black.opacity(pageHovered ? 0.8 : 0.92))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(
-                            Capsule().fill(IslandColor.update.opacity(pageHovered ? 0.9 : 1))
-                        )
-                        .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, 2)
-                    .onHover { hovering in
-                        withAnimation(.easeOut(duration: 0.15)) { pageHovered = hovering }
+                        .buttonStyle(.plain)
+                        .padding(.top, 2)
+                        .onHover { hovering in
+                            withAnimation(.easeOut(duration: 0.15)) { pageHovered = hovering }
+                        }
                     }
                 }
             }
-        }
-        .padding(.horizontal, 14)
-        .padding(.top, 4)
-        .padding(.bottom, 16)
-        .fixedSize(horizontal: false, vertical: true)
-        .background {
-            GeometryReader { proxy in
-                Color.clear.preference(key: SettingsHeightKey.self, value: proxy.size.height)
+            .padding(.horizontal, 14)
+            .padding(.top, 4)
+            .padding(.bottom, 16)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(key: SettingsHeightKey.self, value: proxy.size.height)
+                }
             }
         }
+        .scrollIndicators(.hidden)
         .onPreferenceChange(SettingsHeightKey.self) { height in
             model.setSettingsHeight(height)
         }

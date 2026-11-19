@@ -1,6 +1,7 @@
 import AppKit
 import CoreImage
 import CoreMedia
+import Darwin
 import Metal
 import os
 import QuartzCore
@@ -112,37 +113,41 @@ final class DuoPulse: NSObject {
     private var duration: TimeInterval { Self.fallStart + Self.fallLength }
     private let renderer = LiveRenderer()
 
-    /// `rim`이 1보다 크면 가장자리 색이 화면 끝에 바짝 붙는다.
-    func play(tint color: NSColor, rim: Double = 1) {
+    /// `rim`이 1보다 크면 가장자리 색이 화면 끝에 바짝 붙는다. 화면 기록 권한이 없어 못 띄우면 false.
+    @discardableResult
+    func play(tint color: NSColor, rim: Double = 1) -> Bool {
         let rgb = color.usingColorSpace(.sRGB) ?? color
         tint = (rgb.redComponent, rgb.greenComponent, rgb.blueComponent)
         renderer.setRim(rim)
         guard CGPreflightScreenCaptureAccess() else {
             Self.log("preflight denied, prompt skipped")
-            return
+            return false
         }
         generation += 1
         let token = generation
         Task { [weak self] in
             guard let self else { return }
             do {
-                try await self.startLive()
+                try await self.startLive(token: token)
             } catch {
                 guard token == self.generation else { return }
                 Self.log("capture failed: \(error)")
             }
         }
+        return true
     }
 
-    private func startLive() async throws {
+    private func startLive(token: Int) async throws {
         stopTimer()
         await stopStream()
+        guard token == generation else { return }
         let notch = NotchGeometry.current()
         guard let screen = NSScreen.screens.first(where: { $0.frame.equalTo(notch.screenFrame) })
                 ?? NSScreen.main
                 ?? NSScreen.screens.first
         else { return }
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        guard token == generation else { return }
         let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
         guard let display = content.displays.first(where: { $0.displayID == displayID }) ?? content.displays.first else {
             throw CaptureError.noDisplay
@@ -196,10 +201,16 @@ final class DuoPulse: NSObject {
         let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
         try stream.addStreamOutput(renderer, type: .screen, sampleHandlerQueue: renderer.queue)
         try await stream.startCapture()
+        // 대기하는 사이에 새 효과가 시작됐거나 이미 끝났으면 방금 연 스트림을 바로 닫는다.
+        guard token == generation else {
+            try? await stream.stopCapture()
+            return
+        }
         self.stream = stream
 
         startedAt = CACurrentMediaTime()
         requestedAt = startedAt
+        stopTimer()
         guard let view else { return }
         let link = view.displayLink(target: self, selector: #selector(tick(_:)))
         link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
@@ -239,6 +250,7 @@ final class DuoPulse: NSObject {
     }
 
     private func finish() {
+        generation += 1
         renderer.update(envelope: 0, time: 0, tint: tint, active: false)
         onGlow?(0, 1, NSColor(srgbRed: tint.0, green: tint.1, blue: tint.2, alpha: 1))
         stopTimer()
@@ -509,16 +521,20 @@ final class DuoPulse: NSObject {
     private static func log(_ message: String) {
         let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Mochinotch")
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let line = "\(Date()) \(message)\n"
+        let line = "\(ISO8601DateFormatter().string(from: Date())) \(message)\n"
+        guard let data = line.data(using: .utf8) else { return }
         let url = folder.appendingPathComponent("duo.log")
-        if let data = line.data(using: .utf8) {
-            if FileManager.default.fileExists(atPath: url.path), let handle = try? FileHandle(forWritingTo: url) {
-                handle.seekToEndOfFile()
-                handle.write(data)
-                try? handle.close()
-            } else {
-                try? data.write(to: url)
-            }
+        let fd = url.path.withCString { Darwin.open($0, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW, 0o600) }
+        guard fd >= 0 else { return }
+        defer { Darwin.close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { return }
+        _ = fchmod(fd, 0o600)
+        if info.st_size > 200_000 {
+            _ = ftruncate(fd, 0)
+        }
+        data.withUnsafeBytes { buffer in
+            _ = Darwin.write(fd, buffer.baseAddress, buffer.count)
         }
     }
 }
