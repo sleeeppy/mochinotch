@@ -29,14 +29,15 @@ extension Notification.Name {
 }
 
 enum NotchGeometry {
-    /// 내장 화면이 하드웨어로는 있는데 덮개 때문에 꺼져 있으면 참. 내장 화면이 없는 맥은 거짓.
-    static var builtInIsAsleep: Bool {
+    /// 활성화된 화면이 하나도 없을 때 참. 덮개를 닫았더라도 외장 모니터가 켜져 있으면 거짓.
+    static var allDisplaysAsleep: Bool {
+        if NSScreen.screens.isEmpty { return true }
         var ids = [CGDirectDisplayID](repeating: 0, count: 16)
         var count: UInt32 = 0
         guard CGGetOnlineDisplayList(16, &ids, &count) == .success else { return false }
-        let builtins = ids.prefix(Int(count)).filter { CGDisplayIsBuiltin($0) != 0 }
-        guard !builtins.isEmpty else { return false }
-        return builtins.allSatisfy { CGDisplayIsActive($0) == 0 }
+        let online = ids.prefix(Int(count))
+        guard !online.isEmpty else { return true }
+        return online.allSatisfy { CGDisplayIsActive($0) == 0 }
     }
 
     static func current() -> NotchInfo {

@@ -22,9 +22,10 @@ private final class IntroClock: NSObject {
         )
     }
 
-    func start(_ onFrame: @escaping (CFTimeInterval) -> Void) {
+    @discardableResult
+    func start(_ onFrame: @escaping (CFTimeInterval) -> Void) -> Bool {
         self.onFrame = onFrame
-        retargetScreen()
+        return retargetScreen()
     }
 
     func stop() {
@@ -36,18 +37,20 @@ private final class IntroClock: NSObject {
     /// 덮개를 열면 예전 화면에 묶인 시계는 프레임을 주지 않는다. 콜백은 유지한 채 지금 화면에 다시 건다.
     @objc private func displaysChanged() {
         guard onFrame != nil else { return }
-        retargetScreen()
+        _ = retargetScreen()
     }
 
-    private func retargetScreen() {
+    @discardableResult
+    private func retargetScreen() -> Bool {
         link?.invalidate()
         link = nil
-        guard let onFrame, let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        guard let onFrame, let screen = NSScreen.main ?? NSScreen.screens.first else { return false }
         self.onFrame = onFrame
         let link = screen.displayLink(target: self, selector: #selector(tick(_:)))
         link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
         link.add(to: .main, forMode: .common)
         self.link = link
+        return true
     }
 
     @objc private func tick(_ link: CADisplayLink) {
@@ -1048,6 +1051,7 @@ struct ReleaseNotes: Equatable {
 
     /// 권한 몇 가지는 켠 뒤 다시 켜야 적용된다. 이 앱이 다 꺼진 뒤에 새로 띄운다.
     func relaunch() {
+        guard !isQuitting else { return }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [
@@ -1590,7 +1594,7 @@ struct ReleaseNotes: Equatable {
         introDirect = true
         var began: CFTimeInterval?
         var revealed = false
-        introClock.start { [weak self] now in
+        let started = introClock.start { [weak self] now in
             guard let self else { return }
             let start = began ?? now
             began = start
@@ -1625,6 +1629,12 @@ struct ReleaseNotes: Equatable {
                 }
                 if afterLaunch { self.finishLaunchIntro() }
             }
+        }
+        // 화면이 아직 없어 시계를 걸지 못했으면 인트로 상태에 머물지 않고 바로 풀어 준다.
+        if !started {
+            finishIntro(fold: !setupPending)
+            presentSetupIfPending()
+            if afterLaunch { finishLaunchIntro() }
         }
     }
 
@@ -1807,9 +1817,8 @@ struct ReleaseNotes: Equatable {
         if case .agent(let tool, let outcome, _, _, _) = activity.payload,
            tool.playsDuo, outcome != .cancelled, outcome != .needsInput {
             let tint = Self.duoTint(for: tool, outcome: outcome)
-            if playsScreenEffect {
-                DuoPulse.shared.play(tint: tint, rim: outcome == .failed ? 1 : tool.edgeRim)
-            } else {
+            let playedScreen = playsScreenEffect && DuoPulse.shared.play(tint: tint, rim: outcome == .failed ? 1 : tool.edgeRim)
+            if !playedScreen {
                 let rgb = tint.usingColorSpace(.sRGB) ?? tint
                 let lift = 0.42
                 startIslandGlow(color: Color(
@@ -2200,10 +2209,10 @@ struct ReleaseNotes: Equatable {
 
     private var screenRepair: Task<Void, Never>?
 
-    /// 화면이 바뀌는 동안은 알림이 여러 번 온다. 마지막 것만 보고, 덮개가 닫혀 있으면 창을 숨긴다.
+    /// 화면이 바뀌는 동안은 알림이 여러 번 온다. 마지막 것만 보고, 활성 화면이 없으면 창을 숨긴다.
     private func noteScreensChanged() {
         screenRepair?.cancel()
-        if NotchGeometry.builtInIsAsleep {
+        if NotchGeometry.allDisplaysAsleep {
             panel?.hide()
         } else {
             repairPanel()
@@ -2221,7 +2230,7 @@ struct ReleaseNotes: Equatable {
     private func repairPanel() {
         notch = NotchGeometry.current()
         NotificationCenter.default.post(name: .notchDisplaysChanged, object: nil)
-        guard !NotchGeometry.builtInIsAsleep else {
+        guard !NotchGeometry.allDisplaysAsleep else {
             panel?.hide()
             return
         }

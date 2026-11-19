@@ -131,7 +131,7 @@ public class App : Application
                 model.Ingest(incoming, clock.Elapsed.TotalSeconds);
                 OnTick();
             }));
-            notices.Start();
+            if (OperatingSystem.IsWindows()) notices.Start();
             AttachTray(icon);
             desktop.Exit += (_, _) =>
             {

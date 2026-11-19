@@ -20,7 +20,8 @@ enum NotificationWatcherSelfTest {
             ("WAL에만 있는 기록을 읽는다", testReadsWalOnlyRecord),
             ("같은 앱의 같은 글은 한 번만 알린다", testDuplicateTextSameApp),
             ("다른 앱의 같은 글은 각각 알린다", testDuplicateTextOtherApp),
-            ("중복 판정이 지나면 같은 글도 다시 알린다", testDuplicateTextExpires)
+            ("중복 판정이 지나면 같은 글도 다시 알린다", testDuplicateTextExpires),
+            ("SQLite URI 특수문자를 인코딩한다", testSqliteURIEncoding)
         ]
         var failed = 0
         for (name, test) in tests {
@@ -232,6 +233,11 @@ enum NotificationWatcherSelfTest {
             try expect(box.notices.count == 1, "WAL 기록을 알림 \(box.notices.count)개로 받았다")
             try expect(box.notices.first?.title == "월", "제목 \(box.notices.first?.title ?? "")")
         }
+    }
+
+    private static func testSqliteURIEncoding() throws {
+        let uri = NotificationWatcher.sqliteReadOnlyURI(for: "/tmp/a%20b?c#d/db")
+        try expect(uri == "file:/tmp/a%2520b%3Fc%23d/db?mode=ro", "URI \(uri)")
     }
 
     private static func withFixture(_ body: (Fixture, NotificationWatcher, Box) throws -> Void) throws {
