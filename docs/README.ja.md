@@ -3,7 +3,9 @@
 </p>
 
 <p align="center">
-  <img src="images/hero.png" alt="Mochinotch。閉じたノッチの左に Cursor の作業完了、右に Slack とメッセージのバッジが出ている様子">
+  <a href="https://youtu.be/bSZQH6v812w">
+    <img src="images/hero.png" alt="Mochinotch。閉じたノッチの左に Cursor の作業完了、右に Slack とメッセージのバッジが出ている様子">
+  </a>
 </p>
 
 <p align="center">

@@ -3,7 +3,9 @@
 </p>
 
 <p align="center">
-  <img src="images/hero.png" alt="Mochinotch。收起的刘海左边显示 Cursor 任务完成，右边显示 Slack 和信息的角标">
+  <a href="https://youtu.be/bSZQH6v812w">
+    <img src="images/hero.png" alt="Mochinotch。收起的刘海左边显示 Cursor 任务完成，右边显示 Slack 和信息的角标">
+  </a>
 </p>
 
 <p align="center">
