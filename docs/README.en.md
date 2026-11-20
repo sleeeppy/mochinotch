@@ -3,7 +3,9 @@
 </p>
 
 <p align="center">
-  <img src="images/hero.png" alt="Mochinotch. The collapsed notch shows a finished Cursor task on the left and Slack and Messages badges on the right">
+  <a href="https://youtu.be/bSZQH6v812w">
+    <img src="images/hero.png" alt="Mochinotch. The collapsed notch shows a finished Cursor task on the left and Slack and Messages badges on the right">
+  </a>
 </p>
 
 <p align="center">

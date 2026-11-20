@@ -1,5 +1,7 @@
 <p align="center">
-  <img src="docs/images/hero.png" alt="Mochinotch. 맥북 노치를 말랑한 다이나믹 아일랜드로. 노치 왼쪽에 Cursor 작업 완료, 오른쪽에 Slack과 메시지 알림 배지가 떠 있는 모습">
+  <a href="https://youtu.be/bSZQH6v812w">
+    <img src="docs/images/hero.png" alt="Mochinotch. 맥북 노치를 말랑한 다이나믹 아일랜드로. 노치 왼쪽에 Cursor 작업 완료, 오른쪽에 Slack과 메시지 알림 배지가 떠 있는 모습">
+  </a>
 </p>
 
 <p align="center">
