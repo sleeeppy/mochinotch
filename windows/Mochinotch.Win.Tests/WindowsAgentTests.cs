@@ -436,19 +436,17 @@ public class HookRelayTests
             HookRelay.Options.Parse(["--source", "codex", """{"hook_event_name":"PermissionRequest","tool_name":"Bash","agent_id":"","tool_input":{"command":"ls"}}"""]),
             "",
             new Dictionary<string, string>());
-        Assert.Equal("needsInput", blank.Event?.Kind);
-        Assert.Equal("Bash · ls", blank.Event?.Detail);
+        Assert.Null(blank.Event);
     }
 
     [Fact]
-    public void Codex_parent_permission_and_only_finished_turns_notify()
+    public void Codex_permission_checks_are_silent_and_only_finished_turns_notify()
     {
         var ask = HookRelay.Relay(
             HookRelay.Options.Parse(["--source", "codex", """{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"ls"}}"""]),
             "",
             new Dictionary<string, string>());
-        Assert.Equal("needsInput", ask.Event?.Kind);
-        Assert.Equal("Bash · ls", ask.Event?.Detail);
+        Assert.Null(ask.Event);
         var empty = HookRelay.Relay(
             HookRelay.Options.Parse(["--source", "codex", """{"hook_event_name":"PermissionRequest"}"""]),
             "",
@@ -555,7 +553,7 @@ public class HookInstallerTests
         Assert.Contains("--chain", text);
         Assert.Contains("old-notify", text);
         Assert.Contains("[model]", text);
-        Assert.Contains("PermissionRequest", File.ReadAllText(Path.Combine(home, ".codex", "hooks.json")));
+        Assert.False(File.Exists(Path.Combine(home, ".codex", "hooks.json")));
         Assert.True(HookInstaller.IsConnected(home, HookTool.Codex, "C:/Mochinotch.exe"));
         Assert.False(HookInstaller.IsConnected(home, HookTool.Codex, "D:/Moved/Mochinotch.exe"));
     }

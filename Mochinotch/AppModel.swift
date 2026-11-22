@@ -384,6 +384,9 @@ final class AppModel {
             self?.refreshSetup()
         }
         notifications.start()
+        T3QuestionWatcher.start { [weak self] event in
+            self?.ingest(event)
+        }
         checkForUpdate()
         Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -539,7 +542,7 @@ final class AppModel {
     func ingest(_ event: IncomingEvent) {
         let tool = AgentTool(rawValue: (event.tool ?? "custom").lowercased()) ?? .custom
         if event.kind?.lowercased() == "resolved" {
-            resolveWaiting(tool)
+            resolveWaiting(tool, requestID: event.id?.hasPrefix("t3:") == true ? event.id : nil)
             return
         }
         if event.kind?.lowercased() == "update" {
@@ -581,7 +584,8 @@ final class AppModel {
             id: UUID(),
             payload: .agent(tool: tool, outcome: outcome, title: title, detail: detail, openBundleIDs: bundles),
             createdAt: Date(),
-            keepsHistory: true
+            keepsHistory: true,
+            pendingRequestID: outcome == .needsInput && event.id?.hasPrefix("t3:") == true ? event.id : nil
         )
         let seconds: Double
         switch outcome {
@@ -1860,9 +1864,10 @@ struct ReleaseNotes: Equatable {
     }
 
     /// 질문이나 승인 창이 닫히면 그 확인 요청을 접는다.
-    private func resolveWaiting(_ tool: AgentTool) {
+    private func resolveWaiting(_ tool: AgentTool, requestID: String? = nil) {
         let ids = Set(activities.compactMap { activity -> UUID? in
-            guard case .agent(let existing, .needsInput, _, _, _) = activity.payload, existing == tool else { return nil }
+            guard case .agent(let existing, .needsInput, _, _, _) = activity.payload, existing == tool,
+                  activity.pendingRequestID == requestID else { return nil }
             return activity.id
         })
         guard !ids.isEmpty else { return }

@@ -198,6 +198,7 @@ struct IslandActivity: Identifiable, Equatable {
     var keepsHistory: Bool
     /// 접힌 노치에는 더 보여 주지 않는다. 오른쪽은 알림센터에서 지웠을 때, 왼쪽은 그 앱을 포커스했을 때.
     var hidesPeek = false
+    var pendingRequestID: String?
 
     /// 왼쪽 작업 완료. 시스템 알림이거나, Cursor·Claude·Codex 작업이 끝난 경우.
     var staysOnLeft: Bool {

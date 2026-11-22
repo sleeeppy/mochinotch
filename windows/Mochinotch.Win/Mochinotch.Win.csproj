@@ -15,6 +15,7 @@
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="../../Mochinotch/Events/T3PendingRequests.sql" LogicalName="T3PendingRequests.sql" />
     <AvaloniaResource Include="..\..\Assets\MochinotchIcon.png" Link="MochinotchIcon.png" />
     <AvaloniaResource Include="..\..\Mochinotch\ToolIcons\*.png" Link="ToolIcons\%(Filename)%(Extension)" />
   </ItemGroup>

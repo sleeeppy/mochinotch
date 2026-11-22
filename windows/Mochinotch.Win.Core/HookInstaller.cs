@@ -90,21 +90,10 @@ public static class HookInstaller
     {
         var configPath = Path.Combine(home, ".codex", "config.toml");
         var config = File.Exists(configPath) ? File.ReadAllText(configPath) : "";
-        if (!config.Contains("mochinotch", StringComparison.OrdinalIgnoreCase))
-            return false;
-        if (!string.IsNullOrEmpty(exe) && TomlNotify.TryFind(config, out var found) && found.Values.Count > 0)
-        {
-            if (IsMochinotch(found.Values[0]))
-            {
-                if (!string.Equals(found.Values[0], exe, StringComparison.OrdinalIgnoreCase))
-                    return false;
-            }
-            else if (!found.Values.Any(value => value.Contains("mochinotch", StringComparison.OrdinalIgnoreCase)))
-            {
-                return false;
-            }
-        }
-        return EventsConnected(Read(Path.Combine(home, ".codex", "hooks.json")), "hooks", ["PermissionRequest"], "codex", exe);
+        if (!TomlNotify.TryFind(config, out var found) || found.Values.Count == 0) return false;
+        if (IsMochinotch(found.Values[0]))
+            return string.IsNullOrEmpty(exe) || string.Equals(found.Values[0], exe, StringComparison.OrdinalIgnoreCase);
+        return found.Values.Any(IsMochinotch);
     }
 
     static bool Merge(string home, string exe, HookTool tool)
@@ -277,22 +266,6 @@ public static class HookInstaller
             Write(path, updated, existing.Length > 0);
             changed = true;
         }
-        if (MergeJson(Path.Combine(home, ".codex", "hooks.json"), root =>
-        {
-            var hooks = Object(root, "hooks");
-            var list = Array(hooks, "PermissionRequest");
-            if (!Retarget(list, "codex", Command(exe, "codex")))
-            {
-                list.Add(new JsonObject
-                {
-                    ["hooks"] = new JsonArray(new JsonObject
-                    {
-                        ["type"] = "command",
-                        ["command"] = Command(exe, "codex"),
-                    }),
-                });
-            }
-        })) changed = true;
         return changed;
     }
 
