@@ -29,6 +29,7 @@ sealed class NoticeWatch : IDisposable
     readonly string t3Path = Path.Combine(
         Environment.GetEnvironmentVariable("T3CODE_HOME") ?? Path.Combine(HookInstaller.Home, ".t3"),
         "userdata", "statev2.sqlite");
+    readonly byte[] t3Uri;
     readonly byte[] t3Query;
     HashSet<string> pendingQuestions = [];
     readonly byte[] databaseUri;
@@ -43,14 +44,20 @@ sealed class NoticeWatch : IDisposable
         using var stream = typeof(NoticeWatch).Assembly.GetManifestResourceStream("T3PendingRequests.sql")!;
         using var reader = new StreamReader(stream);
         t3Query = Encoding.UTF8.GetBytes(reader.ReadToEnd() + "\0");
+        t3Uri = FileUri(t3Path);
         database ??= Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Microsoft", "Windows", "Notifications", "wpndatabase.db");
-        var full = Path.GetFullPath(database).Replace('\\', '/')
+        databaseUri = FileUri(database);
+    }
+
+    static byte[] FileUri(string path)
+    {
+        var full = Path.GetFullPath(path).Replace('\\', '/')
             .Replace("%", "%25")
             .Replace("?", "%3F")
             .Replace("#", "%23");
-        databaseUri = Encoding.UTF8.GetBytes("file:///" + full + "?mode=ro\0");
+        return Encoding.UTF8.GetBytes("file:///" + full + "?mode=ro\0");
     }
 
     public void Start()
@@ -121,9 +128,17 @@ sealed class NoticeWatch : IDisposable
 
     void PollT3Questions()
     {
-        if (!File.Exists(t3Path) && pendingQuestions.Count == 0) return;
-        var rows = Read(Encoding.UTF8.GetBytes(t3Path + "\0"), t3Query,
-            statement => (Id: "t3:" + Column(statement, 0), Detail: Column(statement, 1)));
+        List<(string Id, string Detail)>? rows;
+        if (!File.Exists(t3Path))
+        {
+            if (pendingQuestions.Count == 0) return;
+            rows = [];
+        }
+        else
+        {
+            rows = Read(t3Uri, t3Query,
+                statement => (Id: "t3:" + Column(statement, 0), Detail: Column(statement, 1)));
+        }
         if (rows == null) return;
         if (rows.Count > 0 && !HookInstaller.IsConnected(HookInstaller.Home, HookTool.Codex, Environment.ProcessPath ?? ""))
             rows.Clear();

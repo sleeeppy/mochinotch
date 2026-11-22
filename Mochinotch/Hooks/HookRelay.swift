@@ -86,13 +86,16 @@ enum HookRelay {
         let fromCursor = stdinEvent["cursor_version"] != nil
             || (stdinEvent["conversation_id"] != nil && stdinEvent["session_id"] == nil)
         var source = options.source
+        let logged: [String: Any]
+        let logNote: String
         if source == "claude", fromCursor {
             source = "cursor"
-            log(options.source, stdinEvent, "send as cursor")
+            logged = stdinEvent
+            logNote = "send as cursor"
         } else {
             // Codex 본문은 인자로 온다. stdin만 적으면 종류가 빈 줄로 남는다.
-            let logged = options.source == "codex" && !argEvent.isEmpty ? argEvent : stdinEvent
-            log(options.source, logged, "send")
+            logged = options.source == "codex" && !argEvent.isEmpty ? argEvent : stdinEvent
+            logNote = "send"
         }
 
         var tool = options.tool
@@ -175,7 +178,10 @@ enum HookRelay {
             let event = argEvent.isEmpty ? stdinEvent : argEvent
             // 답변 시작, 일반 알림, 종류가 비어 있는 호출은 완료가 아니다.
             // 종류가 없으면 예전에는 완료로 올려서, 시작할 때마다 노치가 떴다.
-            guard let notice = Self.codexNotice(event) else { return false }
+            guard let notice = Self.codexNotice(event) else {
+                log(options.source, logged, "skip")
+                return false
+            }
             if tool.isEmpty { tool = "codex" }
             if kind.isEmpty { kind = notice.kind }
             if title.isEmpty { title = notice.title }
@@ -202,6 +208,7 @@ enum HookRelay {
             dedupeID = "cursor:\(generation)"
         }
         if let dedupeID { payload["id"] = dedupeID }
+        log(options.source, logged, logNote)
         post(payload)
         return source == "cursor" && kind != "needsInput" && kind != "resolved"
     }
@@ -245,6 +252,13 @@ enum HookRelay {
         ]
         let keys = Set(object.keys)
         if keys.isSubset(of: machine) { return nil }
+        // T3가 다른 에이전트를 쓸 때도 Codex로 만드는 스레드 제목·받아쓰기 정리·PR 리뷰 가이드 결과.
+        if keys == ["title", "needsRefinement"] { return nil }
+        if keys == ["transcription"], object["transcription"] is String { return nil }
+        if keys == ["stops"], let stops = object["stops"] as? [[String: Any]], !stops.isEmpty,
+           stops.allSatisfy({ $0["order"] != nil && $0["title"] is String && $0["summary"] is String }) {
+            return nil
+        }
         guard object["body"] is String else { return text }
         if keys == ["title", "body"], let title = object["title"] as? String { return title }
         if keys == ["subject", "body"] || (keys == ["subject", "body", "branch"] && object["branch"] is String),
@@ -253,14 +267,45 @@ enum HookRelay {
     }
 
     private static func isInternalPrompt(_ value: Any?) -> Bool {
-        let messages = value as? [String] ?? []
-        return messages.contains { message in
-            message.hasPrefix("You write concise git commit messages.\n")
-                || message.hasPrefix("You write source control change request content.\n")
+        let messages = (value as? [Any])?.compactMap { $0 as? String } ?? []
+        return messages.contains { raw in
+            let message = raw
+                .replacingOccurrences(of: "\r\n", with: "\n")
+                .replacingOccurrences(of: "\r", with: "\n")
+            let body = stripLeadingImageAttachments(message)
+            return body.hasPrefix("You write concise git commit messages.\n")
+                || body.hasPrefix("You write source control change request content.\n")
+                // T3가 어떤 에이전트를 쓰든 Codex로 돌리는 제목·브랜치·리뷰 가이드·받아쓰기 정리 작업.
+                || body.hasPrefix("Generate a title that will help the user recognize this T3 Code thread")
+                || body.hasPrefix("Regenerate the title for an existing T3 Code thread")
+                || body.hasPrefix("You generate concise git branch names.\n")
+                || body.hasPrefix("You prepare a guided tour of change request #")
+                || body.hasPrefix("The following is the Codex agent history whose request action you are assessing.")
+                || body.hasPrefix("The following is the Codex agent history added since your last approval assessment.")
+                || (message.contains("\n<transcript>\n") && message.contains("\n<composer_before>\n"))
                 || message.contains("Use your image generation tool")
                 || message.contains("Do NOT draw it with code")
                 || message.contains("APPROVAL REQUEST")
                 || message.contains("planned coding-agent action")
+        }
+    }
+
+    /// `--image` 첨부가 앞에 붙은 내부 프롬프트도 첫 문장으로 알아본다.
+    private static func stripLeadingImageAttachments(_ text: String) -> String {
+        var rest = Substring(text)
+        while true {
+            while let first = rest.first, first == " " || first == "\t" || first == "\n" {
+                rest = rest.dropFirst()
+            }
+            if rest.hasPrefix("<image "), let close = rest.range(of: "</image>") {
+                rest = rest[close.upperBound...]
+                continue
+            }
+            if rest.hasPrefix("Codex could not read the local image ") {
+                rest = rest.firstIndex(of: "\n").map { rest[rest.index(after: $0)...] } ?? Substring()
+                continue
+            }
+            return String(rest)
         }
     }
 

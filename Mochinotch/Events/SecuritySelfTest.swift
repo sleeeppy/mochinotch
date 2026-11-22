@@ -20,7 +20,8 @@ enum SecuritySelfTest {
             ("꺼 둔 Kiro 훅은 유지한다", testDisabledKiroHook),
             ("이벤트 토큰이 다르면 거절한다", testEventToken),
             ("Codex 서브에이전트 승인은 확인으로 올리지 않는다", testCodexSubagentPermissionIsQuiet),
-            ("Codex 권한 검사와 실제 완료를 구분한다", testCodexParentStillNotifies)
+            ("Codex 권한 검사와 실제 완료를 구분한다", testCodexParentStillNotifies),
+            ("Codex 주석 notify와 옛 권한 훅 잔재를 처리한다", testCodexConnectionAndLegacyCleanup)
         ]
         var failed = 0
         for (name, test) in tests {
@@ -290,11 +291,117 @@ enum SecuritySelfTest {
             event["input-messages"] = [prompt + "\nReturn a JSON object with keys:"]
             try expect(HookRelay.codexNotice(event) == nil, "자동 생성 초안을 완료로 올렸다")
         }
+        let title: [String: Any] = [
+            "type": "agent-turn-complete",
+            "last-assistant-message": #"{"title":"모델을 기본값으로 설정하기","needsRefinement":true}"#,
+        ]
+        try expect(HookRelay.codexNotice(title) == nil, "T3 제목 생성 결과를 올렸다")
+        for prompt in [
+            "Generate a title that will help the user recognize this T3 Code thread weeks later.\nReturn JSON",
+            "Regenerate the title for an existing T3 Code thread so the user can recognize it weeks later.",
+            "You generate concise git branch names.\nReturn a JSON object with key: branch.",
+            "You prepare a guided tour of change request #12 for a maintainer.",
+            "Clean this speech-to-text transcript.\n\n<transcript>\n안녕\n</transcript>\n\nUse it.\n<composer_before>\n\n</composer_before>",
+            "<image name=[Image #1] path=\"/tmp/shot.png\">\n\n</image>\nYou generate concise git branch names.\nReturn a JSON object with key: branch.",
+            "<image name=[Image #1] path=\"/tmp/shot.png\">\n\n</image>\nCodex could not read the local image at `-`: No such file\nGenerate a title that will help the user recognize this T3 Code thread weeks later.",
+            "You write concise git commit messages.\r\nReturn a JSON object with keys:",
+            "Clean this speech-to-text transcript.\r\n\r\n<transcript>\r\n안녕\r\n</transcript>\r\n<composer_before>\r\n\r\n</composer_before>",
+            "The following is the Codex agent history whose request action you are assessing.",
+            "The following is the Codex agent history added since your last approval assessment.",
+        ] {
+            let event: [String: Any] = [
+                "type": "agent-turn-complete",
+                "input-messages": [prompt],
+                "last-assistant-message": "결과",
+            ]
+            try expect(HookRelay.codexNotice(event) == nil, "T3 내부 작업을 완료로 올렸다: \(prompt.prefix(30))")
+        }
+        let mixedInput: [String: Any] = [
+            "type": "agent-turn-complete",
+            "input-messages": [["type": "image"], "You generate concise git branch names.\nReturn a JSON object with key: branch."],
+            "last-assistant-message": #"{"branch":"feat/mixed"}"#,
+        ]
+        try expect(HookRelay.codexNotice(mixedInput) == nil, "비문자열이 섞인 input-messages의 내부 프롬프트를 올렸다")
+        for json in [
+            #"{"transcription":"정리된 문장"}"#,
+            #"{"stops":[{"order":1,"title":"요약","summary":"변경 요약"}]}"#,
+        ] {
+            let event: [String: Any] = [
+                "type": "agent-turn-complete",
+                "last-assistant-message": json,
+            ]
+            try expect(HookRelay.codexNotice(event) == nil, "T3 JSON 결과를 완료로 올렸다: \(json)")
+        }
         let userJson: [String: Any] = [
             "type": "agent-turn-complete",
             "last-assistant-message": #"{"path":"src/app.ts"}"#,
         ]
         try expect(HookRelay.codexNotice(userJson)?.detail == #"{"path":"src/app.ts"}"#, "사용자가 받은 JSON을 숨겼다")
+        let userStopsJson: [String: Any] = [
+            "type": "agent-turn-complete",
+            "last-assistant-message": #"{"stops":["a","b"]}"#,
+        ]
+        try expect(HookRelay.codexNotice(userStopsJson)?.detail == #"{"stops":["a","b"]}"#, "사용자가 받은 일반 stops JSON을 숨겼다")
+    }
+
+    private static func testCodexConnectionAndLegacyCleanup() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("mochi-codex-\(UUID().uuidString)", isDirectory: true)
+        let codexDir = root.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: codexDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try withHome(root.path) {
+            let config = codexDir.appendingPathComponent("config.toml")
+            try Data("# notify = [\"/Users/me/.local/bin/mochinotch-notify\", \"--source\", \"codex\"]\n".utf8).write(to: config)
+            try expect(!HookInstaller.isConnected(.codex), "주석 처리된 notify를 연결됨으로 봤다")
+
+            let wrapped = "notify = [\"wrapper\", \"--previous-notify\", \"[\\\"/Users/me/.local/bin/mochinotch-notify\\\",\\\"--source\\\",\\\"codex\\\"]\"]\n"
+            try Data(wrapped.utf8).write(to: config)
+            try expect(HookInstaller.isConnected(.codex), "래퍼 안의 notify를 못 알아봤다")
+
+            let hooks = codexDir.appendingPathComponent("hooks.json")
+            let legacy = """
+            {
+              "hooks": {
+                "PermissionRequest": [
+                  {
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "/Users/me/.local/bin/mochinotch-notify --source codex"
+                      }
+                    ]
+                  },
+                  {
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "other-tool-hook"
+                      }
+                    ]
+                  }
+                ],
+                "Stop": [
+                  {
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "keep-stop-hook"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+            """
+            try Data(legacy.utf8).write(to: hooks)
+            try expect(HookInstaller.removeLegacyCodexPermissionHooks(), "옛 PermissionRequest 훅을 못 지웠다")
+            let cleaned = try String(contentsOf: hooks, encoding: .utf8)
+            try expect(!cleaned.contains("mochinotch-notify"), "옛 PermissionRequest 훅이 남아 있다")
+            try expect(cleaned.contains("other-tool-hook"), "다른 PermissionRequest 훅을 지웠다")
+            try expect(cleaned.contains("keep-stop-hook"), "Stop 훅을 지웠다")
+            try expect(!HookInstaller.removeLegacyCodexPermissionHooks(), "두 번째 정리에 또 고쳤다")
+        }
     }
 
     private static func withHome(_ path: String, _ body: () throws -> Void) throws {

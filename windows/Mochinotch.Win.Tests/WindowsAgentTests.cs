@@ -493,6 +493,40 @@ public class HookRelayTests
         Assert.Null(HookRelay.Relay(options, JsonSerializer.Serialize(turn), env).Event);
     }
 
+    [Theory]
+    [InlineData("Generate a title that will help the user recognize this T3 Code thread weeks later.\nReturn JSON", "결과")]
+    [InlineData("Regenerate the title for an existing T3 Code thread so the user can recognize it weeks later.", "결과")]
+    [InlineData("You generate concise git branch names.\nReturn a JSON object with key: branch.", "결과")]
+    [InlineData("You prepare a guided tour of change request #12 for a maintainer.", "결과")]
+    [InlineData("Clean this speech-to-text transcript.\n\n<transcript>\n안녕\n</transcript>\n\nUse it.\n<composer_before>\n\n</composer_before>", "결과")]
+    [InlineData("<image name=[Image #1] path=\"/tmp/shot.png\">\n\n</image>\nYou generate concise git branch names.\nReturn a JSON object with key: branch.", "결과")]
+    [InlineData("<image name=[Image #1] path=\"/tmp/shot.png\">\n\n</image>\nCodex could not read the local image at `-`: No such file\nGenerate a title that will help the user recognize this T3 Code thread weeks later.", "결과")]
+    [InlineData("You write concise git commit messages.\r\nReturn a JSON object with keys:", "결과")]
+    [InlineData("Clean this speech-to-text transcript.\r\n\r\n<transcript>\r\n안녕\r\n</transcript>\r\n<composer_before>\r\n\r\n</composer_before>", "결과")]
+    [InlineData("The following is the Codex agent history whose request action you are assessing.", "")]
+    [InlineData("The following is the Codex agent history added since your last approval assessment.", "")]
+    [InlineData("", "{\"title\":\"모델을 기본값으로 설정하기\",\"needsRefinement\":true}")]
+    [InlineData("", "{\"transcription\":\"정리된 문장\"}")]
+    [InlineData("", "{\"stops\":[{\"order\":1,\"title\":\"요약\",\"summary\":\"변경 요약\"}]}")]
+    public void T3_background_codex_turns_are_silent(string prompt, string answer)
+    {
+        var turn = new Dictionary<string, object> { ["type"] = "agent-turn-complete", ["last-assistant-message"] = answer };
+        if (prompt.Length > 0) turn["input-messages"] = new[] { prompt };
+        var result = HookRelay.Relay(HookRelay.Options.Parse(["--source", "codex"]), JsonSerializer.Serialize(turn), new Dictionary<string, string>());
+        Assert.Null(result.Event);
+    }
+
+    [Fact]
+    public void Codex_user_json_outputs_are_not_hidden()
+    {
+        var options = HookRelay.Options.Parse(["--source", "codex"]);
+        var env = new Dictionary<string, string>();
+        var plain = HookRelay.Relay(options, """{"type":"agent-turn-complete","last-assistant-message":"{\"path\":\"src/app.ts\"}"}""", env);
+        Assert.Equal("""{"path":"src/app.ts"}""", plain.Event?.Detail);
+        var stops = HookRelay.Relay(options, """{"type":"agent-turn-complete","last-assistant-message":"{\"stops\":[\"a\",\"b\"]}"}""", env);
+        Assert.Equal("""{"stops":["a","b"]}""", stops.Event?.Detail);
+    }
+
     [Fact]
     public void Claude_hook_from_cursor_is_cursor()
     {
@@ -575,6 +609,43 @@ public class HookInstallerTests
         var chained = File.ReadAllText(Path.Combine(home2, ".codex", "config.toml"));
         Assert.Contains("--chain", chained);
         Assert.Contains("other-tool.exe", chained);
+    }
+
+    [Fact]
+    public void Codex_install_handles_table_non_array_notify_and_cleans_legacy_permission_hook()
+    {
+        var home = TempHome();
+        var codexDir = Path.Combine(home, ".codex");
+        Directory.CreateDirectory(codexDir);
+        File.WriteAllText(Path.Combine(codexDir, "config.toml"), "[plugins.demo]\nnotify = true\n");
+        File.WriteAllText(
+            Path.Combine(codexDir, "hooks.json"),
+            """
+            {
+              "hooks": {
+                "PermissionRequest": [
+                  { "hooks": [{ "type": "command", "command": "C:/Mochinotch.exe --hook --source codex" }] },
+                  { "hooks": [{ "type": "command", "command": "other-hook.exe" }] }
+                ],
+                "Stop": [
+                  { "hooks": [{ "type": "command", "command": "keep-stop.exe" }] }
+                ]
+              }
+            }
+            """);
+
+        Assert.False(HookInstaller.IsConnected(home, HookTool.Codex, "C:/Mochinotch.exe"));
+        var result = HookInstaller.Install(home, "C:/Mochinotch.exe", [HookTool.Codex]);
+        Assert.Empty(result.Failures);
+        Assert.True(HookInstaller.IsConnected(home, HookTool.Codex, "C:/Mochinotch.exe"));
+        var config = File.ReadAllText(Path.Combine(codexDir, "config.toml"));
+        Assert.Contains("notify = [\"C:/Mochinotch.exe\"", config);
+        Assert.Contains("[plugins.demo]\nnotify = true", config);
+
+        var cleanedHooks = File.ReadAllText(Path.Combine(codexDir, "hooks.json"));
+        Assert.DoesNotContain("Mochinotch.exe", cleanedHooks);
+        Assert.Contains("other-hook.exe", cleanedHooks);
+        Assert.Contains("keep-stop.exe", cleanedHooks);
     }
 
     [Fact]
