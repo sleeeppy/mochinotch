@@ -290,6 +290,25 @@ enum SecuritySelfTest {
             event["input-messages"] = [prompt + "\nReturn a JSON object with keys:"]
             try expect(HookRelay.codexNotice(event) == nil, "자동 생성 초안을 완료로 올렸다")
         }
+        let title: [String: Any] = [
+            "type": "agent-turn-complete",
+            "last-assistant-message": #"{"title":"모델을 기본값으로 설정하기","needsRefinement":true}"#,
+        ]
+        try expect(HookRelay.codexNotice(title) == nil, "T3 제목 생성 결과를 올렸다")
+        for prompt in [
+            "Generate a title that will help the user recognize this T3 Code thread weeks later.\nReturn JSON",
+            "Regenerate the title for an existing T3 Code thread so the user can recognize it weeks later.",
+            "You generate concise git branch names.\nReturn a JSON object with key: branch.",
+            "You prepare a guided tour of change request #12 for a maintainer.",
+            "Clean this speech-to-text transcript.\n\n<transcript>\n안녕\n</transcript>\n\nUse it.\n<composer_before>\n\n</composer_before>",
+        ] {
+            let event: [String: Any] = [
+                "type": "agent-turn-complete",
+                "input-messages": [prompt],
+                "last-assistant-message": "결과",
+            ]
+            try expect(HookRelay.codexNotice(event) == nil, "T3 내부 작업을 완료로 올렸다: \(prompt.prefix(30))")
+        }
         let userJson: [String: Any] = [
             "type": "agent-turn-complete",
             "last-assistant-message": #"{"path":"src/app.ts"}"#,

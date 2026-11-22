@@ -316,6 +316,8 @@ public static class HookRelay
         if (obj.Count == 0) return text;
         if (obj.Keys.All(key => key is "suggestions" or "exclude" or "risk_level" or "user_authorization" or "outcome" or "rationale"))
             return null;
+        // T3 스레드 제목 생성 결과. 다른 에이전트를 쓸 때도 T3가 Codex로 만든다.
+        if (obj.Count == 2 && obj.ContainsKey("title") && obj.ContainsKey("needsRefinement")) return null;
         if (!obj.TryGetValue("body", out var body) || body.ValueKind != JsonValueKind.String) return text;
         if (obj.Count == 2 && obj.TryGetValue("title", out var title) && title.ValueKind == JsonValueKind.String)
             return title.GetString();
@@ -334,6 +336,12 @@ public static class HookRelay
             var text = item.GetString() ?? "";
             if (text.StartsWith("You write concise git commit messages.\n", StringComparison.Ordinal)
                 || text.StartsWith("You write source control change request content.\n", StringComparison.Ordinal)
+                // T3가 어떤 에이전트를 쓰든 Codex로 돌리는 제목·브랜치·리뷰 가이드·받아쓰기 정리 작업.
+                || text.StartsWith("Generate a title that will help the user recognize this T3 Code thread", StringComparison.Ordinal)
+                || text.StartsWith("Regenerate the title for an existing T3 Code thread", StringComparison.Ordinal)
+                || text.StartsWith("You generate concise git branch names.\n", StringComparison.Ordinal)
+                || text.StartsWith("You prepare a guided tour of change request #", StringComparison.Ordinal)
+                || (text.Contains("\n<transcript>\n", StringComparison.Ordinal) && text.Contains("\n<composer_before>\n", StringComparison.Ordinal))
                 || text.Contains("Use your image generation tool", StringComparison.Ordinal)
                 || text.Contains("Do NOT draw it with code", StringComparison.Ordinal)
                 || text.Contains("APPROVAL REQUEST", StringComparison.Ordinal)

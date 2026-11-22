@@ -245,6 +245,8 @@ enum HookRelay {
         ]
         let keys = Set(object.keys)
         if keys.isSubset(of: machine) { return nil }
+        // T3 스레드 제목 생성 결과. 다른 에이전트를 쓸 때도 T3가 Codex로 만든다.
+        if keys == ["title", "needsRefinement"] { return nil }
         guard object["body"] is String else { return text }
         if keys == ["title", "body"], let title = object["title"] as? String { return title }
         if keys == ["subject", "body"] || (keys == ["subject", "body", "branch"] && object["branch"] is String),
@@ -257,6 +259,12 @@ enum HookRelay {
         return messages.contains { message in
             message.hasPrefix("You write concise git commit messages.\n")
                 || message.hasPrefix("You write source control change request content.\n")
+                // T3가 어떤 에이전트를 쓰든 Codex로 돌리는 제목·브랜치·리뷰 가이드·받아쓰기 정리 작업.
+                || message.hasPrefix("Generate a title that will help the user recognize this T3 Code thread")
+                || message.hasPrefix("Regenerate the title for an existing T3 Code thread")
+                || message.hasPrefix("You generate concise git branch names.\n")
+                || message.hasPrefix("You prepare a guided tour of change request #")
+                || (message.contains("\n<transcript>\n") && message.contains("\n<composer_before>\n"))
                 || message.contains("Use your image generation tool")
                 || message.contains("Do NOT draw it with code")
                 || message.contains("APPROVAL REQUEST")

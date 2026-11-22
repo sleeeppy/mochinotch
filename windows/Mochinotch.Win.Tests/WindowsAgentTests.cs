@@ -493,6 +493,21 @@ public class HookRelayTests
         Assert.Null(HookRelay.Relay(options, JsonSerializer.Serialize(turn), env).Event);
     }
 
+    [Theory]
+    [InlineData("Generate a title that will help the user recognize this T3 Code thread weeks later.\nReturn JSON", "결과")]
+    [InlineData("Regenerate the title for an existing T3 Code thread so the user can recognize it weeks later.", "결과")]
+    [InlineData("You generate concise git branch names.\nReturn a JSON object with key: branch.", "결과")]
+    [InlineData("You prepare a guided tour of change request #12 for a maintainer.", "결과")]
+    [InlineData("Clean this speech-to-text transcript.\n\n<transcript>\n안녕\n</transcript>\n\nUse it.\n<composer_before>\n\n</composer_before>", "결과")]
+    [InlineData("", "{\"title\":\"모델을 기본값으로 설정하기\",\"needsRefinement\":true}")]
+    public void T3_background_codex_turns_are_silent(string prompt, string answer)
+    {
+        var turn = new Dictionary<string, object> { ["type"] = "agent-turn-complete", ["last-assistant-message"] = answer };
+        if (prompt.Length > 0) turn["input-messages"] = new[] { prompt };
+        var result = HookRelay.Relay(HookRelay.Options.Parse(["--source", "codex"]), JsonSerializer.Serialize(turn), new Dictionary<string, string>());
+        Assert.Null(result.Event);
+    }
+
     [Fact]
     public void Claude_hook_from_cursor_is_cursor()
     {
