@@ -282,6 +282,16 @@ enum SecuritySelfTest {
             "last-assistant-message": "이미지를 저장했습니다.",
         ]
         try expect(HookRelay.codexNotice(picture) == nil, "이미지 생성 턴을 올렸다")
+        for (prompt, draft) in [
+            ("You write concise git commit messages.", #"{"subject":"Fix shelf","body":"- Refresh demo"}"#),
+            ("You write concise git commit messages.", #"{"branch":"fix/shelf","body":"","subject":"Fix shelf"}"#),
+            ("You write source control change request content.", ###"{"title":"Fix shelf","body":"## Summary\n- Refresh demo"}"###),
+        ] {
+            var event: [String: Any] = ["type": "agent-turn-complete", "last-assistant-message": draft]
+            try expect(HookRelay.codexNotice(event)?.detail == "Fix shelf", "초안 제목 대신 JSON을 표시했다")
+            event["input-messages"] = [prompt + "\nReturn a JSON object with keys:"]
+            try expect(HookRelay.codexNotice(event) == nil, "자동 생성 초안을 완료로 올렸다")
+        }
         let userJson: [String: Any] = [
             "type": "agent-turn-complete",
             "last-assistant-message": #"{"path":"src/app.ts"}"#,

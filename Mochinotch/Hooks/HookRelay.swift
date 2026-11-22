@@ -227,13 +227,10 @@ enum HookRelay {
             return CodexNotice(kind: "needsInput", title: "Codex 확인 필요", detail: ask, dedupeID: nil)
         }
         if type == "agent-turn-complete" {
-            // 제안 목록, 제외 목록, 가디언 판정은 사용자 답이 아니다.
-            // 마지막 글이 그 JSON이면 턴마다 노치에 원문이 쌓인다.
-            if isMachineResult(event["last-assistant-message"] as? String) { return nil }
-            // 이미지 생성이나 승인 검토는 사용자 턴과 따로 끝나고, 본문은 평범한 문장일 수 있다.
-            if isInternalPrompt(event["input-messages"]) { return nil }
+            guard !isInternalPrompt(event["input-messages"]),
+                  let preview = completionPreview(event["last-assistant-message"] as? String ?? "") else { return nil }
             let turn = (event["turn-id"] as? String).nonEmpty
-            var detail = firstLine(event["last-assistant-message"] as? String)
+            var detail = firstLine(preview)
             if detail.isEmpty { detail = folderName(event["cwd"] as? String) }
             return CodexNotice(
                 kind: "completed",
@@ -245,23 +242,30 @@ enum HookRelay {
         return nil
     }
 
-    /// 앱이 숨겨 둔 작업의 결과. 키 전체가 이 집합일 때만 거른다.
-    private static func isMachineResult(_ text: String?) -> Bool {
-        let trimmed = (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    /// 숨은 작업 결과는 nil, 커밋·PR 초안은 제목, 일반 답변은 원문을 돌려준다.
+    private static func completionPreview(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.first == "{",
-              let data = trimmed.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              !object.isEmpty else { return false }
+              let object = try? JSONSerialization.jsonObject(with: Data(trimmed.utf8)) as? [String: Any],
+              !object.isEmpty else { return text }
         let machine: Set<String> = [
             "suggestions", "exclude", "risk_level", "user_authorization", "outcome", "rationale",
         ]
-        return object.keys.allSatisfy { machine.contains($0) }
+        let keys = Set(object.keys)
+        if keys.isSubset(of: machine) { return nil }
+        guard object["body"] is String else { return text }
+        if keys == ["title", "body"], let title = object["title"] as? String { return title }
+        if keys == ["subject", "body"] || (keys == ["subject", "body", "branch"] && object["branch"] is String),
+           let subject = object["subject"] as? String { return subject }
+        return text
     }
 
     private static func isInternalPrompt(_ value: Any?) -> Bool {
         let messages = value as? [String] ?? []
         return messages.contains { message in
-            message.contains("Use your image generation tool")
+            message.hasPrefix("You write concise git commit messages.\n")
+                || message.hasPrefix("You write source control change request content.\n")
+                || message.contains("Use your image generation tool")
                 || message.contains("Do NOT draw it with code")
                 || message.contains("APPROVAL REQUEST")
                 || message.contains("planned coding-agent action")
