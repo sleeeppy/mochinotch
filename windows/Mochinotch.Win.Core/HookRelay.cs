@@ -304,39 +304,32 @@ public static class HookRelay
         }
         if (type == "agent-turn-complete")
         {
-            // 제안 목록, 제외 목록, 가디언 판정은 사용자 답이 아니다.
-            if (IsMachineResult(Str(ev, "last-assistant-message"))) return null;
             if (IsInternalPrompt(ev)) return null;
+            var preview = CompletionPreview(Str(ev, "last-assistant-message"));
+            if (preview is null) return null;
             var turn = Str(ev, "turn-id");
-            var detail = FirstLine(Str(ev, "last-assistant-message"));
+            var detail = FirstLine(preview);
             if (detail.Length == 0) detail = FolderName(Str(ev, "cwd"));
             return new CodexNotice("completed", "Codex 작업 완료", detail, turn.Length > 0 ? "codex:" + turn : null);
         }
         return null;
     }
 
-    /// <summary>앱이 숨겨 둔 작업의 결과. 키 전체가 이 집합일 때만 거른다.</summary>
-    static bool IsMachineResult(string text)
+    /// <summary>숨은 작업 결과는 null, 커밋·PR 초안은 제목, 일반 답변은 원문을 돌려준다.</summary>
+    static string? CompletionPreview(string text)
     {
-        var trimmed = text.Trim();
-        if (trimmed.Length == 0 || trimmed[0] != '{') return false;
-        try
-        {
-            using var doc = JsonDocument.Parse(trimmed);
-            if (doc.RootElement.ValueKind != JsonValueKind.Object) return false;
-            var count = 0;
-            foreach (var property in doc.RootElement.EnumerateObject())
-            {
-                count++;
-                if (property.Name is not ("suggestions" or "exclude" or "risk_level" or "user_authorization" or "outcome" or "rationale"))
-                    return false;
-            }
-            return count > 0;
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
+        if (!text.TrimStart().StartsWith('{')) return text;
+        var obj = Object(text);
+        if (obj.Count == 0) return text;
+        if (obj.Keys.All(key => key is "suggestions" or "exclude" or "risk_level" or "user_authorization" or "outcome" or "rationale"))
+            return null;
+        if (!obj.TryGetValue("body", out var body) || body.ValueKind != JsonValueKind.String) return text;
+        if (obj.Count == 2 && obj.TryGetValue("title", out var title) && title.ValueKind == JsonValueKind.String)
+            return title.GetString();
+        if (obj.TryGetValue("subject", out var subject) && subject.ValueKind == JsonValueKind.String
+            && (obj.Count == 2 || (obj.Count == 3 && obj.TryGetValue("branch", out var branch) && branch.ValueKind == JsonValueKind.String)))
+            return subject.GetString();
+        return text;
     }
 
     static bool IsInternalPrompt(Dictionary<string, JsonElement> ev)
@@ -346,7 +339,9 @@ public static class HookRelay
         {
             if (item.ValueKind != JsonValueKind.String) continue;
             var text = item.GetString() ?? "";
-            if (text.Contains("Use your image generation tool", StringComparison.Ordinal)
+            if (text.StartsWith("You write concise git commit messages.\n", StringComparison.Ordinal)
+                || text.StartsWith("You write source control change request content.\n", StringComparison.Ordinal)
+                || text.Contains("Use your image generation tool", StringComparison.Ordinal)
                 || text.Contains("Do NOT draw it with code", StringComparison.Ordinal)
                 || text.Contains("APPROVAL REQUEST", StringComparison.Ordinal)
                 || text.Contains("planned coding-agent action", StringComparison.Ordinal))

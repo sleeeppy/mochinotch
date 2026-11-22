@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Xunit;
 
 namespace Mochinotch.Win.Tests;
@@ -478,6 +479,20 @@ public class HookRelayTests
             "",
             new Dictionary<string, string>());
         Assert.Null(picture.Event);
+    }
+
+    [Theory]
+    [InlineData("You write concise git commit messages.", """{"subject":"Fix shelf","body":"- Refresh demo"}""")]
+    [InlineData("You write concise git commit messages.", """{"branch":"fix/shelf","body":"","subject":"Fix shelf"}""")]
+    [InlineData("You write source control change request content.", """{"title":"Fix shelf","body":"## Summary\n- Refresh demo"}""")]
+    public void Codex_drafts_show_the_heading_only_for_user_turns(string prompt, string draft)
+    {
+        var turn = new Dictionary<string, object> { ["type"] = "agent-turn-complete", ["last-assistant-message"] = draft };
+        var options = HookRelay.Options.Parse(["--source", "codex"]);
+        var env = new Dictionary<string, string>();
+        Assert.Equal("Fix shelf", HookRelay.Relay(options, JsonSerializer.Serialize(turn), env).Event?.Detail);
+        turn["input-messages"] = new[] { prompt + "\nReturn a JSON object with keys:" };
+        Assert.Null(HookRelay.Relay(options, JsonSerializer.Serialize(turn), env).Event);
     }
 
     [Fact]
