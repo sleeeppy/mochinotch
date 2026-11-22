@@ -13,7 +13,13 @@ enum T3QuestionWatcher {
             var previous = Set<String>()
             while !Task.isCancelled {
                 let exists = FileManager.default.fileExists(atPath: path)
-                if exists, var rows = pending(path: path, query: query) {
+                let rows: [(id: String, detail: String)]?
+                if exists {
+                    rows = pending(path: path, query: query)
+                } else {
+                    rows = previous.isEmpty ? nil : []
+                }
+                if var rows {
                     if !rows.isEmpty, !HookInstaller.isConnected(.codex) { rows.removeAll() }
                     let live = Set(rows.map(\.id))
                     for id in previous.subtracting(live) {
@@ -34,6 +40,7 @@ enum T3QuestionWatcher {
         var db: OpaquePointer?
         defer { sqlite3_close(db) }
         guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return nil }
+        sqlite3_busy_timeout(db, 200)
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
         guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return nil }

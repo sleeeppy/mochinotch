@@ -229,11 +229,22 @@ public static class HookInstaller
 
     static bool MergeCodex(string home, string exe)
     {
+        var cleanedLegacy = RemoveLegacyCodexPermissionHooks(home);
         var path = Path.Combine(home, ".codex", "config.toml");
         var existing = File.Exists(path) ? File.ReadAllText(path) : "";
         var command = new List<string> { exe, "--hook", "--source", "codex" };
         string updated;
-        if (!TomlNotify.TryFind(existing, out var found))
+        TomlNotify.Found found = default;
+        var hasNotify = false;
+        try
+        {
+            hasNotify = TomlNotify.TryFind(existing, out found);
+        }
+        catch (InvalidDataException)
+        {
+            if (HeadContainsBareNotify(existing)) throw;
+        }
+        if (!hasNotify)
         {
             if (HeadContainsBareNotify(existing))
                 throw new InvalidDataException("Codex 설정의 notify를 읽지 못했어요");
@@ -260,13 +271,67 @@ public static class HookInstaller
             }
             updated = ReplaceNotify(existing, found, command);
         }
-        var changed = false;
+        var changed = cleanedLegacy;
         if (updated != existing)
         {
             Write(path, updated, existing.Length > 0);
             changed = true;
         }
         return changed;
+    }
+
+    /// <summary>예전 버전이 <c>.codex/hooks.json</c>의 <c>PermissionRequest</c>에 넣은 우리 훅만 지운다.</summary>
+    static bool RemoveLegacyCodexPermissionHooks(string home)
+    {
+        var path = Path.Combine(home, ".codex", "hooks.json");
+        if (!File.Exists(path)) return false;
+        var existing = File.ReadAllText(path);
+        if (!existing.Contains("mochinotch", StringComparison.OrdinalIgnoreCase)) return false;
+        JsonObject? root;
+        try
+        {
+            root = JsonNode.Parse(existing) as JsonObject;
+        }
+        catch
+        {
+            return false;
+        }
+        if (root?["hooks"] is not JsonObject hooks || hooks["PermissionRequest"] is not JsonArray groups)
+            return false;
+        var removed = false;
+        var keptGroups = new JsonArray();
+        foreach (var groupNode in groups)
+        {
+            if (groupNode is JsonObject group && group["hooks"] is JsonArray entries)
+            {
+                var keptEntries = new JsonArray();
+                foreach (var entry in entries)
+                {
+                    var cmd = entry?["command"] is JsonValue v && v.TryGetValue<string>(out var text) ? text : null;
+                    if (IsOurs(cmd, "codex")) removed = true;
+                    else keptEntries.Add(entry?.DeepClone());
+                }
+                if (keptEntries.Count > 0)
+                {
+                    var clone = (JsonObject)group.DeepClone();
+                    clone["hooks"] = keptEntries;
+                    keptGroups.Add(clone);
+                }
+            }
+            else
+            {
+                var cmd = groupNode?["command"] is JsonValue v && v.TryGetValue<string>(out var text) ? text : null;
+                if (IsOurs(cmd, "codex")) removed = true;
+                else keptGroups.Add(groupNode?.DeepClone());
+            }
+        }
+        if (!removed) return false;
+        if (keptGroups.Count == 0) hooks.Remove("PermissionRequest");
+        else hooks["PermissionRequest"] = keptGroups;
+        var updated = root.ToJsonString(JsonWrite) + "\n";
+        if (updated == existing) return false;
+        Write(path, updated, backup: true);
+        return true;
     }
 
     static bool SameCommand(IReadOnlyList<string> left, IReadOnlyList<string> right)

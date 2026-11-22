@@ -137,7 +137,8 @@ enum HookInstaller {
             return cursorEvents.allSatisfy { hasRelay(hooks[$0], source: "cursor") }
         case .codex:
             // 다른 도구가 notify를 감싸 우리 명령을 인자 안에 넣어 두기도 한다.
-            return text.contains("mochinotch-notify")
+            guard let found = try? TOMLNotify.find(in: Substring(text)) else { return false }
+            return found.values.contains { $0.contains("mochinotch-notify") }
         case .kiro:
             guard let hooks = (try? jsonObject(text))?["hooks"]?.arrayValue else { return false }
             return hooks.contains { hook in
@@ -185,6 +186,7 @@ enum HookInstaller {
 
     /// 이미 연결해 둔 도구에, 승인 요청 hook이 없으면 그 이벤트만 더한다. 승인은 대신 누르지 않는다.
     static func upgradeInstalledHooks() {
+        _ = removeLegacyCodexPermissionHooks()
         for tool in HookTool.allCases {
             guard hasExistingRelay(tool), !isConnected(tool) else { continue }
             _ = try? merge(tool)
@@ -221,7 +223,8 @@ enum HookInstaller {
 
     /// 고쳤으면 true. 이미 승인 요청까지 연결돼 있으면 파일을 건드리지 않는다.
     private static func merge(_ tool: HookTool) throws -> Bool {
-        if isConnected(tool) { return false }
+        let cleanedLegacy = tool == .codex && removeLegacyCodexPermissionHooks()
+        if isConnected(tool) { return cleanedLegacy }
         let url = home.appendingPathComponent(tool.configPath)
         let manager = FileManager.default
         try manager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -233,7 +236,7 @@ enum HookInstaller {
         case .codex: updated = try mergedCodex(existing ?? "")
         case .kiro: updated = mergedKiro(existing)
         }
-        var changed = false
+        var changed = cleanedLegacy
         if existing != updated {
             if existing != nil {
                 let backup = url.appendingPathExtension("mochinotch.bak")
@@ -244,6 +247,44 @@ enum HookInstaller {
             changed = true
         }
         return changed
+    }
+
+    /// 예전 버전이 `~/.codex/hooks.json`의 `PermissionRequest`에 넣은 우리 훅만 지운다. 다른 도구 훅은 그대로 둔다.
+    @discardableResult
+    static func removeLegacyCodexPermissionHooks() -> Bool {
+        let url = home.appendingPathComponent(".codex/hooks.json")
+        guard let existing = try? String(contentsOf: url, encoding: .utf8),
+              existing.contains("mochinotch-notify"),
+              var root = try? jsonObject(existing),
+              var hooks = root["hooks"],
+              let groups = hooks["PermissionRequest"]?.arrayValue else { return false }
+        var removed = false
+        var keptGroups: [OrderedJSON] = []
+        for var group in groups {
+            if let entries = group["hooks"]?.arrayValue {
+                let filtered = entries.filter { !hasRelay($0, source: "codex") }
+                if filtered.count != entries.count { removed = true }
+                if !filtered.isEmpty {
+                    group["hooks"] = .array(filtered)
+                    keptGroups.append(group)
+                }
+            } else if hasRelay(group, source: "codex") {
+                removed = true
+            } else {
+                keptGroups.append(group)
+            }
+        }
+        guard removed else { return false }
+        hooks["PermissionRequest"] = keptGroups.isEmpty ? nil : .array(keptGroups)
+        root["hooks"] = hooks
+        let updated = root.text() + "\n"
+        guard updated != existing else { return false }
+        let manager = FileManager.default
+        let backup = url.appendingPathExtension("mochinotch.bak")
+        try? manager.removeItem(at: backup)
+        try? manager.copyItem(at: url, to: backup)
+        try? Data(updated.utf8).write(to: url, options: .atomic)
+        return true
     }
 
     private static func hasExistingRelay(_ tool: HookTool) -> Bool {

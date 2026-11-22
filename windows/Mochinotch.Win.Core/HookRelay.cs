@@ -316,8 +316,12 @@ public static class HookRelay
         if (obj.Count == 0) return text;
         if (obj.Keys.All(key => key is "suggestions" or "exclude" or "risk_level" or "user_authorization" or "outcome" or "rationale"))
             return null;
-        // T3 스레드 제목 생성 결과. 다른 에이전트를 쓸 때도 T3가 Codex로 만든다.
+        // T3가 다른 에이전트를 쓸 때도 Codex로 만드는 스레드 제목·받아쓰기 정리·PR 리뷰 가이드 결과.
         if (obj.Count == 2 && obj.ContainsKey("title") && obj.ContainsKey("needsRefinement")) return null;
+        if (obj.Count == 1 && obj.TryGetValue("transcription", out var transcript) && transcript.ValueKind == JsonValueKind.String)
+            return null;
+        if (obj.Count == 1 && obj.TryGetValue("stops", out var stops) && IsReviewGuideStops(stops))
+            return null;
         if (!obj.TryGetValue("body", out var body) || body.ValueKind != JsonValueKind.String) return text;
         if (obj.Count == 2 && obj.TryGetValue("title", out var title) && title.ValueKind == JsonValueKind.String)
             return title.GetString();
@@ -327,20 +331,37 @@ public static class HookRelay
         return text;
     }
 
+    static bool IsReviewGuideStops(JsonElement stops)
+    {
+        if (stops.ValueKind != JsonValueKind.Array || stops.GetArrayLength() == 0) return false;
+        foreach (var stop in stops.EnumerateArray())
+        {
+            if (stop.ValueKind != JsonValueKind.Object) return false;
+            if (!stop.TryGetProperty("order", out _)
+                || !stop.TryGetProperty("title", out var title) || title.ValueKind != JsonValueKind.String
+                || !stop.TryGetProperty("summary", out var summary) || summary.ValueKind != JsonValueKind.String)
+                return false;
+        }
+        return true;
+    }
+
     static bool IsInternalPrompt(Dictionary<string, JsonElement> ev)
     {
         if (!ev.TryGetValue("input-messages", out var inputs) || inputs.ValueKind != JsonValueKind.Array) return false;
         foreach (var item in inputs.EnumerateArray())
         {
             if (item.ValueKind != JsonValueKind.String) continue;
-            var text = item.GetString() ?? "";
-            if (text.StartsWith("You write concise git commit messages.\n", StringComparison.Ordinal)
-                || text.StartsWith("You write source control change request content.\n", StringComparison.Ordinal)
+            var text = (item.GetString() ?? "").Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+            var body = StripLeadingImageAttachments(text);
+            if (body.StartsWith("You write concise git commit messages.\n", StringComparison.Ordinal)
+                || body.StartsWith("You write source control change request content.\n", StringComparison.Ordinal)
                 // T3가 어떤 에이전트를 쓰든 Codex로 돌리는 제목·브랜치·리뷰 가이드·받아쓰기 정리 작업.
-                || text.StartsWith("Generate a title that will help the user recognize this T3 Code thread", StringComparison.Ordinal)
-                || text.StartsWith("Regenerate the title for an existing T3 Code thread", StringComparison.Ordinal)
-                || text.StartsWith("You generate concise git branch names.\n", StringComparison.Ordinal)
-                || text.StartsWith("You prepare a guided tour of change request #", StringComparison.Ordinal)
+                || body.StartsWith("Generate a title that will help the user recognize this T3 Code thread", StringComparison.Ordinal)
+                || body.StartsWith("Regenerate the title for an existing T3 Code thread", StringComparison.Ordinal)
+                || body.StartsWith("You generate concise git branch names.\n", StringComparison.Ordinal)
+                || body.StartsWith("You prepare a guided tour of change request #", StringComparison.Ordinal)
+                || body.StartsWith("The following is the Codex agent history whose request action you are assessing.", StringComparison.Ordinal)
+                || body.StartsWith("The following is the Codex agent history added since your last approval assessment.", StringComparison.Ordinal)
                 || (text.Contains("\n<transcript>\n", StringComparison.Ordinal) && text.Contains("\n<composer_before>\n", StringComparison.Ordinal))
                 || text.Contains("Use your image generation tool", StringComparison.Ordinal)
                 || text.Contains("Do NOT draw it with code", StringComparison.Ordinal)
@@ -349,6 +370,33 @@ public static class HookRelay
                 return true;
         }
         return false;
+    }
+
+    /// <summary>`--image` 첨부가 앞에 붙은 내부 프롬프트도 첫 문장으로 알아본다.</summary>
+    static string StripLeadingImageAttachments(string text)
+    {
+        var span = text.AsSpan();
+        while (true)
+        {
+            while (span.Length > 0 && span[0] is ' ' or '\t' or '\n')
+                span = span[1..];
+            if (span.StartsWith("<image ", StringComparison.Ordinal))
+            {
+                var close = span.IndexOf("</image>", StringComparison.Ordinal);
+                if (close >= 0)
+                {
+                    span = span[(close + "</image>".Length)..];
+                    continue;
+                }
+            }
+            if (span.StartsWith("Codex could not read the local image ", StringComparison.Ordinal))
+            {
+                var newline = span.IndexOf('\n');
+                span = newline >= 0 ? span[(newline + 1)..] : ReadOnlySpan<char>.Empty;
+                continue;
+            }
+            return span.ToString();
+        }
     }
 
     static string WaitingDetail(Dictionary<string, JsonElement> ev)
