@@ -216,16 +216,8 @@ enum HookRelay {
 
     static func codexNotice(_ event: [String: Any]) -> CodexNotice? {
         let type = event["type"] as? String ?? ""
-        let hookName = event["hook_event_name"] as? String ?? ""
-        if hookName == "PermissionRequest" {
-            // 스레드로 띄운 서브에이전트는 명령마다 이 hook이 온다.
-            // 사용자 앞에 승인 창이 열린 것이 아니고, 가디언이 곧 처리할 요청도 들어 있다.
-            // 건마다 확인을 열면 그 턴 내내 노치가 확인으로 다시 펼쳐진다.
-            if (event["agent_id"] as? String).nonEmpty != nil { return nil }
-            let ask = permissionDetail(event)
-            guard !(event["tool_name"] as? String ?? "").isEmpty || !ask.isEmpty else { return nil }
-            return CodexNotice(kind: "needsInput", title: "Codex 확인 필요", detail: ask, dedupeID: nil)
-        }
+        // PermissionRequest는 자동 승인 전에도 발생한다. 사용자 카드가 뜬 경우만 별도로 알린다.
+        if event["hook_event_name"] as? String == "PermissionRequest" { return nil }
         if type == "agent-turn-complete" {
             guard !isInternalPrompt(event["input-messages"]),
                   let preview = completionPreview(event["last-assistant-message"] as? String ?? "") else { return nil }

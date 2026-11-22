@@ -20,7 +20,7 @@ enum SecuritySelfTest {
             ("꺼 둔 Kiro 훅은 유지한다", testDisabledKiroHook),
             ("이벤트 토큰이 다르면 거절한다", testEventToken),
             ("Codex 서브에이전트 승인은 확인으로 올리지 않는다", testCodexSubagentPermissionIsQuiet),
-            ("Codex 본인 승인과 작업 완료는 그대로 올린다", testCodexParentStillNotifies)
+            ("Codex 권한 검사와 실제 완료를 구분한다", testCodexParentStillNotifies)
         ]
         var failed = 0
         for (name, test) in tests {
@@ -230,7 +230,7 @@ enum SecuritySelfTest {
             "agent_id": "",
             "tool_input": ["command": "ls"],
         ]
-        try expect(HookRelay.codexNotice(blank)?.kind == "needsInput", "빈 agent_id를 서브에이전트로 봤다")
+        try expect(HookRelay.codexNotice(blank) == nil, "빈 agent_id의 권한 검사를 올렸다")
     }
 
     private static func testCodexParentStillNotifies() throws {
@@ -239,9 +239,7 @@ enum SecuritySelfTest {
             "tool_name": "Bash",
             "tool_input": ["command": "ls"],
         ]
-        let notice = HookRelay.codexNotice(ask)
-        try expect(notice?.kind == "needsInput", "kind \(notice?.kind ?? "nil")")
-        try expect(notice?.detail == "Bash · ls", "detail \(notice?.detail ?? "nil")")
+        try expect(HookRelay.codexNotice(ask) == nil, "권한 검사만으로 확인을 올렸다")
         try expect(HookRelay.codexNotice(["hook_event_name": "PermissionRequest"]) == nil, "빈 승인을 올렸다")
 
         let done: [String: Any] = [

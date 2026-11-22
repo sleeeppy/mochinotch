@@ -274,7 +274,7 @@ In first-time permissions, or Settings → **Permissions · AI**, press **Connec
 |---|---|---|
 | Claude Code | `~/.claude/settings.json` | Finished, failed, approval, question card |
 | Cursor | `~/.cursor/hooks.json` | Finished, failed, stopped. Question cards arrive as Cursor notifications |
-| Codex | `~/.codex/config.toml`, `~/.codex/hooks.json` | Finished, approval (an existing `notify` still runs) |
+| Codex | `~/.codex/config.toml` | Turn completion and questions or approvals awaiting your response in T3 Code (an existing `notify` still runs) |
 | Kiro | `~/.kiro/hooks/mochinotch.json` | Finished. Kiro doesn’t send a hook for a waiting-for-input screen yet |
 
 The hook calls `~/.local/bin/mochinotch-notify`, and that file calls the app. If you move or update the app, the next launch rewrites only this file, so the connection stays.

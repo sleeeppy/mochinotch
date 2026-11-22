@@ -274,7 +274,7 @@ Dock やメニューバーにはアイコンは出ません。操作はすべて
 |---|---|---|
 | Claude Code | `~/.claude/settings.json` | 作業完了、失敗、承認、質問カード |
 | Cursor | `~/.cursor/hooks.json` | 作業完了、失敗、中断。質問カードは Cursor の通知で受けます |
-| Codex | `~/.codex/config.toml`、`~/.codex/hooks.json` | 作業完了、承認（もともとあった `notify` もそのまま実行されます） |
+| Codex | `~/.codex/config.toml` | 作業完了、T3 Code で応答を待っている質問・承認カード（もともとあった `notify` もそのまま実行されます） |
 | Kiro | `~/.kiro/hooks/mochinotch.json` | 作業完了。入力待ち画面用の hook は、Kiro がまだ送りません |
 
 hook は `~/.local/bin/mochinotch-notify` を呼び、このファイルがアプリを呼んで信号を送ります。アプリを移動したりアップデートしても、次の起動でこのファイルだけ新しい場所に直すので、接続は切れません。

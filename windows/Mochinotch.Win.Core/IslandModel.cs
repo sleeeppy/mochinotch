@@ -149,7 +149,7 @@ public sealed class IslandModel
         var tool = AgentPalette.Parse(incoming.Tool);
         if (string.Equals(incoming.Kind, "resolved", StringComparison.OrdinalIgnoreCase))
         {
-            ResolveWaiting(tool, now);
+            ResolveWaiting(tool, now, incoming.Id);
             return;
         }
         var outcome = AgentPalette.ParseOutcome(incoming.Kind, incoming.Success);
@@ -372,23 +372,25 @@ public sealed class IslandModel
         SetPresentation(Presentation.Idle, now);
     }
 
-    void ResolveWaiting(AgentTool tool, double now)
+    void ResolveWaiting(AgentTool tool, double now, string? id)
     {
-        var was = featured?.Tool == tool && featured.Outcome == AgentOutcome.NeedsInput;
-        if (!RemoveWaiting(tool, keepToasts: false)) return;
+        var previous = featured;
+        if (!RemoveWaiting(tool, keepToasts: false, id: id)) return;
+        var was = previous != featured;
         if (was && !hovering && !ShowSettings)
             SetPresentation(Presentation.Idle, now);
         Revision++;
     }
 
     /// <param name="keepToasts">알림 센터에 아직 떠 있는 확인은 작업이 끝나도 남긴다.</param>
-    bool RemoveWaiting(AgentTool tool, bool keepToasts)
+    bool RemoveWaiting(AgentTool tool, bool keepToasts, string? id = null)
     {
         var removed = notes.RemoveAll(note =>
             note.Tool == tool
             && note.Outcome == AgentOutcome.NeedsInput
+            && (note.Dedupe?.StartsWith("t3:", StringComparison.Ordinal) == true ? note.Dedupe == id : id?.StartsWith("t3:", StringComparison.Ordinal) != true)
             && !(keepToasts && note.Dedupe != null && note.Dedupe.StartsWith("toast:", StringComparison.Ordinal)));
-        if (removed > 0 && featured?.Tool == tool && featured.Outcome == AgentOutcome.NeedsInput)
+        if (removed > 0 && featured != null && !notes.Contains(featured))
             featured = notes.FirstOrDefault();
         return removed > 0;
     }

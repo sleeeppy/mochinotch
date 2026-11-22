@@ -294,14 +294,7 @@ public static class HookRelay
     static CodexNotice? CodexNoticeOf(Dictionary<string, JsonElement> ev)
     {
         var type = Str(ev, "type");
-        if (Str(ev, "hook_event_name") == "PermissionRequest")
-        {
-            // 스레드로 띄운 서브에이전트는 명령마다 이 hook이 온다. 사용자 앞의 승인 창이 아니다.
-            if (Str(ev, "agent_id").Length > 0) return null;
-            var ask = PermissionDetail(ev);
-            if (Str(ev, "tool_name").Length == 0 && ask.Length == 0) return null;
-            return new CodexNotice("needsInput", "Codex 확인 필요", ask, null);
-        }
+        if (Str(ev, "hook_event_name") == "PermissionRequest") return null;
         if (type == "agent-turn-complete")
         {
             if (IsInternalPrompt(ev)) return null;

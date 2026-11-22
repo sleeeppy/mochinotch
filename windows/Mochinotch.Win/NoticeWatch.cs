@@ -26,6 +26,11 @@ sealed class NoticeWatch : IDisposable
         """ + "\0");
 
     readonly Action<IncomingEvent> publish;
+    readonly string t3Path = Path.Combine(
+        Environment.GetEnvironmentVariable("T3CODE_HOME") ?? Path.Combine(HookInstaller.Home, ".t3"),
+        "userdata", "statev2.sqlite");
+    readonly byte[] t3Query;
+    HashSet<string> pendingQuestions = [];
     readonly byte[] databaseUri;
     readonly Dictionary<long, string> open = [];
     Timer? timer;
@@ -35,6 +40,9 @@ sealed class NoticeWatch : IDisposable
     public NoticeWatch(Action<IncomingEvent> publish, string? database = null)
     {
         this.publish = publish;
+        using var stream = typeof(NoticeWatch).Assembly.GetManifestResourceStream("T3PendingRequests.sql")!;
+        using var reader = new StreamReader(stream);
+        t3Query = Encoding.UTF8.GetBytes(reader.ReadToEnd() + "\0");
         database ??= Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Microsoft", "Windows", "Notifications", "wpndatabase.db");
@@ -61,7 +69,13 @@ sealed class NoticeWatch : IDisposable
         if (Interlocked.Exchange(ref busy, 1) == 1) return;
         try
         {
-            var rows = Read();
+            PollT3Questions();
+            var rows = Read(databaseUri, Query, statement =>
+            {
+                var (title, body) = Texts(Column(statement, 3));
+                return new ToastRow(sqlite3_column_int64(statement, 0), Column(statement, 1),
+                    sqlite3_column_int64(statement, 2), title, body);
+            });
             if (rows == null) return;
             var live = new Dictionary<long, string>();
             var fresh = new List<IncomingEvent>();
@@ -105,7 +119,23 @@ sealed class NoticeWatch : IDisposable
         }
     }
 
-    List<ToastRow>? Read()
+    void PollT3Questions()
+    {
+        if (!File.Exists(t3Path) && pendingQuestions.Count == 0) return;
+        var rows = Read(Encoding.UTF8.GetBytes(t3Path + "\0"), t3Query,
+            statement => (Id: "t3:" + Column(statement, 0), Detail: Column(statement, 1)));
+        if (rows == null) return;
+        if (rows.Count > 0 && !HookInstaller.IsConnected(HookInstaller.Home, HookTool.Codex, Environment.ProcessPath ?? ""))
+            rows.Clear();
+        var live = rows.Select(row => row.Id).ToHashSet();
+        foreach (var id in pendingQuestions.Except(live))
+            publish(new IncomingEvent { Id = id, Tool = "codex", Kind = "resolved" });
+        foreach (var row in rows.Where(row => !pendingQuestions.Contains(row.Id)))
+            publish(new IncomingEvent { Id = row.Id, Tool = "codex", Kind = "needsInput", Detail = row.Detail });
+        pendingQuestions = live;
+    }
+
+    static List<T>? Read<T>(byte[] databaseUri, byte[] query, Func<nint, T> row)
     {
         if (sqlite3_open_v2(databaseUri, out var db, OpenReadonly | OpenUri, 0) != 0)
         {
@@ -115,18 +145,17 @@ sealed class NoticeWatch : IDisposable
         try
         {
             sqlite3_busy_timeout(db, 200);
-            if (sqlite3_prepare_v2(db, Query, Query.Length, out var statement, 0) != 0)
+            if (sqlite3_prepare_v2(db, query, query.Length, out var statement, 0) != 0)
                 return null;
             try
             {
-                var rows = new List<ToastRow>();
+                var rows = new List<T>();
                 while (true)
                 {
                     var step = sqlite3_step(statement);
                     if (step == Done) return rows;
                     if (step != Row) return null;
-                    var (title, body) = Texts(Column(statement, 3));
-                    rows.Add(new ToastRow(sqlite3_column_int64(statement, 0), Column(statement, 1), sqlite3_column_int64(statement, 2), title, body));
+                    rows.Add(row(statement));
                 }
             }
             finally

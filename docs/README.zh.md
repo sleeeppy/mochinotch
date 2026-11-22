@@ -274,7 +274,7 @@ Dock 和菜单栏都不会出现图标。所有操作都在刘海上。
 |---|---|---|
 | Claude Code | `~/.claude/settings.json` | 任务完成、失败、批准窗口、问题卡片 |
 | Cursor | `~/.cursor/hooks.json` | 任务完成、失败、停止。问题卡片通过 Cursor 通知接收 |
-| Codex | `~/.codex/config.toml`、`~/.codex/hooks.json` | 任务完成、批准窗口（原来的 `notify` 仍会执行） |
+| Codex | `~/.codex/config.toml` | 任务完成、T3 Code 中等待你回应的问题和审批卡片（原来的 `notify` 仍会执行） |
 | Kiro | `~/.kiro/hooks/mochinotch.json` | 任务完成。等待输入的画面，Kiro 还不会发送 hook |
 
 hook 会调用 `~/.local/bin/mochinotch-notify`，再由这个文件通知应用。即使移动或更新了应用，下次打开时也只会把这个文件改到新位置，连接不会断。

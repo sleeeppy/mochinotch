@@ -137,11 +137,7 @@ enum HookInstaller {
             return cursorEvents.allSatisfy { hasRelay(hooks[$0], source: "cursor") }
         case .codex:
             // 다른 도구가 notify를 감싸 우리 명령을 인자 안에 넣어 두기도 한다.
-            guard text.contains("mochinotch-notify") else { return false }
-            let hooksURL = home.appendingPathComponent(".codex/hooks.json")
-            guard let hooksText = try? String(contentsOf: hooksURL, encoding: .utf8),
-                  let hooks = (try? jsonObject(hooksText))?["hooks"] else { return false }
-            return hasRelay(hooks["PermissionRequest"], source: "codex")
+            return text.contains("mochinotch-notify")
         case .kiro:
             guard let hooks = (try? jsonObject(text))?["hooks"]?.arrayValue else { return false }
             return hooks.contains { hook in
@@ -247,7 +243,6 @@ enum HookInstaller {
             try Data(updated.utf8).write(to: url, options: .atomic)
             changed = true
         }
-        if tool == .codex, try mergeCodexPermissionHooks() { changed = true }
         return changed
     }
 
@@ -394,29 +389,6 @@ enum HookInstaller {
 
     static func previewKiro(_ existing: String?) -> String {
         mergedKiro(existing)
-    }
-
-    /// 완료 알림용 `notify`와 따로, 승인을 물어볼 때만 부르는 hook이다. 결정은 하지 않는다.
-    private static func mergeCodexPermissionHooks() throws -> Bool {
-        let url = home.appendingPathComponent(".codex/hooks.json")
-        let manager = FileManager.default
-        try manager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let existing = try? String(contentsOf: url, encoding: .utf8)
-        var root = try jsonObject(existing ?? "")
-        var hooks = try objectValue(root["hooks"])
-        if hasRelay(hooks["PermissionRequest"], source: "codex") { return false }
-        let entry = OrderedJSON.object([
-            ("hooks", .array([.object([("type", .string("command")), ("command", .string(relayCommand(source: "codex")))])])),
-        ])
-        hooks["PermissionRequest"] = .array(try arrayValue(hooks["PermissionRequest"]) + [entry])
-        root["hooks"] = hooks
-        if existing != nil {
-            let backup = url.appendingPathExtension("mochinotch.bak")
-            try? manager.removeItem(at: backup)
-            try manager.copyItem(at: url, to: backup)
-        }
-        try Data((root.text() + "\n").utf8).write(to: url, options: .atomic)
-        return true
     }
 
     private static func firstTableHeader(in text: String) -> String.Index? {
