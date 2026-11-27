@@ -13,10 +13,11 @@ public sealed record OutgoingEvent(
     string? Id,
     string? BundleID);
 
-public sealed record RelayResult(bool AcknowledgeCursor, OutgoingEvent? Event);
+/// <param name="Reply">표준 출력에 낼 답. Cursor <c>{}</c>와 따로, Antigravity Stop은 <c>decision</c>이 꼭 있어야 한다.</param>
+public sealed record RelayResult(bool AcknowledgeCursor, OutgoingEvent? Event, string? Reply = null);
 
 /// <summary>
-/// <c>Mochinotch --hook --source claude|cursor|codex|kiro</c>.
+/// <c>Mochinotch --hook --source claude|cursor|codex|kiro|antigravity</c>.
 /// 맥 앱의 hook 해석과 같다. 시스템 알림은 만들지 않는다.
 /// </summary>
 public static class HookRelay
@@ -34,11 +35,12 @@ public static class HookRelay
             .ToDictionary(entry => (string)entry.Key, entry => entry.Value?.ToString() ?? "", StringComparer.Ordinal);
         var result = Relay(options, stdin, env);
         if (result.Event != null) Post(result.Event);
-        if (result.AcknowledgeCursor)
+        var reply = result.Reply ?? (result.AcknowledgeCursor ? "{}\n" : null);
+        if (reply != null)
         {
             try
             {
-                Console.Out.Write("{}\n");
+                Console.Out.Write(reply);
                 Console.Out.Flush();
             }
             catch
@@ -180,6 +182,15 @@ public static class HookRelay
                 if (title.Length == 0) title = "Kiro 작업 완료";
                 if (detail.Length == 0) detail = FolderName(Str(stdinEvent, "cwd"));
                 break;
+            case "antigravity":
+                // Stop만 연결한다. 이벤트 이름은 본문에 없다.
+                var stop = AntigravityNoticeOf(stdinEvent);
+                if (tool.Length == 0) tool = "antigravity";
+                if (kind.Length == 0) kind = stop.Kind;
+                if (title.Length == 0) title = stop.Title;
+                if (detail.Length == 0) detail = stop.Detail;
+                if (dedupe == null) dedupe = stop.Dedupe;
+                break;
             case "codex":
                 var codex = argEvent.Count > 0 ? argEvent : stdinEvent;
                 var notice = CodexNoticeOf(codex);
@@ -209,7 +220,8 @@ public static class HookRelay
 
         var outgoing = new OutgoingEvent(tool, title, detail, kind, kind != "failed", dedupe, bundle.Length == 0 ? null : bundle);
         var acknowledge = source == "cursor" && kind is not ("needsInput" or "resolved");
-        return new RelayResult(acknowledge, outgoing);
+        // "continue"만 아니면 그대로 멈춘다.
+        return new RelayResult(acknowledge, outgoing, source == "antigravity" ? "{\"decision\":\"\"}\n" : null);
     }
 
     public static void Post(OutgoingEvent outgoing)
@@ -290,6 +302,30 @@ public static class HookRelay
 
     /// <summary>Codex hook이 노치에 올릴 내용. 올릴 게 없으면 null.</summary>
     readonly record struct CodexNotice(string Kind, string Title, string Detail, string? Dedupe);
+
+    /// <summary><c>terminationReason</c>은 <c>model_stop</c>, <c>max_steps_exceeded</c>, <c>error</c> 같은 값이 온다.</summary>
+    static CodexNotice AntigravityNoticeOf(Dictionary<string, JsonElement> ev)
+    {
+        var reason = Str(ev, "terminationReason").ToLowerInvariant();
+        var error = Str(ev, "error").Trim();
+        var folder = "";
+        if (ev.TryGetValue("workspacePaths", out var paths) && paths.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var path in paths.EnumerateArray())
+            {
+                if (path.ValueKind == JsonValueKind.String) folder = FolderName(path.GetString() ?? "");
+                break;
+            }
+        }
+        var conversation = Str(ev, "conversationId");
+        var execution = ev.TryGetValue("executionNum", out var num) ? num.ToString() : "";
+        var dedupe = conversation.Length > 0 ? $"antigravity:{conversation}:{execution}" : null;
+        if (reason.Contains("cancel") || reason.Contains("abort") || reason.Contains("interrupt"))
+            return new CodexNotice("cancelled", "Antigravity 작업 중단", folder, dedupe);
+        if (error.Length > 0 || reason.Contains("error") || reason.Contains("exceeded"))
+            return new CodexNotice("failed", "Antigravity 작업 실패", error.Length > 0 ? FirstLine(error) : folder, dedupe);
+        return new CodexNotice("completed", "Antigravity 작업 완료", folder, dedupe);
+    }
 
     static CodexNotice? CodexNoticeOf(Dictionary<string, JsonElement> ev)
     {

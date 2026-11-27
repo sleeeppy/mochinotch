@@ -21,6 +21,7 @@ public static class ForegroundAgent
                 "claude" => AgentTool.Claude,
                 "codex" => AgentTool.Codex,
                 "kiro" => AgentTool.Kiro,
+                "antigravity" => AgentTool.Antigravity,
                 _ => null,
             };
         }
@@ -39,6 +40,7 @@ public static class ForegroundAgent
             AgentTool.Claude => new[] { "Claude" },
             AgentTool.Codex => new[] { "Codex" },
             AgentTool.Kiro => new[] { "Kiro" },
+            AgentTool.Antigravity => new[] { "Antigravity" },
             _ => Array.Empty<string>(),
         };
         foreach (var name in names)

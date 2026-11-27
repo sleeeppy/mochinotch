@@ -36,7 +36,7 @@
 
 ### AI 任务结束时
 
-AI 代理（Claude Code、Cursor、Codex、Kiro）做完任务后，刘海会向两侧展开来告诉你。<br/>
+AI 代理（Claude Code、Cursor、Codex、Kiro、Antigravity）做完任务后，刘海会向两侧展开来告诉你。<br/>
 光沿着边缘走一圈，屏幕边缘也会轻轻染上那个应用的颜色。
 
 <p align="center">
@@ -253,12 +253,12 @@ Dock 和菜单栏都不会出现图标。所有操作都在刘海上。
 | 退出应用 | 设置最下面的 **退出** |
 
 - 右边的通知图标在列表展开过一次后，会收回刘海里。
-- 左边的 AI 任务图标，在你把那个应用（Claude、Cursor、Codex、Kiro）调到前面时会消失。
+- 左边的 AI 任务图标，在你把那个应用（Claude、Cursor、Codex、Kiro、Antigravity）调到前面时会消失。
 - 列表只在应用开着的时候积累，最多保留最近 30 条。
 
 ---
 
-### 连接 AI 代理（Claude Code · Cursor · Codex · Kiro）
+### 连接 AI 代理（Claude Code · Cursor · Codex · Kiro · Antigravity）
 
 要让 AI 工具把“任务结束了”发给刘海，每个工具都要装一次 hook。不会调用 AI API，也不会发送对话内容。信号只发到这台 Mac 里的 `127.0.0.1:47321`。
 
@@ -267,7 +267,7 @@ Dock 和菜单栏都不会出现图标。所有操作都在刘海上。
 在初始权限设置，或设置 → **权限 · AI 连接** 里，点 **连接 AI 代理** 的 **连接**。不需要终端，也不需要另外安装 Python。
 
 1. 只会往这台 Mac 上找到的工具的设置文件里写入 hook。修改前会把原文件复制成 `.mochinotch.bak`，已经连接过的文件不会再动。
-2. 正在运行的 Cursor、Claude、Codex 会自动重新打开，马上生效。如果因为有未保存的工作而询问是否退出，不会强行关掉，而是请你自己重新打开。Kiro 会自己重新读取 hook 文件夹，所以不会重新打开。
+2. 正在运行的 Cursor、Claude、Codex、Antigravity 会自动重新打开，马上生效。如果因为有未保存的工作而询问是否退出，不会强行关掉，而是请你自己重新打开。Kiro 会自己重新读取 hook 文件夹，所以不会重新打开。
 3. 终端里的 Claude Code 和 Codex 从新开的会话开始生效。
 
 | 工具 | 文件 | 会通知的事 |
@@ -276,6 +276,7 @@ Dock 和菜单栏都不会出现图标。所有操作都在刘海上。
 | Cursor | `~/.cursor/hooks.json` | 任务完成、失败、停止。问题卡片通过 Cursor 通知接收 |
 | Codex | `~/.codex/config.toml` | 任务完成、T3 Code 中等待你回应的问题和审批卡片（原来的 `notify` 仍会执行） |
 | Kiro | `~/.kiro/hooks/mochinotch.json` | 任务完成。等待输入的画面，Kiro 还不会发送 hook |
+| Antigravity | `~/.gemini/config/hooks.json` 里的 `mochinotch` 项 | 任务完成、失败、中断。应用、IDE 和 `agy` CLI 都读这个文件。其他工具加的项保持不变 |
 
 hook 会调用 `~/.local/bin/mochinotch-notify`，再由这个文件通知应用。即使移动或更新了应用，下次打开时也只会把这个文件改到新位置，连接不会断。
 

@@ -36,7 +36,7 @@ A bolt and the battery percent appear on either side of the notch, then fold awa
 
 ### When AI work finishes
 
-When an AI agent (Claude Code, Cursor, Codex, Kiro) finishes, the notch spreads sideways to tell you. <br/>
+When an AI agent (Claude Code, Cursor, Codex, Kiro, Antigravity) finishes, the notch spreads sideways to tell you. <br/>
 A light travels once around the edge, and the screen edge glows softly in that app’s color.
 
 <p align="center">
@@ -253,12 +253,12 @@ No icon appears in the Dock or the menu bar. Everything happens on the notch.
 | Quit | **Quit** at the bottom of Settings |
 
 - Notification icons on the right tuck back into the notch after you expand the list once.
-- An AI icon on the left disappears when you bring that app (Claude, Cursor, Codex, Kiro) forward.
+- An AI icon on the left disappears when you bring that app (Claude, Cursor, Codex, Kiro, Antigravity) forward.
 - The list lasts only while the app is running, up to the latest 30 items.
 
 ---
 
-### Connect AI agents (Claude Code · Cursor · Codex · Kiro)
+### Connect AI agents (Claude Code · Cursor · Codex · Kiro · Antigravity)
 
 Each tool needs a hook once so it can tell the notch that work finished. No AI API is called and no conversation is sent. Only a “finished” signal goes to `127.0.0.1:47321` on your Mac.
 
@@ -267,7 +267,7 @@ Each tool needs a hook once so it can tell the notch that work finished. No AI A
 In first-time permissions, or Settings → **Permissions · AI**, press **Connect** under **Connect AI agents**. No terminal and no extra install such as Python.
 
 1. Hooks are written only into settings files for tools found on this Mac. The original file is copied to `.mochinotch.bak` first, and a file that is already connected is left alone.
-2. Cursor, Claude, and Codex relaunch themselves when they’re open, so the hook applies right away. If an app asks about unsaved work, it is not forced to quit. You’re asked to relaunch it yourself. Kiro rereads its hook folder and does not relaunch.
+2. Cursor, Claude, Codex, and Antigravity relaunch themselves when they’re open, so the hook applies right away. If an app asks about unsaved work, it is not forced to quit. You’re asked to relaunch it yourself. Kiro rereads its hook folder and does not relaunch.
 3. Claude Code and Codex in the terminal apply from the next session you open.
 
 | Tool | File | What it reports |
@@ -276,6 +276,7 @@ In first-time permissions, or Settings → **Permissions · AI**, press **Connec
 | Cursor | `~/.cursor/hooks.json` | Finished, failed, stopped. Question cards arrive as Cursor notifications |
 | Codex | `~/.codex/config.toml` | Turn completion and questions or approvals awaiting your response in T3 Code (an existing `notify` still runs) |
 | Kiro | `~/.kiro/hooks/mochinotch.json` | Finished. Kiro doesn’t send a hook for a waiting-for-input screen yet |
+| Antigravity | The `mochinotch` entry in `~/.gemini/config/hooks.json` | Finished, failed, or stopped. The app, the IDE, and the `agy` CLI all read this file. Entries from other tools are left alone |
 
 The hook calls `~/.local/bin/mochinotch-notify`, and that file calls the app. If you move or update the app, the next launch rewrites only this file, so the connection stays.
 

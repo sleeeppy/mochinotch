@@ -368,6 +368,33 @@ public class HookRelayTests
     }
 
     [Fact]
+    public void Antigravity_stop_is_a_completion_and_replies_with_a_decision()
+    {
+        var result = HookRelay.Relay(
+            HookRelay.Options.Parse(["--source", "antigravity"]),
+            """{"terminationReason":"model_stop","error":"","fullyIdle":true,"conversationId":"c1","executionNum":2,"workspacePaths":["/work/mochinotch"]}""",
+            new Dictionary<string, string>());
+        Assert.NotNull(result.Event);
+        Assert.Equal("antigravity", result.Event.Tool);
+        Assert.Equal("completed", result.Event.Kind);
+        Assert.Equal("mochinotch", result.Event.Detail);
+        Assert.Equal("antigravity:c1:2", result.Event.Id);
+        Assert.Equal("{\"decision\":\"\"}\n", result.Reply);
+        Assert.False(result.AcknowledgeCursor);
+    }
+
+    [Fact]
+    public void Antigravity_error_stop_is_a_failure()
+    {
+        var result = HookRelay.Relay(
+            HookRelay.Options.Parse(["--source", "antigravity"]),
+            """{"terminationReason":"error","error":"quota exceeded"}""",
+            new Dictionary<string, string>());
+        Assert.Equal("failed", result.Event?.Kind);
+        Assert.Equal("quota exceeded", result.Event?.Detail);
+    }
+
+    [Fact]
     public void Claude_notification_that_is_not_a_question_is_dropped()
     {
         var result = HookRelay.Relay(
@@ -659,6 +686,41 @@ public class HookInstallerTests
         var result = HookInstaller.Install(home, "C:/Mochinotch.exe", [HookTool.Kiro]);
         Assert.Empty(result.Failures);
         Assert.True(HookInstaller.IsConnected(home, HookTool.Kiro, "C:/Mochinotch.exe"));
+    }
+
+    [Fact]
+    public void Antigravity_hook_keeps_other_entries_and_installs_once()
+    {
+        var home = TempHome();
+        var dir = Path.Combine(home, ".gemini", "config");
+        Directory.CreateDirectory(dir);
+        Directory.CreateDirectory(Path.Combine(home, ".gemini", "antigravity-cli"));
+        var path = Path.Combine(dir, "hooks.json");
+        File.WriteAllText(path, """{"other-tool":{"Stop":[{"type":"command","command":"other --stop"}]}}""");
+        Assert.True(HookInstaller.IsPresent(home, HookTool.Antigravity));
+        var first = HookInstaller.Install(home, "C:/Mochinotch.exe", [HookTool.Antigravity]);
+        Assert.Empty(first.Failures);
+        Assert.Contains(HookTool.Antigravity, first.Changed);
+        Assert.True(HookInstaller.IsConnected(home, HookTool.Antigravity, "C:/Mochinotch.exe"));
+        var text = File.ReadAllText(path);
+        Assert.Contains("other --stop", text);
+        Assert.Contains("C:/Mochinotch.exe --hook --source antigravity", text);
+        var second = HookInstaller.Install(home, "C:/Mochinotch.exe", [HookTool.Antigravity]);
+        Assert.Empty(second.Changed);
+        Assert.Equal(text, File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void Antigravity_disabled_entry_is_not_connected_or_reenabled()
+    {
+        var home = TempHome();
+        var dir = Path.Combine(home, ".gemini", "config");
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "hooks.json");
+        File.WriteAllText(path, """{"mochinotch":{"enabled":false,"Stop":[{"type":"command","command":"C:/Mochinotch.exe --hook --source antigravity"}]}}""");
+        Assert.False(HookInstaller.IsConnected(home, HookTool.Antigravity, "C:/Mochinotch.exe"));
+        HookInstaller.Install(home, "C:/Mochinotch.exe", [HookTool.Antigravity]);
+        Assert.Contains("\"enabled\": false", File.ReadAllText(path));
     }
 
     static string TempHome()

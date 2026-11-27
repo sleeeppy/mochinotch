@@ -18,6 +18,8 @@ enum SecuritySelfTest {
             ("Codex notify를 두 번 넣지 않는다", testCodexNotifyIdempotent),
             ("훅 경로는 항상 셸 따옴표로 감싼다", testShellQuote),
             ("꺼 둔 Kiro 훅은 유지한다", testDisabledKiroHook),
+            ("Antigravity 훅은 다른 항목을 두고 한 번만 넣는다", testAntigravityHookMerge),
+            ("Antigravity 종료 이유를 완료·실패·중단으로 나눈다", testAntigravityNotice),
             ("이벤트 토큰이 다르면 거절한다", testEventToken),
             ("Codex 서브에이전트 승인은 확인으로 올리지 않는다", testCodexSubagentPermissionIsQuiet),
             ("Codex 권한 검사와 실제 완료를 구분한다", testCodexParentStillNotifies),
@@ -199,6 +201,40 @@ enum SecuritySelfTest {
         try expect(merged.contains("\"enabled\""), "enabled가 사라졌다")
         try expect(merged.contains("keep"), "extra가 사라졌다")
         }
+    }
+
+    private static func testAntigravityHookMerge() throws {
+        try withHome("/tmp/mochi-audit-home") {
+        let original = """
+        {"other-tool":{"Stop":[{"type":"command","command":"other --stop"}]}}
+        """
+        let merged = try HookInstaller.previewAntigravity(original)
+        let parsed = try OrderedJSON.parse(merged)
+        try expect(parsed["other-tool"]?["Stop"]?.arrayValue?.count == 1, "다른 도구 항목이 바뀌었다")
+        let command = parsed["mochinotch"]?["Stop"]?.arrayValue?.first?["command"]?.stringValue ?? ""
+        try expect(command.contains("--source antigravity"), "Stop 훅이 없다: \(merged)")
+        try expect(try HookInstaller.previewAntigravity(merged) == merged, "두 번 넣었다")
+        let disabled = """
+        {"mochinotch":{"enabled":false,"Stop":[{"type":"command","command":"\(HookInstaller.relayURL.path) --source antigravity"}]}}
+
+        """
+        try expect(try HookInstaller.previewAntigravity(disabled) == disabled, "꺼 둔 항목을 고쳤다")
+        }
+    }
+
+    private static func testAntigravityNotice() throws {
+        let done = HookRelay.antigravityNotice([
+            "terminationReason": "model_stop", "error": "", "conversationId": "c1", "executionNum": 2,
+            "workspacePaths": ["/Users/me/project"],
+        ])
+        try expect(done.kind == "completed" && done.detail == "project", "완료: \(done)")
+        try expect(done.dedupeID == "antigravity:c1:2", "중복 키: \(String(describing: done.dedupeID))")
+        let failed = HookRelay.antigravityNotice(["terminationReason": "error", "error": "quota exceeded"])
+        try expect(failed.kind == "failed" && failed.detail == "quota exceeded", "실패: \(failed)")
+        let steps = HookRelay.antigravityNotice(["terminationReason": "max_steps_exceeded"])
+        try expect(steps.kind == "failed", "단계 초과: \(steps)")
+        let cancelled = HookRelay.antigravityNotice(["terminationReason": "user_cancelled"])
+        try expect(cancelled.kind == "cancelled", "중단: \(cancelled)")
     }
 
     private static func testEventToken() throws {

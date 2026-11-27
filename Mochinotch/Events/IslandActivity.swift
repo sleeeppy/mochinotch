@@ -36,10 +36,11 @@ enum AgentTool: String, Equatable {
     case cursor
     case codex
     case kiro
+    case antigravity
     case custom
 
     /// 완료 연출을 하는 도구.
-    static let agents: [AgentTool] = [.cursor, .claude, .codex, .kiro]
+    static let agents: [AgentTool] = [.cursor, .claude, .codex, .kiro, .antigravity]
 
     var displayName: String {
         switch self {
@@ -47,6 +48,7 @@ enum AgentTool: String, Equatable {
         case .cursor: return "Cursor"
         case .codex: return "Codex"
         case .kiro: return "Kiro"
+        case .antigravity: return "Antigravity"
         case .custom: return "작업"
         }
     }
@@ -61,6 +63,8 @@ enum AgentTool: String, Equatable {
             return ["com.openai.codex"]
         case .kiro:
             return ["dev.kiro.desktop", "dev.kiro.cli"]
+        case .antigravity:
+            return ["com.google.antigravity", "com.google.antigravity-ide"]
         case .custom:
             return []
         }
@@ -78,6 +82,7 @@ enum AgentTool: String, Equatable {
         case .claude: return ["Claude"]
         case .codex: return ["Codex"]
         case .kiro: return ["Kiro", "Kiro CLI"]
+        case .antigravity: return ["Antigravity", "Antigravity IDE"]
         case .custom: return []
         }
     }
@@ -88,6 +93,7 @@ enum AgentTool: String, Equatable {
         case .cursor: return "cursorarrow.rays"
         case .codex: return "terminal.fill"
         case .kiro: return "moon.stars.fill"
+        case .antigravity: return "arrow.up.circle.fill"
         case .custom: return "app.fill"
         }
     }
@@ -98,6 +104,7 @@ enum AgentTool: String, Equatable {
         case .cursor: return IslandColor.cursor
         case .codex: return IslandColor.codex
         case .kiro: return IslandColor.kiro
+        case .antigravity: return IslandColor.antigravity
         case .custom: return Color.white.opacity(0.85)
         }
     }
@@ -109,6 +116,7 @@ enum AgentTool: String, Equatable {
         case .claude: return (0.95, 0.45, 0.27)
         case .codex: return (1, 1, 1)
         case .kiro: return (0.53, 0.30, 0.96)
+        case .antigravity: return (0.26, 0.52, 0.96)
         case .custom: return (1, 1, 1)
         }
     }
@@ -128,6 +136,11 @@ enum AgentTool: String, Equatable {
         case .cursor: return 2.2
         default: return 1
         }
+    }
+
+    /// 쏟아지는 앞머리 빛을 프리즘처럼 무지개로 가르는 세기. 0이면 앱 색 한 가지다.
+    var edgePrism: Double {
+        self == .antigravity ? 1 : 0
     }
 
     /// 이 앱에서 온 시스템 알림은 일반 알림이 아니라 작업 완료로 본다.
@@ -256,7 +269,7 @@ struct IslandActivity: Identifiable, Equatable {
         guard case .notice(let appName, _, _, let bundleID) = payload else { return false }
         if let bundleID, AgentTool.noticeBundleIDs.contains(bundleID) { return true }
         switch appName.lowercased() {
-        case "cursor", "claude", "claude code", "codex", "kiro": return true
+        case "cursor", "claude", "claude code", "codex", "kiro", "antigravity", "antigravity ide": return true
         default: return false
         }
     }
@@ -473,6 +486,7 @@ struct IslandActivity: Identifiable, Equatable {
         case "claude", "claude code": return .claude
         case "codex": return .codex
         case "kiro": return .kiro
+        case "antigravity", "antigravity ide": return .antigravity
         default: return nil
         }
     }

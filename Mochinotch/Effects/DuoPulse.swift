@@ -113,12 +113,14 @@ final class DuoPulse: NSObject {
     private var duration: TimeInterval { Self.fallStart + Self.fallLength }
     private let renderer = LiveRenderer()
 
-    /// `rim`이 1보다 크면 가장자리 색이 화면 끝에 바짝 붙는다. 화면 기록 권한이 없어 못 띄우면 false.
+    /// `rim`이 1보다 크면 가장자리 색이 화면 끝에 바짝 붙는다. `prism`이 0보다 크면 쏟아지는 앞머리가
+    /// 프리즘을 지난 빛처럼 무지개 테로 갈라진다. 화면 기록 권한이 없어 못 띄우면 false.
     @discardableResult
-    func play(tint color: NSColor, rim: Double = 1) -> Bool {
+    func play(tint color: NSColor, rim: Double = 1, prism: Double = 0) -> Bool {
         let rgb = color.usingColorSpace(.sRGB) ?? color
         tint = (rgb.redComponent, rgb.greenComponent, rgb.blueComponent)
         renderer.setRim(rim)
+        renderer.setPrism(prism)
         guard CGPreflightScreenCaptureAccess() else {
             Self.log("preflight denied, prompt skipped")
             return false
@@ -300,6 +302,7 @@ final class DuoPulse: NSObject {
         time: Double,
         tint: (CGFloat, CGFloat, CGFloat),
         rim: Double,
+        prism: Double,
         cornerRadius: CGFloat,
         notch: CGRect
     ) -> CIImage {
@@ -310,6 +313,7 @@ final class DuoPulse: NSObject {
             time: time,
             tint: tint,
             rim: rim,
+            prism: prism,
             cornerRadius: cornerRadius,
             notch: notch
         )
@@ -325,13 +329,18 @@ final class DuoPulse: NSObject {
         time: Double,
         tint: (CGFloat, CGFloat, CGFloat),
         rim: Double,
+        prism: Double,
         cornerRadius: CGFloat,
         notch: CGRect
     ) -> CIImage {
         let pour = pourState(time)
         guard envelope > 0.001 || pour.front > 0.001 else { return source }
-        let wash = CIImage(color: CIColor(red: tint.0, green: tint.1, blue: tint.2, alpha: 1))
+        let solid = CIImage(color: CIColor(red: tint.0, green: tint.1, blue: tint.2, alpha: 1))
             .cropped(to: extent)
+        // 프리즘을 쓰는 도구는 남는 테두리 색에도 무지개를 살짝 섞는다. 앱 색이 대부분이다.
+        let wash = prism > 0.001
+            ? add(scaled(spectrumWash(extent: extent), by: 0.28 * prism), to: scaled(solid, by: 1 - 0.28 * prism))
+            : solid
         let feathered = featheredBorder(extent: extent, cornerRadius: cornerRadius)
         let border = rim > 1.001
             ? feathered.applyingFilter("CIGammaAdjust", parameters: ["inputPower": rim])
@@ -344,7 +353,9 @@ final class DuoPulse: NSObject {
         let poured = multiply(border, spill.reveal)
         let front = multiply(border, spill.front)
         // 가장자리는 0.44. 화면 안쪽 끝은 같은 자리에서 더 부드럽게 0이 된다.
-        let tintMask = add(scaled(front, by: 0.34 * pour.front), to: scaled(poured, by: 0.44 * envelope))
+        // 프리즘을 쓰는 도구는 앱 색을 덜어 무지개가 주인공이 되게 한다.
+        let tintShare = 1 - 0.25 * prism
+        let tintMask = add(scaled(front, by: 0.34 * pour.front * tintShare), to: scaled(poured, by: 0.44 * envelope * tintShare))
         let tinted = wash.applyingFilter("CIBlendWithMask", parameters: [
             kCIInputBackgroundImageKey: source,
             kCIInputMaskImageKey: multiply(tintMask, scaled(poured, by: envelope))
@@ -363,7 +374,34 @@ final class DuoPulse: NSObject {
             "inputBVector": CIVector(x: 0, y: 0, z: (tint.2 + (1 - tint.2) * lift) * strength, w: 0),
             "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1)
         ])
-        return add(light, to: focused).cropped(to: extent)
+        guard prism > 0.001 else { return add(light, to: focused).cropped(to: extent) }
+        // 프리즘. 앱 색 앞머리 바로 앞에 무지개를 붙인다. 바깥부터 빨강·노랑·초록·청록이고, 테를 반씩 겹쳐
+        // 색이 끊기지 않고 앱 색으로 이어진다. 맨 바깥 빨강은 옅게 해 앞 끝이 스며들듯 보이게 한다.
+        let step = reach * 0.45 * 0.5 * 0.22
+        let open = min(1, pour.progress * 4)
+        let spectrum: [(CGFloat, (CGFloat, CGFloat, CGFloat), CGFloat)] = [
+            (4, (1, 0.25, 0.3), 0.45),
+            (3, (1, 0.78, 0.2), 0.75),
+            (2, (0.35, 0.95, 0.45), 0.85),
+            (1, (0.2, 0.85, 1), 0.9),
+        ]
+        let rainbow = CGFloat(0.17 * pour.front * prism)
+        var lit = scaled(light, by: 1 - 0.3 * prism)
+        for (index, color, weight) in spectrum {
+            let masks = pourMasks(
+                origin: origin, reach: reach, progress: pour.progress, extent: extent,
+                offset: index * step * open, band: step * 1.6
+            )
+            let ring = multiply(border, masks.front)
+            let amount = rainbow * weight
+            lit = add(ring.applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: color.0 * amount, y: 0, z: 0, w: 0),
+                "inputGVector": CIVector(x: 0, y: color.1 * amount, z: 0, w: 0),
+                "inputBVector": CIVector(x: 0, y: 0, z: color.2 * amount, w: 0),
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1)
+            ]), to: lit)
+        }
+        return add(lit, to: focused).cropped(to: extent)
     }
 
     /// 색만 더하고 불투명도는 1로 둔다. `CIAdditionCompositing`은 불투명도까지 더해 2가 되고,
@@ -390,10 +428,12 @@ final class DuoPulse: NSObject {
         origin: CGPoint,
         reach: CGFloat,
         progress: CGFloat,
-        extent: CGRect
+        extent: CGRect,
+        offset: CGFloat = 0,
+        band bandOverride: CGFloat? = nil
     ) -> (reveal: CIImage, front: CIImage) {
         let soft = reach * 0.45
-        let radius = progress * (reach + soft)
+        let radius = progress * (reach + soft) + offset * progress
         let center = CIVector(x: origin.x, y: origin.y)
         func disc(inner: CGFloat, outer: CGFloat) -> CIImage {
             CIFilter(name: "CIRadialGradient", parameters: [
@@ -415,9 +455,9 @@ final class DuoPulse: NSObject {
                 "inputPoint4": CIVector(x: 1, y: 1)
             ])
         // 앞은 짧게 밝아지고, 지나간 뒤는 길게 식는다.
-        let band = soft * 0.5
+        let band = bandOverride ?? soft * 0.5
         let outer = disc(inner: radius - band, outer: radius)
-        let inner = disc(inner: radius - band * 4.5, outer: radius - band)
+        let inner = disc(inner: radius - band * (bandOverride == nil ? 4.5 : 2), outer: radius - band)
         let front = inner.applyingFilter("CISubtractBlendMode", parameters: [
             kCIInputBackgroundImageKey: outer
         ])
@@ -435,6 +475,57 @@ final class DuoPulse: NSObject {
             "inputBVector": CIVector(x: 0, y: 0, z: amount, w: 0),
             "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1)
         ])
+    }
+
+    nonisolated(unsafe) private static var spectrumCache: (key: (CGFloat, CGFloat), image: CIImage)?
+
+    /// 화면을 비스듬히 가로지르는 무지개. 왼쪽 위는 노랑·초록, 오른쪽 위는 빨강, 아래는 파랑·보라로,
+    /// Antigravity 로고의 색 흐름을 따른다.
+    nonisolated private static func spectrumWash(extent: CGRect) -> CIImage {
+        let key = (extent.width, extent.height)
+        if let cached = spectrumCache, cached.key == key { return cached.image }
+        let width = 96, height = 64
+        let stops: [(CGFloat, (CGFloat, CGFloat, CGFloat))] = [
+            (0, (0.30, 0.42, 1)),
+            (0.35, (0.20, 0.80, 0.95)),
+            (0.55, (0.35, 0.90, 0.45)),
+            (0.72, (1, 0.82, 0.25)),
+            (1, (1, 0.35, 0.30)),
+        ]
+        func color(_ t: CGFloat) -> (CGFloat, CGFloat, CGFloat) {
+            let t = min(1, max(0, t))
+            for index in 1..<stops.count where t <= stops[index].0 {
+                let (a, ca) = stops[index - 1], (b, cb) = stops[index]
+                let f = smoothstep(0, 1, (t - a) / max(b - a, 0.0001))
+                return (ca.0 + (cb.0 - ca.0) * f, ca.1 + (cb.1 - ca.1) * f, ca.2 + (cb.2 - ca.2) * f)
+            }
+            return stops[stops.count - 1].1
+        }
+        var bytes = [UInt8](repeating: 255, count: width * height * 4)
+        for y in 0..<height {
+            for x in 0..<width {
+                // y는 아래에서 위로 간다. 위로 갈수록, 오른쪽으로 갈수록 따뜻한 색.
+                let u = CGFloat(x) / CGFloat(width - 1), v = CGFloat(y) / CGFloat(height - 1)
+                let c = color(v * 0.75 + u * 0.35 - 0.05)
+                let index = (y * width + x) * 4
+                bytes[index] = UInt8(c.0 * 255)
+                bytes[index + 1] = UInt8(c.1 * 255)
+                bytes[index + 2] = UInt8(c.2 * 255)
+            }
+        }
+        let image = CIImage(
+            bitmapData: Data(bytes),
+            bytesPerRow: width * 4,
+            size: CGSize(width: width, height: height),
+            format: .RGBA8,
+            colorSpace: CGColorSpaceCreateDeviceRGB()
+        )
+        .transformed(by: CGAffineTransform(scaleX: extent.width / CGFloat(width), y: extent.height / CGFloat(height)))
+        .clampedToExtent()
+        .applyingGaussianBlur(sigma: min(extent.width, extent.height) * 0.04)
+        .cropped(to: extent)
+        spectrumCache = (key, image)
+        return image
     }
 
     /// 도달 거리는 그대로 두고, 화면 안쪽 끝만 흐린다.
@@ -597,6 +688,10 @@ private final class LiveRenderer: NSObject, SCStreamOutput {
         state.withLock { $0.rim = rim }
     }
 
+    func setPrism(_ prism: Double) {
+        state.withLock { $0.prism = prism }
+    }
+
     /// 이번 효과에서 한 프레임이라도 그렸는지.
     var hasPresented: Bool {
         state.withLock { $0.presented }
@@ -616,6 +711,7 @@ private final class LiveRenderer: NSObject, SCStreamOutput {
             time: visuals.time,
             tint: visuals.tint,
             rim: visuals.rim,
+            prism: visuals.prism,
             cornerRadius: visuals.cornerRadius,
             notch: Visuals.notchPixels(visuals.notch, points: visuals.points, extent: source.extent)
         )
@@ -639,6 +735,7 @@ private struct Visuals: Sendable {
     var time = 0.0
     var tint = (CGFloat(0.5), CGFloat(0.5), CGFloat(0.5))
     var rim = 1.0
+    var prism = 0.0
     var cornerRadius: CGFloat = 32
     /// 화면 원점 기준 포인트. 노치가 없으면 zero.
     var notch = CGRect.zero

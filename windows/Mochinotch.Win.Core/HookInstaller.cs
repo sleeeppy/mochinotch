@@ -10,6 +10,7 @@ public enum HookTool
     Cursor,
     Codex,
     Kiro,
+    Antigravity,
 }
 
 public sealed record ToolLink(HookTool Tool, bool Present, bool Connected);
@@ -22,7 +23,7 @@ public sealed class InstallResult
 }
 
 /// <summary>
-/// Cursor, Claude, Codex, Kiro의 hook만 넣는다. Windows 알림은 읽지 않는다.
+/// Cursor, Claude, Codex, Kiro, Antigravity의 hook만 넣는다. Windows 알림은 읽지 않는다.
 /// </summary>
 public static class HookInstaller
 {
@@ -62,8 +63,7 @@ public static class HookInstaller
 
     public static bool IsPresent(string home, HookTool tool)
     {
-        var folder = Path.Combine(home, ConfigFolder(tool));
-        if (Directory.Exists(folder)) return true;
+        if (PresenceFolders(tool).Any(folder => Directory.Exists(Path.Combine(home, folder)))) return true;
         return KnownExecutable(tool).Any(File.Exists);
     }
 
@@ -77,6 +77,7 @@ public static class HookInstaller
                 HookTool.Cursor => EventsConnected(Read(Path.Combine(home, ".cursor", "hooks.json")), "hooks", CursorEvents, "cursor", exe),
                 HookTool.Kiro => KiroConnected(Read(Path.Combine(home, ".kiro", "hooks", "mochinotch.json")), exe),
                 HookTool.Codex => CodexConnected(home, exe),
+                HookTool.Antigravity => AntigravityConnected(Read(AntigravityPath(home)), exe),
                 _ => false,
             };
         }
@@ -108,8 +109,51 @@ public static class HookInstaller
             }),
             HookTool.Kiro => MergeKiro(home, exe),
             HookTool.Codex => MergeCodex(home, exe),
+            HookTool.Antigravity => MergeAntigravity(home, exe),
             _ => false,
         };
+    }
+
+    static string AntigravityPath(string home) => Path.Combine(home, ".gemini", "config", "hooks.json");
+
+    /// <summary>
+    /// 이름 하나에 이벤트를 묶는 파일이라, 다른 도구 항목은 두고 <c>mochinotch</c>에 <c>Stop</c>만 넣는다.
+    /// 버전에 따라 <c>PreToolUse</c>가 읽히지 않고, 잘못 답하면 도구 호출이 막힌다. 꺼 둔 항목은 켜지 않는다.
+    /// </summary>
+    static bool MergeAntigravity(string home, string exe)
+    {
+        var path = AntigravityPath(home);
+        var existing = File.Exists(path) ? File.ReadAllText(path) : "";
+        var root = ParseObject(existing);
+        var command = Command(exe, "antigravity");
+        var found = false;
+        foreach (var pair in root)
+        {
+            if (pair.Value is JsonObject entry && entry["Stop"] is JsonArray stops && Retarget(stops, "antigravity", command))
+                found = true;
+        }
+        if (!found)
+        {
+            var entry = Object(root, "mochinotch");
+            Array(entry, "Stop").Add(new JsonObject
+            {
+                ["type"] = "command",
+                ["command"] = command,
+                ["timeout"] = 10,
+            });
+        }
+        var updated = root.ToJsonString(JsonWrite) + "\n";
+        if (existing == updated) return false;
+        Write(path, updated, existing.Length > 0);
+        return true;
+    }
+
+    static bool AntigravityConnected(string? text, string exe)
+    {
+        if (text == null || JsonNode.Parse(text) is not JsonObject root) return false;
+        return root.Any(pair => pair.Value is JsonObject entry
+            && !IsDisabled(entry)
+            && ContainsOurs(entry["Stop"], "antigravity", exe));
     }
 
     static bool MergeJson(string path, Action<JsonObject> edit)
@@ -467,8 +511,14 @@ public static class HookInstaller
         HookTool.Cursor => ".cursor",
         HookTool.Codex => ".codex",
         HookTool.Kiro => ".kiro",
+        HookTool.Antigravity => Path.Combine(".gemini", "antigravity"),
         _ => "",
     };
+
+    /// <summary><c>.gemini</c>는 Gemini CLI도 쓰니 Antigravity 폴더만 본다.</summary>
+    static IEnumerable<string> PresenceFolders(HookTool tool) => tool == HookTool.Antigravity
+        ? [Path.Combine(".gemini", "antigravity"), Path.Combine(".gemini", "antigravity-cli"), Path.Combine(".gemini", "antigravity-ide")]
+        : [ConfigFolder(tool)];
 
     static IEnumerable<string> KnownExecutable(HookTool tool)
     {
@@ -488,6 +538,9 @@ public static class HookInstaller
                 break;
             case HookTool.Kiro:
                 yield return Path.Combine(local, "Programs", "Kiro", "Kiro.exe");
+                break;
+            case HookTool.Antigravity:
+                yield return Path.Combine(local, "Programs", "Antigravity", "Antigravity.exe");
                 break;
         }
     }
