@@ -31,7 +31,7 @@
 
 ### AI 작업이 끝나면
 
-AI Agent(Claude Code, Cursor, Codex, Kiro)가 작업을 마치면 노치가 옆으로 펼쳐지며 알려 줍니다. <br/>
+AI Agent(Claude Code, Cursor, Codex, Kiro, Antigravity)가 작업을 마치면 노치가 옆으로 펼쳐지며 알려 줍니다. <br/>
 테두리를 따라 빛이 한 바퀴 돌고, 화면 가장자리까지 그 앱 색으로 은은하게 빛나요.
 
 <p align="center">
@@ -256,7 +256,7 @@ Dock이나 메뉴 막대에는 아이콘이 생기지 않아요. 모든 조작�
 | 앱 끄기 | 설정 맨 아래 **종료** |
 
 - 오른쪽 알림 아이콘은 목록을 한 번 펼쳐 보면 노치 안으로 들어갑니다.
-- 왼쪽 AI 작업 아이콘은 그 앱(Claude, Cursor, Codex, Kiro)을 앞으로 가져오면 사라집니다.
+- 왼쪽 AI 작업 아이콘은 그 앱(Claude, Cursor, Codex, Kiro, Antigravity)을 앞으로 가져오면 사라집니다.
 - 목록은 앱을 켜 둔 동안만 쌓이고, 최근 30개까지 남습니다.
 
 ---
@@ -270,7 +270,7 @@ AI 도구가 작업을 끝냈다는 신호를 노치로 보내려면 각 도구�
 초기 권한 설정이나 설정 → **권한 · AI 연결**에서 **AI 에이전트 연결**의 **연결**을 누르세요. 터미널도, python 같은 추가 설치도 필요 없어요.
 
 1. 이 맥에서 찾은 도구의 설정 파일에만 hook을 넣습니다. 고치기 전에 원래 파일을 `.mochinotch.bak`으로 복사하고, 이미 연결된 파일은 건드리지 않아요.
-2. 켜져 있는 Cursor, Claude, Codex 앱은 저절로 다시 켜서 바로 적용합니다. 저장하지 않은 작업이 있어 앱이 종료를 물어보면 억지로 끄지 않고, 직접 다시 켜 달라고 알려 줘요. Kiro는 hook 폴더를 스스로 다시 읽어서 다시 켜지 않아요.
+2. 켜져 있는 Cursor, Claude, Codex, Antigravity 앱은 저절로 다시 켜서 바로 적용합니다. 저장하지 않은 작업이 있어 앱이 종료를 물어보면 억지로 끄지 않고, 직접 다시 켜 달라고 알려 줘요. Kiro는 hook 폴더를 스스로 다시 읽어서 다시 켜지 않아요.
 3. 터미널에서 쓰는 Claude Code와 Codex는 새로 여는 세션부터 적용돼요.
 
 | 도구 | 파일 | 알려 주는 것 |
@@ -279,6 +279,7 @@ AI 도구가 작업을 끝냈다는 신호를 노치로 보내려면 각 도구�
 | Cursor | `~/.cursor/hooks.json` | 작업 완료, 실패, 중단. 질문 카드는 Cursor 알림으로 받아요 |
 | Codex | `~/.codex/config.toml` | 작업 완료, T3 Code에서 응답을 기다리는 질문·승인 카드 (원래 있던 `notify`도 그대로 실행돼요) |
 | Kiro | `~/.kiro/hooks/mochinotch.json` | 작업 완료. 입력 대기 화면용 hook은 Kiro가 아직 보내지 않아요 |
+| Antigravity | `~/.gemini/config/hooks.json`의 `mochinotch` 항목 | 작업 완료·실패·중단. 앱, IDE, `agy` CLI가 같은 파일을 읽어요. 다른 도구가 넣은 항목은 그대로 둬요 |
 
 hook은 `~/.local/bin/mochinotch-notify`를 부르고, 이 파일이 앱을 불러 신호를 보냅니다. 앱을 옮기거나 업데이트해도 다음에 켤 때 이 파일만 새 위치로 고쳐서 연결이 끊기지 않아요.
 

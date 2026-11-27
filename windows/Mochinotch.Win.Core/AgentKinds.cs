@@ -6,6 +6,7 @@ public enum AgentTool
     Cursor,
     Codex,
     Kiro,
+    Antigravity,
     Custom,
 }
 
@@ -37,6 +38,7 @@ public static class AgentPalette
         AgentTool.Cursor => "Cursor",
         AgentTool.Codex => "Codex",
         AgentTool.Kiro => "Kiro",
+        AgentTool.Antigravity => "Antigravity",
         _ => "작업",
     };
 
@@ -48,6 +50,7 @@ public static class AgentPalette
         AgentTool.Cursor => "C",
         AgentTool.Codex => "O",
         AgentTool.Kiro => "K",
+        AgentTool.Antigravity => "G",
         _ => "•",
     };
 
@@ -58,6 +61,7 @@ public static class AgentPalette
         AgentTool.Cursor => new(0.486, 0.361, 0.988),
         AgentTool.Codex => new(0.133, 0.773, 0.369),
         AgentTool.Kiro => new(0.53, 0.30, 0.96),
+        AgentTool.Antigravity => new(0.26, 0.52, 0.96),
         _ => new(0.85, 0.85, 0.85),
     };
 
@@ -68,6 +72,7 @@ public static class AgentPalette
         AgentTool.Claude => new(0.95, 0.45, 0.27),
         AgentTool.Codex => new(1, 1, 1),
         AgentTool.Kiro => new(0.53, 0.30, 0.96),
+        AgentTool.Antigravity => new(0.26, 0.52, 0.96),
         _ => Rgb.White,
     };
 
@@ -99,6 +104,7 @@ public static class AgentPalette
         "cursor" => AgentTool.Cursor,
         "codex" => AgentTool.Codex,
         "kiro" => AgentTool.Kiro,
+        "antigravity" => AgentTool.Antigravity,
         _ => AgentTool.Custom,
     };
 
@@ -108,6 +114,7 @@ public static class AgentPalette
         AgentTool.Cursor => "cursor",
         AgentTool.Codex => "codex",
         AgentTool.Kiro => "kiro",
+        AgentTool.Antigravity => "antigravity",
         _ => "custom",
     };
 

@@ -1,6 +1,6 @@
 import Foundation
 
-/// `Mochinotch --hook --source claude|cursor|codex`. AI 도구의 hook이 부르면 작업 완료를 노치로 보낸다.
+/// `Mochinotch --hook --source claude|cursor|codex|kiro|antigravity`. AI 도구의 hook이 부르면 작업 완료를 노치로 보낸다.
 /// 앱이 꺼져 있으면 조용히 끝난다. python 없이 돈다.
 enum HookRelay {
     static func run(_ arguments: [String]) -> Int32 {
@@ -35,6 +35,12 @@ enum HookRelay {
         }
         // Cursor hook은 표준 출력에 {} 만 내야 이어서 질문을 던지지 않는다.
         // 승인 hook은 {} 를 내면 명령이 막힐 수 있어, 완료 hook만 응답한다.
+        // Antigravity Stop hook은 `decision`을 꼭 받아야 한다. "continue"만 아니면 그대로 멈춘다.
+        if options.source == "antigravity" {
+            relay(options)
+            FileHandle.standardOutput.write(Data("{\"decision\":\"\"}\n".utf8))
+            return 0
+        }
         let acknowledgeCursor = relay(options)
         if acknowledgeCursor {
             FileHandle.standardOutput.write(Data("{}\n".utf8))
@@ -55,6 +61,7 @@ enum HookRelay {
     }
 
     /// 완료 hook이면 Cursor에 `{}`를 돌려줘야 하면 true. 승인 요청은 결정을 하지 않는다.
+    @discardableResult
     private static func relay(_ options: Options) -> Bool {
         let environment = ProcessInfo.processInfo.environment
         let argPayload = options.positional.last ?? ""
@@ -174,6 +181,14 @@ enum HookRelay {
             if kind.isEmpty { kind = "completed" }
             if title.isEmpty { title = "Kiro 작업 완료" }
             if detail.isEmpty { detail = folderName(stdinEvent["cwd"] as? String) }
+        case "antigravity":
+            // Stop만 연결한다. 이벤트 이름은 본문에 없다.
+            if tool.isEmpty { tool = "antigravity" }
+            let notice = Self.antigravityNotice(stdinEvent)
+            if kind.isEmpty { kind = notice.kind }
+            if title.isEmpty { title = notice.title }
+            if detail.isEmpty { detail = notice.detail }
+            if dedupeID == nil { dedupeID = notice.dedupeID }
         case "codex":
             let event = argEvent.isEmpty ? stdinEvent : argEvent
             // 답변 시작, 일반 알림, 종류가 비어 있는 호출은 완료가 아니다.
@@ -239,6 +254,24 @@ enum HookRelay {
             )
         }
         return nil
+    }
+
+    /// Antigravity `Stop` 본문. `terminationReason`은 `model_stop`, `max_steps_exceeded`, `error` 같은 값이 온다.
+    static func antigravityNotice(_ event: [String: Any]) -> CodexNotice {
+        let reason = (event["terminationReason"] as? String ?? "").lowercased()
+        let error = (event["error"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let folder = folderName((event["workspacePaths"] as? [Any])?.first as? String)
+        let dedupeID = (event["conversationId"] as? String).nonEmpty.map { conversation in
+            "antigravity:\(conversation):\(event["executionNum"].map { String(describing: $0) } ?? "")"
+        }
+        if ["cancel", "abort", "interrupt"].contains(where: reason.contains) {
+            return CodexNotice(kind: "cancelled", title: "Antigravity 작업 중단", detail: folder, dedupeID: dedupeID)
+        }
+        if !error.isEmpty || reason.contains("error") || reason.contains("exceeded") {
+            let detail = error.isEmpty ? folder : firstLine(error)
+            return CodexNotice(kind: "failed", title: "Antigravity 작업 실패", detail: detail, dedupeID: dedupeID)
+        }
+        return CodexNotice(kind: "completed", title: "Antigravity 작업 완료", detail: folder, dedupeID: dedupeID)
     }
 
     /// 숨은 작업 결과는 nil, 커밋·PR 초안은 제목, 일반 답변은 원문을 돌려준다.

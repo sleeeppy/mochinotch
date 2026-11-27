@@ -1194,6 +1194,7 @@ struct ReleaseNotes: Equatable {
         let text = "\(notice.title)\n\(notice.subtitle)\n\(notice.body)".lowercased()
         guard text.contains("permission required") else { return nil }
         if text.contains("kiro") { return .kiro }
+        if text.contains("antigravity") || text.contains("agy") { return .antigravity }
         if text.contains("claude") { return .claude }
         if text.contains("codex") { return .codex }
         if text.contains("cursor") { return .cursor }
@@ -1544,7 +1545,7 @@ struct ReleaseNotes: Equatable {
             return NSColor(srgbRed: 1, green: 0.271, blue: 0.227, alpha: 1)
         }
         switch tool {
-        case .cursor, .claude, .codex, .kiro:
+        case .cursor, .claude, .codex, .kiro, .antigravity:
             let rgb = tool.edgeTintRGB
             return NSColor(srgbRed: rgb.0, green: rgb.1, blue: rgb.2, alpha: 1)
         case .custom:
@@ -1821,7 +1822,11 @@ struct ReleaseNotes: Equatable {
         if case .agent(let tool, let outcome, _, _, _) = activity.payload,
            tool.playsDuo, outcome != .cancelled, outcome != .needsInput {
             let tint = Self.duoTint(for: tool, outcome: outcome)
-            let playedScreen = playsScreenEffect && DuoPulse.shared.play(tint: tint, rim: outcome == .failed ? 1 : tool.edgeRim)
+            let playedScreen = playsScreenEffect && DuoPulse.shared.play(
+                tint: tint,
+                rim: outcome == .failed ? 1 : tool.edgeRim,
+                prism: outcome == .failed ? 0 : tool.edgePrism
+            )
             if !playedScreen {
                 let rgb = tint.usingColorSpace(.sRGB) ?? tint
                 let lift = 0.42

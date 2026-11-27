@@ -623,6 +623,7 @@ sealed class SettingsWindow : Window
         HookTool.Cursor => AgentTool.Cursor,
         HookTool.Codex => AgentTool.Codex,
         HookTool.Kiro => AgentTool.Kiro,
+        HookTool.Antigravity => AgentTool.Antigravity,
         _ => AgentTool.Custom,
     };
 

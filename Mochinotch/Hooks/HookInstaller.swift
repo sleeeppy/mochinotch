@@ -6,6 +6,7 @@ enum HookTool: String, CaseIterable, Sendable {
     case cursor
     case codex
     case kiro
+    case antigravity
 
     var displayName: String {
         switch self {
@@ -13,6 +14,7 @@ enum HookTool: String, CaseIterable, Sendable {
         case .cursor: return "Cursor"
         case .codex: return "Codex"
         case .kiro: return "Kiro"
+        case .antigravity: return "Antigravity"
         }
     }
 
@@ -23,6 +25,7 @@ enum HookTool: String, CaseIterable, Sendable {
         case .cursor: return ["com.todesktop.230313mzl4w4u92"]
         case .codex: return ["com.openai.codex"]
         case .kiro: return ["dev.kiro.desktop", "dev.kiro.cli"]
+        case .antigravity: return ["com.google.antigravity", "com.google.antigravity-ide"]
         }
     }
 
@@ -37,6 +40,7 @@ enum HookTool: String, CaseIterable, Sendable {
         case .cursor: return ".cursor/hooks.json"
         case .codex: return ".codex/config.toml"
         case .kiro: return ".kiro/hooks/mochinotch.json"
+        case .antigravity: return ".gemini/config/hooks.json"
         }
     }
 
@@ -46,6 +50,15 @@ enum HookTool: String, CaseIterable, Sendable {
         case .cursor: return ["cursor-agent"]
         case .codex: return ["codex"]
         case .kiro: return ["kiro-cli"]
+        case .antigravity: return ["agy"]
+        }
+    }
+
+    /// 있으면 이 도구를 쓴다고 보는 폴더. `~/.gemini`는 Gemini CLI도 쓰니 Antigravity 폴더만 본다.
+    fileprivate var presenceFolders: [String] {
+        switch self {
+        case .antigravity: return [".gemini/antigravity", ".gemini/antigravity-cli", ".gemini/antigravity-ide"]
+        default: return [String(configPath.prefix { $0 != "/" })]
         }
     }
 }
@@ -112,8 +125,9 @@ enum HookInstaller {
 
     static func isPresent(_ tool: HookTool) -> Bool {
         let manager = FileManager.default
-        let folder = home.appendingPathComponent(String(tool.configPath.prefix { $0 != "/" }))
-        if manager.fileExists(atPath: folder.path) { return true }
+        if tool.presenceFolders.contains(where: { manager.fileExists(atPath: home.appendingPathComponent($0).path) }) {
+            return true
+        }
         if tool.appBundleIDs.contains(where: { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil }) {
             return true
         }
@@ -144,6 +158,12 @@ enum HookInstaller {
             return hooks.contains { hook in
                 if case .bool(false)? = hook["enabled"] { return false }
                 return hook["trigger"]?.stringValue == "Stop" && hasRelay(hook["action"], source: "kiro")
+            }
+        case .antigravity:
+            guard case .object(let entries)? = try? jsonObject(text) else { return false }
+            return entries.contains { _, entry in
+                if case .bool(false)? = entry["enabled"] { return false }
+                return hasRelay(entry["Stop"], source: "antigravity")
             }
         }
     }
@@ -210,6 +230,7 @@ enum HookInstaller {
         APP=\(shellQuoted(executable))
         if [ ! -x "$APP" ]; then
           [ "$1" = "--source" ] && [ "$2" = "cursor" ] && printf '{}\\n'
+          [ "$1" = "--source" ] && [ "$2" = "antigravity" ] && printf '{"decision":""}\\n'
           exit 0
         fi
         exec "$APP" --hook "$@"
@@ -235,6 +256,7 @@ enum HookInstaller {
         case .cursor: updated = try mergedCursor(existing)
         case .codex: updated = try mergedCodex(existing ?? "")
         case .kiro: updated = mergedKiro(existing)
+        case .antigravity: updated = try mergedAntigravity(existing)
         }
         var changed = cleanedLegacy
         if existing != updated {
@@ -366,6 +388,26 @@ enum HookInstaller {
         return OrderedJSON.object([("version", .string("v1")), ("hooks", .array([hook]))]).text() + "\n"
     }
 
+    /// 이름 하나에 이벤트를 묶는 파일이라, 다른 도구가 넣은 항목은 그대로 두고 `mochinotch`만 넣는다.
+    /// 완료는 `Stop` 하나로 받는다. 버전에 따라 `PreToolUse`가 읽히지 않고, 잘못 답하면 도구 호출이 막힌다.
+    /// 사용자가 꺼 둔 항목은 다시 켜지 않는다.
+    private static func mergedAntigravity(_ existing: String?) throws -> String {
+        var root = try jsonObject(existing ?? "")
+        guard case .object(let entries) = root else { throw InstallError.unreadable }
+        let ours = entries.contains { _, entry in hasRelay(entry["Stop"], source: "antigravity") }
+        if ours, let existing { return existing.hasSuffix("\n") ? existing : existing + "\n" }
+        var entry = try objectValue(root[antigravityHookName])
+        entry["Stop"] = .array(try arrayValue(entry["Stop"]) + [.object([
+            ("type", .string("command")),
+            ("command", .string(relayCommand(source: "antigravity"))),
+            ("timeout", .number("10")),
+        ])])
+        root[antigravityHookName] = entry
+        return root.text() + "\n"
+    }
+
+    private static let antigravityHookName = "mochinotch"
+
     private static func objectValue(_ value: OrderedJSON?) throws -> OrderedJSON {
         guard let value else { return .object([]) }
         guard case .object = value else { throw InstallError.unreadable }
@@ -430,6 +472,10 @@ enum HookInstaller {
 
     static func previewKiro(_ existing: String?) -> String {
         mergedKiro(existing)
+    }
+
+    static func previewAntigravity(_ existing: String?) throws -> String {
+        try mergedAntigravity(existing)
     }
 
     private static func firstTableHeader(in text: String) -> String.Index? {

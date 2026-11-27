@@ -527,6 +527,7 @@ public sealed class IslandModel
         HookTool.Cursor => "Cursor",
         HookTool.Codex => "Codex",
         HookTool.Kiro => "Kiro",
+        HookTool.Antigravity => "Antigravity",
         _ => "",
     };
 
