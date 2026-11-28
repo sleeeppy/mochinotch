@@ -659,15 +659,33 @@ final class AppModel {
     }
 
     /// 받아서 바꿔 넣을 수 있으면 바로 하고, 아니면 릴리즈 페이지를 연다.
+    /// 누른 순간 최신 릴리즈를 다시 읽는다. 오래 켜 둔 앱이 예전에 본 버전을 받으면 업데이트를 두 번 해야 한다.
     func openUpdate() {
         guard !installingUpdate else { return }
-        guard let release = latestRelease, release.dmg != nil, AppUpdater.canReplace() else {
+        guard let known = latestRelease, known.dmg != nil, AppUpdater.canReplace() else {
             openReleasePage()
             return
         }
         updateProgress = 0
-        featureUpdate(release.version)
+        featureUpdate(known.version)
+        let local = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
         Task { @MainActor [weak self] in
+            var release = known
+            switch await Self.githubUpdateAvailable(local: local) {
+            case .newer(let fresh) where fresh.dmg != nil:
+                release = fresh
+                self?.latestRelease = fresh
+                self?.featureUpdate(fresh.version)
+            case .current:
+                // 그사이 이미 최신이 됐다. 받을 것이 없다.
+                self?.updateProgress = nil
+                self?.updateAvailable = false
+                self?.activities.removeAll(where: \.isUpdateNotice)
+                return
+            default:
+                // 지금 못 읽으면 알고 있던 버전이라도 받는다.
+                break
+            }
             do {
                 try await AppUpdater.prepare(release) { value in
                     Task { @MainActor in
@@ -687,11 +705,15 @@ final class AppModel {
 
     /// 받는 동안 진행을 보여 줄 업데이트 줄. 목록에서 지웠으면 다시 넣는다.
     private func featureUpdate(_ tag: String) {
-        if let existing = activities.first(where: \.isUpdateNotice) {
-            featuredID = existing.id
-            return
-        }
         let version = Self.versionParts(tag).map(String.init).joined(separator: ".")
+        if let existing = activities.first(where: \.isUpdateNotice) {
+            if case .update(version) = existing.payload {
+                featuredID = existing.id
+                return
+            }
+            // 받기 직전에 더 새 버전을 찾았으면 줄의 버전도 바꾼다.
+            activities.removeAll(where: \.isUpdateNotice)
+        }
         let activity = IslandActivity(
             id: UUID(),
             payload: .update(version: version),

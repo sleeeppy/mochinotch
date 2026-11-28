@@ -25,16 +25,6 @@ struct SettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 SettingsDivider()
-                SettingsRow(
-                    title: model.text(.introTitle),
-                    subtitle: model.pendingIntroPreview == nil ? model.text(.introIdle) : model.text(.introPreview)
-                ) {
-                    MenuDropdown(title: model.introStudy.title(in: model.language), open: openMenu == .intro) {
-                        toggle(.intro)
-                    }
-                    .anchorPreference(key: IntroAnchorKey.self, value: .bounds) { $0 }
-                }
-                SettingsDivider()
                 SwitchRow(
                     title: model.text(.effectTitle),
                     subtitle: model.playsScreenEffect ? model.text(.effectOn) : model.text(.effectOff),
@@ -49,6 +39,16 @@ struct SettingsView: View {
                     isOn: model.shelfOnLeft
                 ) {
                     model.setShelfOnLeft(!model.shelfOnLeft)
+                }
+                SettingsDivider()
+                SettingsRow(
+                    title: model.text(.introTitle),
+                    subtitle: model.pendingIntroPreview == nil ? model.text(.introIdle) : model.text(.introPreview)
+                ) {
+                    MenuDropdown(title: model.introStudy.title(in: model.language), open: openMenu == .intro) {
+                        toggle(.intro)
+                    }
+                    .anchorPreference(key: IntroAnchorKey.self, value: .bounds) { $0 }
                 }
                 SettingsDivider()
                 SettingsRow(
@@ -403,8 +403,8 @@ private struct MenuDropdown: View {
 
 private struct IntroMenu: View {
     static let width: CGFloat = 132
-    /// 여백 8, 줄 2개, 줄 사이 2.
-    static let height: CGFloat = 8 + 28 * 2 + 2
+    /// 여백 8, 줄마다 28, 줄 사이 2.
+    static let height: CGFloat = 8 + 28 * CGFloat(IntroStudy.allCases.count) + 2 * CGFloat(IntroStudy.allCases.count - 1)
     @Environment(AppModel.self) private var model
     var onPick: () -> Void
 

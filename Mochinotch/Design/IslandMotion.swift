@@ -179,7 +179,7 @@ struct IntroScript {
     /// 로고로 벌어진다. 옆과 바닥의 속도가 달라 엇박으로 출렁인다.
     mutating func bloom(at time: Double) {
         sides(Self.logoSides, at: time, .pop)
-        drop.to(Self.logoDrop, at: time + 0.04, .drop)
+        drop.to(Self.logoDrop, at: time + 0.07, .drop)
     }
 
     /// 당겼던 떡을 놓는다. 가운데로 빠르게 튕겨 들어와 조이고, 조인 만큼 아래로 밀려 나온다.
@@ -271,16 +271,17 @@ struct IntroScript {
     static func make(_ study: IntroStudy) -> IntroScript {
         switch study {
         case .mochi:
-            // 왼쪽 톡, 오른쪽 톡은 살짝 겹치고, 한 번 쉰 뒤 눌렸다가 그 반동으로 크게 벌어진다.
-            var script = IntroScript(reveal: 1.52, glow: 1.9, length: 4.5)
-            script.left.to(60, at: 0, .peek)
-            script.left.to(0, at: 0.3, .tuck)
-            script.right.to(60, at: 0.4, .peek)
-            script.right.to(0, at: 0.7, .tuck)
-            script.sides(12, at: 1.1, .drip)
-            script.drop.to(22, at: 1.1, .drip)
-            script.bloom(at: 1.46)
-            script.breathe(from: 2.5)
+            // 왼쪽 톡, 오른쪽 톡은 살짝 겹치고, 짧게 쉰 뒤 아래로 꾹 눌렸다가 그 반동으로 크게 벌어진다.
+            var script = IntroScript(reveal: 1.34, glow: 1.72, length: 4.32)
+            script.left.to(62, at: 0, .peek)
+            script.left.to(0, at: 0.28, .tuck)
+            script.right.to(62, at: 0.36, .peek)
+            script.right.to(0, at: 0.64, .tuck)
+            script.sides(15, at: 0.94, .drip)
+            script.drop.to(27, at: 0.94, .drip)
+            script.drop.to(19, at: 1.28, .snapUp)
+            script.bloom(at: 1.28)
+            script.breathe(from: 2.32)
             return script
 
         case .taffy:

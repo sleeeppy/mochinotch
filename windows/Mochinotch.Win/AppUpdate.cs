@@ -77,20 +77,30 @@ sealed class AppUpdate : IDisposable
 
     public async Task Install(Action quit)
     {
-        var offer = Offer;
-        if (offer == null || Busy) return;
-        if (string.IsNullOrEmpty(offer.Download))
-        {
-            Open(offer.Page);
-            return;
-        }
+        var known = Offer;
+        if (known == null || Busy) return;
         Busy = true;
         Progress = 0;
         ProgressKnown = false;
         Publish();
         var swapped = false;
+        var offer = known;
         try
         {
+            // 누른 순간 최신 릴리즈를 다시 읽는다. 오래 켜 둔 앱이 예전에 본 버전을 받으면 업데이트를 두 번 해야 한다.
+            // 못 읽으면 알고 있던 버전이라도 받는다.
+            var (fresh, reached) = await Fetch();
+            if (reached)
+            {
+                Offer = fresh;
+                if (fresh == null) return;
+                offer = fresh;
+            }
+            if (string.IsNullOrEmpty(offer.Download))
+            {
+                Open(offer.Page);
+                return;
+            }
             var file = await Save(offer);
             if (file == null)
             {
@@ -141,17 +151,11 @@ sealed class AppUpdate : IDisposable
 
     async Task Read()
     {
-        WinRelease? found = null;
-        var ok = false;
+        WinRelease? found;
+        bool ok;
         try
         {
-            var json = await http.GetStringAsync(Latest);
-            found = WinUpdate.FromLatest(json, local, arm, WinUpdate.IsInstalled(Environment.ProcessPath));
-            ok = true;
-        }
-        catch (Exception)
-        {
-            // 네트워크가 없으면 다음 확인 때 다시 본다.
+            (found, ok) = await Fetch();
         }
         finally
         {
@@ -182,6 +186,20 @@ sealed class AppUpdate : IDisposable
                 Changed?.Invoke();
             }
         });
+    }
+
+    /// <summary>최신 릴리즈를 읽는다. 이미 최신이면 null. 네트워크가 없으면 reached가 false라 다음 확인 때 다시 본다.</summary>
+    async Task<(WinRelease? Release, bool Reached)> Fetch()
+    {
+        try
+        {
+            var json = await http.GetStringAsync(Latest);
+            return (WinUpdate.FromLatest(json, local, arm, WinUpdate.IsInstalled(Environment.ProcessPath)), true);
+        }
+        catch (Exception)
+        {
+            return (null, false);
+        }
     }
 
     void Hold(UpdateLook look)
