@@ -1663,8 +1663,7 @@ struct ReleaseNotes: Equatable {
                 if quietOnly { self.finishLaunchIntro() }
                 return
             }
-            let idle = IslandMetrics.resolve(notch: self.notch, presentation: .idle, rowCount: 0)
-            self.startIntro(IntroScript.make(study, half: Double(idle.width / 2)), afterLaunch: quietOnly)
+            self.startIntro(IntroScript.make(study), afterLaunch: quietOnly)
         }
     }
 
@@ -1697,7 +1696,7 @@ struct ReleaseNotes: Equatable {
                 self.revealIntro()
             }
             if let glow = script.glow {
-                self.introGlow(t - glow)
+                self.introGlow(t - glow, color: script.glowColor)
             }
             if t >= script.length {
                 // 안내를 열 거면 접지 않고 인사한 모양에서 바로 펼친다.
@@ -1721,11 +1720,11 @@ struct ReleaseNotes: Equatable {
     }
 
     /// 벌어진 윤곽을 따라 빛이 한 바퀴 돈다. 에이전트 완료 때와 같은 선이다.
-    private func introGlow(_ elapsed: Double) {
+    private func introGlow(_ elapsed: Double, color: Color?) {
         guard elapsed >= 0 else { return }
         let travel = min(1, elapsed / 1.9)
         introGlowing = true
-        edgeGlowColor = Color(red: 1, green: 0.9, blue: 0.95)
+        edgeGlowColor = color ?? Color(red: 1, green: 0.9, blue: 0.95)
         edgeGlowTravel = travel
         edgeGlow = travel < 0.47 ? 1 : max(0, 1 - (travel - 0.47) / 0.16)
     }

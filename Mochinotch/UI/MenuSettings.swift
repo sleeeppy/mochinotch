@@ -25,16 +25,6 @@ struct SettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 SettingsDivider()
-                SettingsRow(
-                    title: model.text(.introTitle),
-                    subtitle: model.pendingIntroPreview == nil ? model.text(.introIdle) : model.text(.introPreview)
-                ) {
-                    MenuDropdown(title: model.introStudy.title(in: model.language), open: openMenu == .intro) {
-                        toggle(.intro)
-                    }
-                    .anchorPreference(key: IntroAnchorKey.self, value: .bounds) { $0 }
-                }
-                SettingsDivider()
                 SwitchRow(
                     title: model.text(.effectTitle),
                     subtitle: model.playsScreenEffect ? model.text(.effectOn) : model.text(.effectOff),
@@ -49,6 +39,16 @@ struct SettingsView: View {
                     isOn: model.shelfOnLeft
                 ) {
                     model.setShelfOnLeft(!model.shelfOnLeft)
+                }
+                SettingsDivider()
+                SettingsRow(
+                    title: model.text(.introTitle),
+                    subtitle: model.pendingIntroPreview == nil ? model.text(.introIdle) : model.text(.introPreview)
+                ) {
+                    MenuDropdown(title: model.introStudy.title(in: model.language), open: openMenu == .intro) {
+                        toggle(.intro)
+                    }
+                    .anchorPreference(key: IntroAnchorKey.self, value: .bounds) { $0 }
                 }
                 SettingsDivider()
                 SettingsRow(
