@@ -37,17 +37,13 @@ mkdir "$stage/stage/.background"
 # 1x와 2x를 한 tiff에 넣어 레티나에서도 배경이 흐리지 않게 한다.
 tiffutil -cathidpicheck "$root/docs/images/dmg-background.png" "$root/docs/images/dmg-background@2x.png" \
   -out "$stage/stage/.background/background.tiff" >/dev/null
-icon="$app/Contents/Resources/AppIcon.icns"
-[ -f "$icon" ] && cp "$icon" "$stage/stage/.VolumeIcon.icns"
 
 mkdir -p "$root/build"
 rm -f "$out"
 hdiutil create -volname "$volume" -srcfolder "$stage/stage" -fs HFS+ -format UDRW -ov "$stage/rw.dmg" >/dev/null
 
 mount="$(hdiutil attach -readwrite -noverify -noautoopen "$stage/rw.dmg" | awk -F'\t' '/\/Volumes\//{print $NF; exit}')"
-[ -f "$mount/.VolumeIcon.icns" ] && SetFile -a C "$mount"
 SetFile -a V "$mount/.background"
-[ -f "$mount/.VolumeIcon.icns" ] && SetFile -a V "$mount/.VolumeIcon.icns"
 
 # 배경이 600x360이다. bounds는 제목 막대까지 포함하므로 높이에 32를 더한다.
 # 아이콘 위치는 배경의 화살표 양 끝(160, 178), (440, 178)과 맞춘다.
@@ -79,6 +75,14 @@ tell application "Finder"
   end tell
 end tell
 EOF
+
+# 디스크 아이콘은 Finder가 창을 꾸민 뒤에 넣어야 지워지지 않는다.
+icon="$app/Contents/Resources/AppIcon.icns"
+if [ -f "$icon" ]; then
+  cp "$icon" "$mount/.VolumeIcon.icns"
+  SetFile -a V "$mount/.VolumeIcon.icns"
+  SetFile -a C "$mount"
+fi
 
 # Finder가 남긴 흔적은 지우고, .DS_Store(창 모양)만 남긴다.
 rm -rf "$mount/.fseventsd" "$mount/.Trashes"
