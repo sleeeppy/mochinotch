@@ -106,7 +106,7 @@ Press the gear and no separate window appears. The notch grows a little and sett
 </p>
 
 - **Open at login**: starts automatically when the Mac turns on.
-- **Intro**: choose `Mochi`, `Stretch`, `Heartbeat`, `Jelly`, or `Swing` for the greeting at launch. After you pick one, move the pointer off the notch and it plays once.
+- **Intro**: choose `Mochi` or `Stretch` for the greeting at launch. After you pick one, move the pointer off the notch and it plays once.
 - **Screen-edge glow**: when off, only the notch edge glows at the end of AI work. The screen stays as it is.
 - **Permissions · AI**: opens the first-time permission screen again. It shows how many items are still off.
 - **Guide**: next to the version at the bottom. Opens this page.

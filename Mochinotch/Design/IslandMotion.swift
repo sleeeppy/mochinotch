@@ -139,9 +139,6 @@ struct IntroPose {
 enum IntroStudy: String, CaseIterable {
     case mochi
     case taffy
-    case heartbeat
-    case jelly
-    case swing
 
     static var stored: IntroStudy {
         if let raw = UserDefaults.standard.string(forKey: "introStudy"), let study = IntroStudy(rawValue: raw) {
@@ -154,9 +151,6 @@ enum IntroStudy: String, CaseIterable {
         switch self {
         case .mochi: return L10n.text(.introMochi, language)
         case .taffy: return L10n.text(.introTaffy, language)
-        case .heartbeat: return L10n.text(.introHeartbeat, language)
-        case .jelly: return L10n.text(.introJelly, language)
-        case .swing: return L10n.text(.introSwing, language)
         }
     }
 }
@@ -171,8 +165,6 @@ struct IntroScript {
     var reveal: Double
     /// 윤곽을 따라 빛이 한 바퀴 도는 시작 시각.
     var glow: Double?
-    /// 그 빛의 색. 없으면 옅은 분홍빛 흰색.
-    var glowColor: Color?
     var length: Double
 
     /// 로고가 서는 마지막 모양. 아이콘과 이름이 크게 들어갈 만큼.
@@ -187,7 +179,7 @@ struct IntroScript {
     /// 로고로 벌어진다. 옆과 바닥의 속도가 달라 엇박으로 출렁인다.
     mutating func bloom(at time: Double) {
         sides(Self.logoSides, at: time, .pop)
-        drop.to(Self.logoDrop, at: time + 0.04, .drop)
+        drop.to(Self.logoDrop, at: time + 0.07, .drop)
     }
 
     /// 당겼던 떡을 놓는다. 가운데로 빠르게 튕겨 들어와 조이고, 조인 만큼 아래로 밀려 나온다.
@@ -203,23 +195,6 @@ struct IntroScript {
         drop.to(40, at: fire, .snapUp)
         drop.to(Self.logoDrop, at: fire + 0.14, .drop)
         return fire
-    }
-
-    /// 한 번 뛴다. 옆과 아래로 짧게 부풀었다가 바로 노치로 돌아간다.
-    mutating func beat(sides value: Double, drop depth: Double, at time: Double) {
-        sides(value, at: time, .plop)
-        drop.to(depth, at: time, .plop)
-        sides(0, at: time + 0.11, .tuck)
-        drop.to(0, at: time + 0.11, .tuck)
-    }
-
-    /// 로고로 벌어지고, 이름이 나오고, 빛이 돌고, 한 번 숨 쉰 뒤 끝난다.
-    mutating func land(at time: Double) {
-        bloom(at: time)
-        reveal = time + 0.06
-        glow = time + 0.45
-        breathe(from: time + 1.05)
-        length = time + 2.85
     }
 
     /// 머무는 동안 한 번 부풀었다 가라앉는다.
@@ -296,16 +271,17 @@ struct IntroScript {
     static func make(_ study: IntroStudy) -> IntroScript {
         switch study {
         case .mochi:
-            // 왼쪽 톡, 오른쪽 톡은 살짝 겹치고, 한 번 쉰 뒤 눌렸다가 그 반동으로 크게 벌어진다.
-            var script = IntroScript(reveal: 1.52, glow: 1.9, length: 4.5)
-            script.left.to(60, at: 0, .peek)
-            script.left.to(0, at: 0.3, .tuck)
-            script.right.to(60, at: 0.4, .peek)
-            script.right.to(0, at: 0.7, .tuck)
-            script.sides(12, at: 1.1, .drip)
-            script.drop.to(22, at: 1.1, .drip)
-            script.bloom(at: 1.46)
-            script.breathe(from: 2.5)
+            // 왼쪽 톡, 오른쪽 톡은 살짝 겹치고, 짧게 쉰 뒤 아래로 꾹 눌렸다가 그 반동으로 크게 벌어진다.
+            var script = IntroScript(reveal: 1.34, glow: 1.72, length: 4.32)
+            script.left.to(62, at: 0, .peek)
+            script.left.to(0, at: 0.28, .tuck)
+            script.right.to(62, at: 0.36, .peek)
+            script.right.to(0, at: 0.64, .tuck)
+            script.sides(15, at: 0.94, .drip)
+            script.drop.to(27, at: 0.94, .drip)
+            script.drop.to(19, at: 1.28, .snapUp)
+            script.bloom(at: 1.28)
+            script.breathe(from: 2.32)
             return script
 
         case .taffy:
@@ -317,47 +293,6 @@ struct IntroScript {
             script.glow = fire + 0.45
             script.breathe(from: fire + 0.95)
             script.length = fire + 2.75
-            return script
-
-        case .heartbeat:
-            // 두근, 두근. 작게 한 번 크게 한 번 뛰고 쉬었다가 다시 뛴다. 세 번째 크게 뛸 때 로고로 벌어진다.
-            var script = IntroScript(reveal: 0, glow: nil, length: 0)
-            script.glowColor = Color(red: 1, green: 0.62, blue: 0.72)
-            for (at, sides, drop) in [(0.0, 30.0, 12.0), (0.2, 58.0, 24.0), (0.95, 34.0, 14.0), (1.15, 70.0, 30.0)] {
-                script.beat(sides: sides, drop: drop, at: at)
-            }
-            script.land(at: 1.9)
-            return script
-
-        case .jelly:
-            // 가운데가 길쭉하게 처졌다가, 위로 탁 튀며 납작하고 넓게 퍼진다.
-            // 다시 길쭉해지려는 반동을 타고 로고로 벌어져서 한동안 탱글탱글 흔들린다.
-            var script = IntroScript(reveal: 0, glow: nil, length: 0)
-            script.drop.to(44, at: 0, .pull)
-            script.sides(-4, at: 0, .pull)
-            let slam = 0.85
-            script.drop.to(3, at: slam, .snapUp)
-            script.sides(118, at: slam, .fling)
-            script.drop.to(36, at: slam + 0.26, .drop)
-            script.sides(46, at: slam + 0.26, .recoil)
-            script.land(at: slam + 0.52)
-            return script
-
-        case .swing:
-            // 그네를 구르듯 좌우로 쏠린다. 한 번 쏠릴 때마다 더 멀리 가다가, 가운데를 지나는 힘으로 로고가 된다.
-            var script = IntroScript(reveal: 0, glow: nil, length: 0)
-            script.drop.to(12, at: 0, .slide)
-            let pushes: [(at: Double, left: Double, right: Double)] = [
-                (0.0, 52, -4), (0.44, -4, 86), (0.88, 118, -4), (1.32, -4, 148),
-            ]
-            for push in pushes {
-                script.left.to(push.left, at: push.at, .slide)
-                script.right.to(push.right, at: push.at, .slide)
-                // 가운데를 지날 때 조금 처진다.
-                script.drop.to(20, at: push.at, .drip)
-                script.drop.to(12, at: push.at + 0.2, .slide)
-            }
-            script.land(at: 1.74)
             return script
         }
     }
