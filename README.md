@@ -217,12 +217,13 @@ Claude와 Codex가 승인 창이나 질문 카드를 띄우면 노치에 주황�
 2. 파일을 열면 설치 창이 열려요. `Mochinotch.app`을 **Applications** 폴더로 끌어다 놓습니다.
 3. 앱을 엽니다.
 
-Homebrew를 쓴다면 터미널에서 설치할 수도 있어요. 처음 열 때 뜨는 경고 없이 바로 열립니다.
+Homebrew를 쓴다면 터미널에 아래 한 줄을 붙여 넣어도 돼요. 처음 열 때 뜨는 경고 없이 바로 열립니다.
 
 ```sh
-brew trust sleeeppy/tap
-brew install --cask sleeeppy/tap/mochinotch
+brew trust --cask sleeeppy/tap/mochinotch && brew install --cask sleeeppy/tap/mochinotch
 ```
+
+Homebrew는 공식 목록에 없는 앱을 설치하기 전에 한 번 허락(`brew trust`)을 받아요. 앞부분이 Mochinotch 하나만 허락하는 명령입니다.
 
 새 버전이 나오면 노치에 알려 주고, 설정 맨 아래에 **업데이트**가 생겨요. **v0.3.5 이상**이면 누르면 새 버전을 받아 그 자리에서 바꾸고 다시 켭니다. 켜 둔 권한과 AI 연결은 그대로예요. v0.3.4 이하는 여기서 받아 설치하면, 그다음부터는 앱 안에서 업데이트돼요.
 
