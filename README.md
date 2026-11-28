@@ -221,10 +221,12 @@ Claude와 Codex가 승인 창이나 질문 카드를 띄우면 노치에 주황�
 
 **Windows**는 노치 없이, 확인과 완료만 화면 위쪽에 작게 뜹니다. 설정은 트레이 아이콘에서 엽니다.
 
-1. [.NET 10 런타임](https://dotnet.microsoft.com/download/dotnet/10.0)(Windows x64)이 없으면 먼저 설치합니다.
-2. [Releases](https://github.com/sleeeppy/mochinotch/releases/latest)에서 `Mochinotch-win-x64.exe`를 받습니다.
-3. 원하는 폴더에 두고 실행합니다. 런타임이 없으면 설치 안내가 뜹니다.
-4. 새 버전이 나오면 설정 아래에 **업데이트**가 생깁니다.
+1. [Releases](https://github.com/sleeeppy/mochinotch/releases/latest)에서 `Mochinotch-win-x64-setup.exe`를 받아 실행합니다.
+2. 안내를 따라 **다음**을 누르면 설치됩니다. 관리자 권한은 필요 없어요. [.NET 10 런타임](https://dotnet.microsoft.com/download/dotnet/10.0)이 없으면 설치 프로그램이 받아서 같이 설치합니다.
+3. 시작 메뉴의 **Mochinotch**로 엽니다. 지우려면 **설정 → 앱**에서 Mochinotch를 제거합니다.
+4. 새 버전이 나오면 설정 아래에 **업데이트**가 생깁니다. 누르면 창 없이 같은 자리에 바꾸고 다시 켜요.
+
+예전에 `Mochinotch-win-x64.exe`를 따로 두고 쓰던 경우, 업데이트를 누르면 설치 창이 한 번 뜹니다. 설치가 끝나면 AI 연결과 로그인 시 실행이 새 위치로 옮겨져요. 예전 exe는 지워도 됩니다.
 
 <br/>
 
@@ -333,5 +335,9 @@ Xcode에서 서명을 **Sign to Run Locally**로 두고 Run 합니다. 터미널
 | `Mochinotch/` | 앱 소스 |
 | `Mochinotch/Hooks/` | hook 전달(`--hook`)과 설정 병합(`--install-hooks`) |
 | `scripts/install-hooks.sh` | 빌드한 앱으로 `--install-hooks` 실행 |
+| `scripts/make-dmg.sh` | Release 앱으로 설치용 DMG 만들기 |
+| `scripts/make-win-installer.sh` | Windows 설치 프로그램(`Mochinotch-win-x64-setup.exe`) 만들기. `brew install makensis` 필요 |
+| `scripts/make-installer-art.swift` | DMG 배경과 Windows 설치 화면 그림 다시 그리기 |
+| `windows/installer/` | Windows 설치 프로그램(NSIS) 스크립트 |
 | `hooks/` | 도구별 설정 예시 |
 | `docs/` | 개발 플랜과 README 이미지 |

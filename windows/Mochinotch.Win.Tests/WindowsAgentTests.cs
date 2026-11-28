@@ -261,6 +261,49 @@ public class WinUpdateTests
     }
 
     [Fact]
+    public void Installed_copy_prefers_the_setup_and_portable_copy_prefers_the_exe()
+    {
+        var json = $$"""
+            {"tag_name":"v0.9.0","html_url":"{{Page}}","assets":[
+              {"name":"Mochinotch-win-x64.exe","url":"{{Api}}"},
+              {"name":"Mochinotch-win-x64-setup.exe","url":"https://api.github.com/repos/sleeeppy/mochinotch/releases/assets/2"}
+            ]}
+            """;
+        Assert.Equal("Mochinotch-win-x64.exe", WinUpdate.FromLatest(json, "0.8.0")?.FileName);
+        Assert.Equal("Mochinotch-win-x64-setup.exe", WinUpdate.FromLatest(json, "0.8.0", installed: true)?.FileName);
+    }
+
+    [Fact]
+    public void Setup_alone_is_offered_to_portable_copies()
+    {
+        var json = $$"""
+            {"tag_name":"v0.9.0","html_url":"{{Page}}","assets":[
+              {"name":"Mochinotch.dmg","url":"https://api.github.com/repos/sleeeppy/mochinotch/releases/assets/3"},
+              {"name":"Mochinotch-win-x64-setup.exe","url":"{{Api}}"}
+            ]}
+            """;
+        Assert.Equal("Mochinotch-win-x64-setup.exe", WinUpdate.FromLatest(json, "0.8.0")?.FileName);
+    }
+
+    [Fact]
+    public void Uninstaller_next_to_the_exe_marks_an_installed_copy()
+    {
+        var directory = Directory.CreateTempSubdirectory("mn-installed").FullName;
+        try
+        {
+            var exe = Path.Combine(directory, "Mochinotch.exe");
+            Assert.False(WinUpdate.IsInstalled(exe));
+            File.WriteAllText(Path.Combine(directory, WinUpdate.UninstallerName), "");
+            Assert.True(WinUpdate.IsInstalled(exe));
+            Assert.False(WinUpdate.IsInstalled(null));
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
     public void Install_target_is_the_running_executable()
     {
         var running = Path.Combine("C", "Apps", "Mochinotch-win-x64.exe");
@@ -588,6 +631,21 @@ public class HookInstallerTests
         var updated = File.ReadAllText(Path.Combine(home, ".cursor", "hooks.json"));
         Assert.Contains(moved.Replace("\\", "\\\\"), updated);
         Assert.DoesNotContain(exe.Replace("\\", "\\\\"), updated);
+    }
+
+    [Fact]
+    public void Relink_moves_only_tools_already_connected_elsewhere()
+    {
+        var home = TempHome();
+        var portable = @"C:\Users\me\Downloads\Mochinotch-win-x64.exe";
+        var installed = @"C:\Users\me\AppData\Local\Programs\Mochinotch\Mochinotch.exe";
+        HookInstaller.Install(home, portable, [HookTool.Cursor]);
+        Directory.CreateDirectory(Path.Combine(home, ".claude"));
+        var result = HookInstaller.Relink(home, installed);
+        Assert.Equal([HookTool.Cursor], result.Changed);
+        Assert.True(HookInstaller.IsConnected(home, HookTool.Cursor, installed));
+        Assert.False(File.Exists(Path.Combine(home, ".claude", "settings.json")));
+        Assert.Empty(HookInstaller.Relink(home, installed).Changed);
     }
 
     [Fact]
