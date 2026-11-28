@@ -6,8 +6,8 @@
 #   ./scripts/publish-packages.sh 0.8.2 --dry-run  파일만 만들고 아무 데도 올리지 않는다
 #
 # 필요한 것: gh(로그인), git, komac(brew install komac)
-# macOS:   brew trust --cask sleeeppy/tap/mochinotch && brew install --cask sleeeppy/tap/mochinotch
-#          (Homebrew 7부터 공식이 아닌 tap은 brew trust를 먼저 해야 한다)
+# macOS:   brew tap sleeeppy/tap && brew trust --cask sleeeppy/tap/mochinotch && brew install --cask sleeeppy/tap/mochinotch
+#          (Homebrew 7부터 공식이 아닌 tap은 직접 tap하고 brew trust를 해야 한다)
 # Windows: winget install sleeeppy.Mochinotch   (첫 PR이 microsoft/winget-pkgs에 머지된 뒤)
 set -e
 
@@ -190,7 +190,7 @@ if [ ! -f "$work/tap/README.md" ]; then
 # sleeeppy/tap
 
 ```sh
-brew trust --cask sleeeppy/tap/mochinotch && brew install --cask sleeeppy/tap/mochinotch
+brew tap sleeeppy/tap && brew trust --cask sleeeppy/tap/mochinotch && brew install --cask sleeeppy/tap/mochinotch
 ```
 EOF
 fi
@@ -208,4 +208,7 @@ fi
   fi
 )
 
+# komac은 내 계정의 winget-pkgs 포크로 PR을 보낸다. 처음이면 포크부터 만든다.
+me="$(gh api user -q .login)"
+gh repo view "$me/winget-pkgs" >/dev/null 2>&1 || gh repo fork microsoft/winget-pkgs --clone=false >/dev/null
 GITHUB_TOKEN="$(gh auth token)" komac submit --yes "$manifests"

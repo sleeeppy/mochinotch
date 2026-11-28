@@ -224,10 +224,10 @@ Claude 或 Codex 弹出批准窗口或问题卡片时，刘海上会打开橙色
 如果你用 Homebrew，也可以把下面这一行粘贴到终端里安装。这样第一次打开时不会出现警告。
 
 ```sh
-brew trust --cask sleeeppy/tap/mochinotch && brew install --cask sleeeppy/tap/mochinotch
+brew tap sleeeppy/tap && brew trust --cask sleeeppy/tap/mochinotch && brew install --cask sleeeppy/tap/mochinotch
 ```
 
-Homebrew 在安装不在官方列表里的应用前，会先要求允许一次（`brew trust`）。前半部分只允许 Mochinotch。
+Homebrew 在安装不在官方列表里的应用前，会先要求允许一次（`brew trust`）。中间的 `brew trust` 只允许 Mochinotch。
 
 有新版本时刘海会告诉你，设置最下面会出现 **更新**。**v0.3.5 及以上**点一下就会就地接收、替换并重新打开。已经打开的权限和 AI 连接会保留。v0.3.4 及更早需要先从这里安装一次，之后就能在应用里更新。
 
