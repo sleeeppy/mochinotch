@@ -22,6 +22,8 @@ public static class Program
             return InstallHooks();
         if (args.FirstOrDefault() == "--relink")
             return Relink();
+        if (args.FirstOrDefault() == "--unlink")
+            return Unlink();
         for (var index = 0; index < args.Length; index++)
         {
             if (args[index] == "--port" && index + 1 < args.Length && int.TryParse(args[index + 1], out var port))
@@ -72,6 +74,13 @@ public static class Program
             // 레지스트리를 못 쓰면 설정에서 다시 켤 수 있다.
         }
         return result.Failures.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>설치 프로그램이 지울 때 부른다. AI 도구 설정에서 우리 hook만 뺀다.</summary>
+    static int Unlink()
+    {
+        if (!OperatingSystem.IsWindows()) return 1;
+        return HookInstaller.Remove(HookInstaller.Home).Failures.Count == 0 ? 0 : 1;
     }
 
     static int InstallHooks()

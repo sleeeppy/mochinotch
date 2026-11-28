@@ -147,6 +147,8 @@ final class AppModel {
     /// 켜질 때 인사가 끝나기 전에는 업데이트 알림을 띄우지 않는다.
     private var awaitingLaunchIntro = true
     private var pendingUpdateVersion: String?
+    private var presenceWait: Task<Void, Never>?
+    private var presenceVersion: String?
 
     private var featuredID: UUID?
     private var noticesSeenAt = Date.distantPast
@@ -290,7 +292,9 @@ final class AppModel {
         let unseen = activities.filter { activity in
             guard !activity.hidesPeek else { return false }
             if agent { return activity.staysOnLeft }
-            return activity.isNotice && !activity.staysOnLeft && activity.createdAt > noticesSeenAt
+            // 업데이트는 노치를 펼쳐 볼 때까지 오른쪽에 남는다. 6초 알림을 놓쳐도 보이게.
+            let showsRight = activity.isNotice || (activity.isUpdateNotice && !installingUpdate)
+            return showsRight && !activity.staysOnLeft && activity.createdAt > noticesSeenAt
         }
         for activity in unseen.reversed() {
             let key = activity.iconBundleIDs.first ?? activity.leadingText
@@ -707,6 +711,7 @@ final class AppModel {
                 "version": version,
                 "body": release.notes,
                 "page": release.page.absoluteString,
+                "from": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
             ],
             forKey: Self.pendingNotesKey
         )
@@ -718,9 +723,11 @@ final class AppModel {
               let version = stored["version"],
               version == (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
         else { return }
+        let from = stored["from"] ?? ""
         releaseNotes = ReleaseNotes(
             version: version,
-            body: Self.plainNotes(stored["body"] ?? ""),
+            previous: from.isEmpty || from == version ? nil : from,
+            blocks: ReleaseNoteBlock.parse(stored["body"] ?? ""),
             page: AppUpdater.githubPage(stored["page"])
         )
     }
@@ -749,26 +756,13 @@ final class AppModel {
         expandNow()
     }
 
-    /// 마크다운과 HTML을 노치에서 읽을 글로 바꾼다.
-    private static func plainNotes(_ markdown: String) -> String {
-        var text = markdown
-        text = text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-        text = text.replacingOccurrences(of: "!\\[[^\\]]*\\]\\([^)]*\\)", with: "", options: .regularExpression)
-        text = text.replacingOccurrences(of: "\\[([^\\]]+)\\]\\([^)]*\\)", with: "$1", options: .regularExpression)
-        text = text.replacingOccurrences(of: "(?m)^#{1,6}\\s*", with: "", options: .regularExpression)
-        text = text.replacingOccurrences(of: "[*_]{1,3}", with: "", options: .regularExpression)
-        text = text.replacingOccurrences(of: "(?m)^[ \\t]+|[ \\t]+$", with: "", options: .regularExpression)
-        while text.contains("\n\n\n") {
-            text = text.replacingOccurrences(of: "\n\n\n", with: "\n\n")
-        }
-        return text.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
     private static let pendingNotesKey = "pendingReleaseNotes"
 
 struct ReleaseNotes: Equatable {
     var version: String
-    var body: String
+    /// 업데이트 전 버전. 0.8.1 이하에서 올라오면 모른다.
+    var previous: String?
+    var blocks: [ReleaseNoteBlock]
     var page: URL?
 }
 
@@ -844,6 +838,8 @@ struct ReleaseNotes: Equatable {
     }
 
     private static let announcedUpdateKey = "announcedUpdateVersion"
+    private static let announcedUpdateCountKey = "announcedUpdateCount"
+    private static let announcedUpdateAtKey = "announcedUpdateAt"
 
     private enum UpdateCheck {
         case newer(AppUpdater.Release)
@@ -867,11 +863,11 @@ struct ReleaseNotes: Equatable {
         return .newer(AppUpdater.release(from: json, tag: tag, page: page))
     }
 
-    /// 이 버전은 한 번만 알린다. 다음 버전이 나오면 다시 한 번. 켜질 때 인사가 끝나기 전에는 기다린다.
+    /// 새 버전은 바로 알리고, 받지 않으면 하루 뒤에 다시 알린다. 한 버전에 세 번까지.
+    /// 켜질 때 인사가 끝나기 전이나, 자리를 비웠거나 화면이 잠겨 있으면 돌아올 때까지 기다린다.
     private func announceUpdate(_ tag: String) {
         let version = Self.versionParts(tag).map(String.init).joined(separator: ".")
-        guard !version.isEmpty else { return }
-        if UserDefaults.standard.string(forKey: Self.announcedUpdateKey) == version { return }
+        guard !version.isEmpty, Self.updateNoticeDue(version) else { return }
         if awaitingLaunchIntro || introDirect || introTask != nil {
             pendingUpdateVersion = version
             return
@@ -879,9 +875,33 @@ struct ReleaseNotes: Equatable {
         presentUpdateNotice(version)
     }
 
+    private static let updateReminderGap: TimeInterval = 20 * 60 * 60
+    private static let updateReminderLimit = 3
+
+    private static func updateNoticeDue(_ version: String) -> Bool {
+        let defaults = UserDefaults.standard
+        guard defaults.string(forKey: announcedUpdateKey) == version else { return true }
+        let count = max(defaults.integer(forKey: announcedUpdateCountKey), 1)
+        guard count < updateReminderLimit else { return false }
+        let last = defaults.object(forKey: announcedUpdateAtKey) as? Date ?? .distantPast
+        return Date().timeIntervalSince(last) >= updateReminderGap
+    }
+
     private func presentUpdateNotice(_ version: String) {
-        if UserDefaults.standard.string(forKey: Self.announcedUpdateKey) == version { return }
-        UserDefaults.standard.set(version, forKey: Self.announcedUpdateKey)
+        guard Self.updateNoticeDue(version), !installingUpdate else { return }
+        guard Self.userIsPresent else {
+            waitForPresence(version)
+            return
+        }
+        let defaults = UserDefaults.standard
+        let count = defaults.string(forKey: Self.announcedUpdateKey) == version
+            ? max(defaults.integer(forKey: Self.announcedUpdateCountKey), 1) + 1
+            : 1
+        defaults.set(version, forKey: Self.announcedUpdateKey)
+        defaults.set(count, forKey: Self.announcedUpdateCountKey)
+        defaults.set(Date(), forKey: Self.announcedUpdateAtKey)
+        // 다시 알릴 때는 목록의 예전 줄을 새 줄로 바꾼다. 새 줄이라야 접힌 노치 오른쪽에 다시 붙는다.
+        activities.removeAll(where: \.isUpdateNotice)
         present(
             IslandActivity(
                 id: UUID(),
@@ -891,6 +911,40 @@ struct ReleaseNotes: Equatable {
             ),
             seconds: 6
         )
+    }
+
+    /// 1분 안에 키보드나 마우스를 썼고 화면이 잠겨 있지 않다.
+    private static var userIsPresent: Bool {
+        if let session = CGSessionCopyCurrentDictionary() as? [String: Any],
+           session["CGSSessionScreenIsLocked"] as? Bool == true {
+            return false
+        }
+        return secondsSinceInput < 60
+    }
+
+    private static var secondsSinceInput: TimeInterval {
+        CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
+    }
+
+    private func waitForPresence(_ version: String) {
+        presenceVersion = version
+        guard presenceWait == nil else { return }
+        presenceWait = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3))
+                guard let self else { return }
+                // 돌아온 직후의 첫 움직임에 바로 띄우면 다른 일을 하느라 못 본다. 잠깐 더 둔다.
+                if Self.userIsPresent, Self.secondsSinceInput < 3 {
+                    try? await Task.sleep(for: .seconds(2))
+                    self.presenceWait = nil
+                    if let latest = self.presenceVersion {
+                        self.presenceVersion = nil
+                        self.presentUpdateNotice(latest)
+                    }
+                    return
+                }
+            }
+        }
     }
 
     /// 켜질 때 인사가 끝났거나 건너뛴 뒤에 미뤄 둔 업데이트를 띄운다.
@@ -1656,7 +1710,7 @@ struct ReleaseNotes: Equatable {
     private func revealIntro() {
         let activity = IslandActivity(
             id: UUID(),
-            payload: .hint(title: "もちノッチ", detail: "노치에 마우스를 올려보세요"),
+            payload: .hint(title: "Mochinotch", detail: "노치에 마우스를 올려보세요"),
             createdAt: Date(),
             keepsHistory: false
         )

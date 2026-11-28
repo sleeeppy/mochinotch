@@ -718,6 +718,7 @@ private struct PeekNoticeIcon: View {
             }
             .overlay(alignment: .topTrailing) {
                 DockBadge(count: group.count)
+                    .opacity(group.latest.isUpdateNotice ? 0 : 1)
                     .keyframeAnimator(initialValue: CGFloat(1), trigger: arrivals) { badge, scale in
                         badge
                             .scaleEffect(scale)
@@ -1288,7 +1289,7 @@ private struct ExpandedIslandContent: View {
 
     private var header: some View {
         HStack(spacing: 4) {
-            Text("もちノッチ")
+            Text("Mochinotch")
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .foregroundStyle(Color.white.opacity(0.82))
             if !model.showsSetup, !model.showsReleaseNotes {
@@ -1534,53 +1535,23 @@ private struct ActivityRow: View {
 }
 
 /// 인앱 업데이트가 끝난 뒤 다시 켜지면 보이는 패치 노트. 닫기 전에는 접히지 않는다.
+/// 위에는 앱 아이콘과 버전, 아래에는 바뀐 점을 한 줄씩 카드에 담는다.
 private struct ReleaseNotesView: View {
     @Environment(AppModel.self) private var model
     @State private var pageHovered = false
+    @State private var doneHovered = false
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 14) {
                 if let notes = model.releaseNotes {
-                    Text(model.text(.notesInstalled, notes.version))
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundStyle(IslandColor.primary)
-                    if !notes.body.isEmpty {
-                        Text(notes.body)
-                            .font(.system(size: 12))
-                            .foregroundStyle(IslandColor.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .textSelection(.enabled)
-                    }
-                    if notes.page != nil {
-                        Button {
-                            model.openReleaseNotesPage()
-                        } label: {
-                            HStack(spacing: 4) {
-                                Text(model.text(.notesPage))
-                                Image(systemName: "arrow.up.right")
-                                    .font(.system(size: 9, weight: .bold))
-                            }
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Color.black.opacity(pageHovered ? 0.8 : 0.92))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(
-                                Capsule().fill(IslandColor.update.opacity(pageHovered ? 0.9 : 1))
-                            )
-                            .contentShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.top, 2)
-                        .onHover { hovering in
-                            withAnimation(.easeOut(duration: 0.15)) { pageHovered = hovering }
-                        }
-                    }
+                    header(notes)
+                    content(notes.blocks)
+                    footer(notes)
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.top, 4)
+            .padding(.top, 6)
             .padding(.bottom, 16)
             .background {
                 GeometryReader { proxy in
@@ -1593,6 +1564,181 @@ private struct ReleaseNotesView: View {
             model.setSettingsHeight(height)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private func header(_ notes: AppModel.ReleaseNotes) -> some View {
+        HStack(spacing: 12) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 44, height: 44)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(model.text(.notesBadge))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(IslandColor.update)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if let previous = notes.previous {
+                        Text("v\(previous)")
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundStyle(IslandColor.secondary)
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(IslandColor.secondary)
+                    }
+                    Text("v\(notes.version)")
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundStyle(IslandColor.primary)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// 목록 앞의 문단은 요약으로 크게, 목록은 카드 안에 점과 함께 둔다. 제목은 카드를 나눈다.
+    @ViewBuilder
+    private func content(_ blocks: [ReleaseNoteBlock]) -> some View {
+        let sections = Self.sections(blocks)
+        ForEach(sections.indices, id: \.self) { index in
+            let section = sections[index]
+            VStack(alignment: .leading, spacing: 8) {
+                if let title = section.title {
+                    Text(Self.inline(title))
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(IslandColor.secondary)
+                        .padding(.leading, 2)
+                }
+                ForEach(section.paragraphs.indices, id: \.self) { line in
+                    Text(Self.inline(section.paragraphs[line]))
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(IslandColor.primary.opacity(0.92))
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+                if !section.bullets.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(section.bullets.indices, id: \.self) { line in
+                            HStack(alignment: .firstTextBaseline, spacing: 9) {
+                                Circle()
+                                    .fill(IslandColor.update)
+                                    .frame(width: 5, height: 5)
+                                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                                Text(Self.inline(section.bullets[line]))
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(IslandColor.primary.opacity(0.78))
+                                    .lineSpacing(2.5)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color.white.opacity(0.06))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+                    )
+                }
+            }
+        }
+    }
+
+    private func footer(_ notes: AppModel.ReleaseNotes) -> some View {
+        HStack(spacing: 8) {
+            if notes.page != nil {
+                Button {
+                    model.openReleaseNotesPage()
+                } label: {
+                    HStack(spacing: 3) {
+                        Text(model.text(.notesPage))
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 8.5, weight: .bold))
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(IslandColor.primary.opacity(pageHovered ? 0.9 : 0.55))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .onHover { hovering in
+                    withAnimation(.easeOut(duration: 0.15)) { pageHovered = hovering }
+                }
+            }
+            Spacer(minLength: 0)
+            Button {
+                model.dismissReleaseNotes()
+            } label: {
+                Text(model.text(.notesDone))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.black.opacity(0.88))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(IslandColor.update.opacity(doneHovered ? 0.86 : 1)))
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.15)) { doneHovered = hovering }
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private struct Section {
+        var title: String?
+        var paragraphs: [String] = []
+        var bullets: [String] = []
+    }
+
+    /// 제목마다 새 묶음. 목록 뒤에 다시 문단이 오면 그 문단도 새 묶음으로 내려 순서를 지킨다.
+    private static func sections(_ blocks: [ReleaseNoteBlock]) -> [Section] {
+        var result: [Section] = []
+        var current = Section()
+        func push() {
+            if current.title != nil || !current.paragraphs.isEmpty || !current.bullets.isEmpty {
+                result.append(current)
+            }
+            current = Section()
+        }
+        for block in blocks {
+            switch block {
+            case .heading(let title):
+                push()
+                current.title = title
+            case .paragraph(let text):
+                if !current.bullets.isEmpty { push() }
+                current.paragraphs.append(text)
+            case .bullet(let text):
+                current.bullets.append(text)
+            }
+        }
+        push()
+        return result
+    }
+
+    /// 굵게, 코드, 링크만 살린다. 해석이 안 되면 글 그대로 보인다.
+    private static func inline(_ text: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        guard var attributed = try? AttributedString(markdown: text, options: options) else {
+            return AttributedString(text)
+        }
+        for run in attributed.runs {
+            guard let intent = run.inlinePresentationIntent else { continue }
+            if intent.contains(.code) {
+                attributed[run.range].font = .system(size: 11, weight: .medium, design: .monospaced)
+                attributed[run.range].backgroundColor = Color.white.opacity(0.08)
+            }
+            if intent.contains(.stronglyEmphasized) {
+                attributed[run.range].foregroundColor = IslandColor.primary
+            }
+        }
+        return attributed
     }
 }
 

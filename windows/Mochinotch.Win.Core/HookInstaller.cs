@@ -73,6 +73,170 @@ public static class HookInstaller
         return Install(home, exe, stale);
     }
 
+    /// <summary>
+    /// 설치 프로그램이 Mochinotch를 지울 때 부른다. 도구 설정에서 우리 hook만 빼고 나머지는 그대로 둔다.
+    /// Codex notify에 원래 명령을 이어 두었으면(<c>--chain</c>) 그 명령으로 되돌린다.
+    /// </summary>
+    public static InstallResult Remove(string home)
+    {
+        var result = new InstallResult();
+        foreach (var tool in Enum.GetValues<HookTool>())
+        {
+            try
+            {
+                if (Unmerge(home, tool)) result.Changed.Add(tool);
+            }
+            catch (Exception ex)
+            {
+                result.Failures.Add((tool, ex.Message));
+            }
+        }
+        return result;
+    }
+
+    static bool Unmerge(string home, HookTool tool) => tool switch
+    {
+        HookTool.Claude => UnmergeHooks(Path.Combine(home, ".claude", "settings.json"), "claude"),
+        HookTool.Cursor => UnmergeHooks(Path.Combine(home, ".cursor", "hooks.json"), "cursor"),
+        HookTool.Kiro => UnmergeKiro(Path.Combine(home, ".kiro", "hooks", "mochinotch.json")),
+        HookTool.Codex => UnmergeCodex(home),
+        HookTool.Antigravity => UnmergeAntigravity(AntigravityPath(home)),
+        _ => false,
+    };
+
+    /// <summary>Claude와 Cursor. <c>hooks</c> 아래 이벤트마다 우리 항목을 빼고, 비면 이벤트도 뺀다.</summary>
+    static bool UnmergeHooks(string path, string source)
+    {
+        var existing = Read(path);
+        if (existing == null || !existing.Contains("mochinotch", StringComparison.OrdinalIgnoreCase)) return false;
+        if (JsonNode.Parse(existing) is not JsonObject root || root["hooks"] is not JsonObject hooks) return false;
+        var removed = false;
+        foreach (var pair in hooks.ToList())
+        {
+            if (pair.Value is not JsonArray list) continue;
+            if (!Prune(list, source)) continue;
+            removed = true;
+            if (list.Count == 0) hooks.Remove(pair.Key);
+        }
+        if (!removed) return false;
+        if (hooks.Count == 0) root.Remove("hooks");
+        Write(path, root.ToJsonString(JsonWrite) + "\n", backup: true);
+        return true;
+    }
+
+    /// <summary>
+    /// 목록에서 우리 명령을 뺀다. Claude처럼 묶음 안에 <c>hooks</c>가 있으면 그 안에서 빼고, 빈 묶음도 뺀다.
+    /// </summary>
+    static bool Prune(JsonArray list, string source)
+    {
+        var removed = false;
+        for (var index = list.Count - 1; index >= 0; index--)
+        {
+            var item = list[index];
+            if (item is JsonObject group && group["hooks"] is JsonArray inner)
+            {
+                if (!Prune(inner, source)) continue;
+                removed = true;
+                if (inner.Count == 0) list.RemoveAt(index);
+            }
+            else if (IsOurs(CommandOf(item), source))
+            {
+                list.RemoveAt(index);
+                removed = true;
+            }
+        }
+        return removed;
+    }
+
+    static string? CommandOf(JsonNode? node)
+        => node?["command"] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+
+    /// <summary>우리만 쓰는 파일이다. 다른 hook이 없으면 파일째 지운다.</summary>
+    static bool UnmergeKiro(string path)
+    {
+        var existing = Read(path);
+        if (existing == null) return false;
+        if (JsonNode.Parse(existing) is not JsonObject root || root["hooks"] is not JsonArray hooks) return false;
+        var before = hooks.Count;
+        for (var index = hooks.Count - 1; index >= 0; index--)
+        {
+            if (IsOurs(CommandOf(hooks[index]?["action"]), "kiro")) hooks.RemoveAt(index);
+        }
+        if (hooks.Count == before) return false;
+        if (hooks.Count == 0) File.Delete(path);
+        else Write(path, root.ToJsonString(JsonWrite) + "\n", backup: true);
+        return true;
+    }
+
+    /// <summary>이름마다 이벤트를 묶는 파일. 우리 명령을 빼고, 이벤트가 하나도 안 남은 묶음은 지운다.</summary>
+    static bool UnmergeAntigravity(string path)
+    {
+        var existing = Read(path);
+        if (existing == null || !existing.Contains("mochinotch", StringComparison.OrdinalIgnoreCase)) return false;
+        if (JsonNode.Parse(existing) is not JsonObject root) return false;
+        var removed = false;
+        foreach (var pair in root.ToList())
+        {
+            if (pair.Value is not JsonObject entry) continue;
+            var touched = false;
+            foreach (var ev in entry.ToList())
+            {
+                if (ev.Value is not JsonArray list || !Prune(list, "antigravity")) continue;
+                touched = true;
+                if (list.Count == 0) entry.Remove(ev.Key);
+            }
+            if (!touched) continue;
+            removed = true;
+            if (!entry.Any(ev => ev.Value is JsonArray)) root.Remove(pair.Key);
+        }
+        if (!removed) return false;
+        Write(path, root.ToJsonString(JsonWrite) + "\n", backup: true);
+        return true;
+    }
+
+    static bool UnmergeCodex(string home)
+    {
+        var changed = RemoveLegacyCodexPermissionHooks(home);
+        var path = Path.Combine(home, ".codex", "config.toml");
+        var existing = Read(path);
+        if (existing == null || !TomlNotify.TryFind(existing, out var found)) return changed;
+        if (found.Values.Count == 0 || !IsMochinotch(found.Values[0])) return changed;
+        string updated;
+        var chainAt = found.Values.IndexOf("--chain");
+        List<string>? original = null;
+        if (chainAt >= 0 && chainAt + 1 < found.Values.Count)
+        {
+            try
+            {
+                original = JsonSerializer.Deserialize<List<string>>(found.Values[chainAt + 1]);
+            }
+            catch (JsonException)
+            {
+                original = null;
+            }
+        }
+        if (original is { Count: > 0 })
+        {
+            updated = string.Concat(existing.AsSpan(0, found.Start), "notify = ", TomlNotify.Format(original), existing.AsSpan(found.End));
+        }
+        else
+        {
+            // 줄바꿈과, 넣을 때 같이 단 "# Mochinotch" 줄까지 지운다.
+            var end = found.End;
+            if (end < existing.Length && existing[end] == '\r') end++;
+            if (end < existing.Length && existing[end] == '\n') end++;
+            var start = found.Start;
+            const string marker = "# Mochinotch\n";
+            if (start >= marker.Length && existing.AsSpan(start - marker.Length, marker.Length).SequenceEqual(marker)
+                && (start == marker.Length || existing[start - marker.Length - 1] == '\n'))
+                start -= marker.Length;
+            updated = string.Concat(existing.AsSpan(0, start), existing.AsSpan(end));
+        }
+        if (updated == existing) return changed;
+        Write(path, updated, backup: true);
+        return true;
+    }
+
     public static bool IsPresent(string home, HookTool tool)
     {
         if (PresenceFolders(tool).Any(folder => Directory.Exists(Path.Combine(home, folder)))) return true;
