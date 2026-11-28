@@ -100,9 +100,11 @@ sealed class AppUpdate : IDisposable
             Progress = 1;
             Publish();
             var name = Path.GetFileName(file).ToLowerInvariant();
-            if (name.EndsWith(".msi") || name.Contains("setup") || name.Contains("install"))
+            if (WinUpdate.IsInstaller(name))
             {
-                Process.Start(new ProcessStartInfo(file) { UseShellExecute = true });
+                // 설치본은 창 없이 같은 자리에 덮어쓰고 다시 켠다. portable에서 넘어가면 설치 창을 보여 준다.
+                var silent = WinUpdate.IsInstalled(Environment.ProcessPath) && name.EndsWith(".exe");
+                Process.Start(new ProcessStartInfo(file) { UseShellExecute = true, Arguments = silent ? "/S" : "" });
                 quit();
                 swapped = true;
                 return;
@@ -144,7 +146,7 @@ sealed class AppUpdate : IDisposable
         try
         {
             var json = await http.GetStringAsync(Latest);
-            found = WinUpdate.FromLatest(json, local, arm);
+            found = WinUpdate.FromLatest(json, local, arm, WinUpdate.IsInstalled(Environment.ProcessPath));
             ok = true;
         }
         catch (Exception)

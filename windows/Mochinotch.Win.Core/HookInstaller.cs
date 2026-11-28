@@ -61,6 +61,18 @@ public static class HookInstaller
         return result;
     }
 
+    /// <summary>
+    /// 이미 연결했지만 다른 위치의 Mochinotch를 가리키는 도구만 지금 exe로 옮긴다.
+    /// 설치 프로그램이 portable exe에서 설치 폴더로 옮길 때 쓴다. 연결하지 않은 도구는 건드리지 않는다.
+    /// </summary>
+    public static InstallResult Relink(string home, string exe)
+    {
+        var stale = Enum.GetValues<HookTool>()
+            .Where(tool => IsConnected(home, tool, "") && !IsConnected(home, tool, exe))
+            .ToList();
+        return Install(home, exe, stale);
+    }
+
     public static bool IsPresent(string home, HookTool tool)
     {
         if (PresenceFolders(tool).Any(folder => Directory.Exists(Path.Combine(home, folder)))) return true;

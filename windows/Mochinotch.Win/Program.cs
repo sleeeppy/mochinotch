@@ -20,6 +20,8 @@ public static class Program
             return HookRelay.Run(args.Skip(1).ToArray());
         if (args.FirstOrDefault() == "--install-hooks")
             return InstallHooks();
+        if (args.FirstOrDefault() == "--relink")
+            return Relink();
         for (var index = 0; index < args.Length; index++)
         {
             if (args[index] == "--port" && index + 1 < args.Length && int.TryParse(args[index + 1], out var port))
@@ -51,6 +53,26 @@ public static class Program
 
     public static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<App>().UsePlatformDetect().WithInterFont().LogToTrace();
+
+    /// <summary>
+    /// 설치 프로그램이 파일을 놓은 뒤 부른다. 예전 위치를 가리키던 hook과 로그인 시 실행을 새 exe로 옮긴다.
+    /// </summary>
+    static int Relink()
+    {
+        if (!OperatingSystem.IsWindows()) return 1;
+        var exe = Environment.ProcessPath ?? "";
+        if (exe.Length == 0) return 1;
+        var result = HookInstaller.Relink(HookInstaller.Home, exe);
+        try
+        {
+            if (LoginStart.Enabled) LoginStart.Set(true, exe);
+        }
+        catch (Exception)
+        {
+            // 레지스트리를 못 쓰면 설정에서 다시 켤 수 있다.
+        }
+        return result.Failures.Count == 0 ? 0 : 1;
+    }
 
     static int InstallHooks()
     {

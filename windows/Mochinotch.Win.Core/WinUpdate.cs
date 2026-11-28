@@ -6,11 +6,28 @@ public sealed record WinRelease(string Version, string Page, string? Download, s
 
 /// <summary>
 /// GitHub 최신 릴리즈에서 윈도우 설치 파일만 고른다.
-/// 맥용 dmg는 받지 않는다. 자산 이름에 win이 들어가고 exe, msi, zip인 파일을 쓴다.
+/// 맥용 dmg는 받지 않는다. 자산 이름에 win이나 setup이 들어가고 exe, msi, zip인 파일을 쓴다.
+/// 설치 프로그램으로 깔았으면 Setup을, portable exe로 쓰고 있으면 portable exe를 먼저 고른다.
 /// </summary>
 public static class WinUpdate
 {
-    public static WinRelease? FromLatest(string json, string localVersion, bool arm = false)
+    /// <summary>설치 프로그램이 지운 프로그램 목록에 올린 Uninstall.exe가 옆에 있으면 설치본이다.</summary>
+    public const string UninstallerName = "Uninstall.exe";
+
+    public static bool IsInstalled(string? processPath)
+    {
+        if (string.IsNullOrWhiteSpace(processPath)) return false;
+        var directory = Path.GetDirectoryName(processPath);
+        return !string.IsNullOrEmpty(directory) && File.Exists(Path.Combine(directory, UninstallerName));
+    }
+
+    public static bool IsInstaller(string fileName)
+    {
+        var name = Path.GetFileName(fileName).ToLowerInvariant();
+        return name.EndsWith(".msi") || name.Contains("setup") || name.Contains("install");
+    }
+
+    public static WinRelease? FromLatest(string json, string localVersion, bool arm = false, bool installed = false)
     {
         try
         {
@@ -19,7 +36,7 @@ public static class WinUpdate
             var tag = root.TryGetProperty("tag_name", out var tagValue) ? tagValue.GetString() ?? "" : "";
             if (!Newer(tag, localVersion)) return null;
             if (!root.TryGetProperty("assets", out var assets)) return null;
-            var chosen = Choose(assets, arm);
+            var chosen = Choose(assets, arm, installed);
             if (chosen == null) return null;
             var page = PageOf(root) ?? "https://github.com/sleeeppy/mochinotch/releases/latest";
             var version = tag.Trim().TrimStart('v', 'V');
@@ -103,7 +120,7 @@ public static class WinUpdate
         return 0;
     }
 
-    static (string Url, string Name, string? Sha256)? Choose(JsonElement assets, bool arm)
+    static (string Url, string Name, string? Sha256)? Choose(JsonElement assets, bool arm, bool installed)
     {
         (string Url, string Name, string? Sha256, int Score)? best = null;
         foreach (var asset in assets.EnumerateArray())
@@ -113,7 +130,7 @@ public static class WinUpdate
             if (!IsWindowsPackage(lowered)) continue;
             var url = AssetUrl(asset);
             if (url == null) continue;
-            var score = ScoreOf(lowered, arm);
+            var score = ScoreOf(lowered, arm, installed);
             if (best == null || score > best.Value.Score)
                 best = (url, name, Digest(asset), score);
         }
@@ -122,13 +139,14 @@ public static class WinUpdate
 
     static bool IsWindowsPackage(string name)
     {
-        if (!(name.Contains("win") || name.Contains("windows"))) return false;
+        if (!(name.Contains("win") || name.Contains("setup"))) return false;
         return name.EndsWith(".exe") || name.EndsWith(".msi") || name.EndsWith(".zip");
     }
 
-    static int ScoreOf(string name, bool arm)
+    static int ScoreOf(string name, bool arm, bool installed)
     {
         var score = name.EndsWith(".exe") ? 30 : name.EndsWith(".msi") ? 20 : 10;
+        score += IsInstaller(name) == installed ? 100 : 0;
         if (name.Contains("mochinotch")) score += 20;
         var wantsArm = name.Contains("arm64") || name.Contains("aarch64");
         var wantsIntel = name.Contains("x64") || name.Contains("win64") || name.Contains("x86_64");
