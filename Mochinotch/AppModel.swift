@@ -1663,7 +1663,8 @@ struct ReleaseNotes: Equatable {
                 if quietOnly { self.finishLaunchIntro() }
                 return
             }
-            self.startIntro(IntroScript.make(study), afterLaunch: quietOnly)
+            let idle = IslandMetrics.resolve(notch: self.notch, presentation: .idle, rowCount: 0)
+            self.startIntro(IntroScript.make(study, half: Double(idle.width / 2)), afterLaunch: quietOnly)
         }
     }
 

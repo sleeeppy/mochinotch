@@ -139,6 +139,9 @@ struct IntroPose {
 enum IntroStudy: String, CaseIterable {
     case mochi
     case taffy
+    case drop
+    case merge
+    case melt
 
     static var stored: IntroStudy {
         if let raw = UserDefaults.standard.string(forKey: "introStudy"), let study = IntroStudy(rawValue: raw) {
@@ -151,6 +154,9 @@ enum IntroStudy: String, CaseIterable {
         switch self {
         case .mochi: return L10n.text(.introMochi, language)
         case .taffy: return L10n.text(.introTaffy, language)
+        case .drop: return L10n.text(.introDrop, language)
+        case .merge: return L10n.text(.introMerge, language)
+        case .melt: return L10n.text(.introMelt, language)
         }
     }
 }
@@ -268,7 +274,8 @@ struct IntroScript {
         return CGFloat(-3 * (1 - exp(value / 3)))
     }
 
-    static func make(_ study: IntroStudy) -> IntroScript {
+    /// `half`는 접힌 노치 너비의 절반이다. 방울을 노치 모서리에서 떨어뜨릴 때 쓴다.
+    static func make(_ study: IntroStudy, half: Double) -> IntroScript {
         switch study {
         case .mochi:
             // 왼쪽 톡, 오른쪽 톡은 살짝 겹치고, 한 번 쉰 뒤 눌렸다가 그 반동으로 크게 벌어진다.
@@ -292,6 +299,136 @@ struct IntroScript {
             script.glow = fire + 0.45
             script.breathe(from: fire + 0.95)
             script.length = fire + 2.75
+            return script
+
+        case .drop:
+            // 가운데가 천천히 처지며 방울이 맺히고, 떡 줄이 끊기면 툭 떨어진다.
+            // 떨어진 반동으로 노치로 튀어 올라가 꿀꺽 삼켜지고, 삼킨 힘으로 로고가 된다.
+            var script = IntroScript(reveal: 0, glow: nil, length: 0)
+            script.sides(-4, at: 0, .drip)
+            script.drop.to(12, at: 0, .drip)
+            var ball = IntroBall(x: IntroTrack(0), y: IntroTrack(30))
+            ball.stretchesWithSpeed = true
+            ball.size.to(15, at: 0.05, .pull)
+            ball.y.to(66, at: 0.12, .pull)
+            ball.tether.to(1, at: 0, .pull)
+            ball.squash.to(-0.16, at: 0.2, .pull)
+            // 줄이 끊긴다. 몸통은 튕겨 올라가고 방울은 아래로 떨어지며 길쭉해진다.
+            let snap = 1.2
+            ball.tether.to(0, at: snap, .snapUp)
+            ball.y.to(132, at: snap, .drop)
+            ball.squash.to(0.1, at: snap + 0.28, .plop)
+            ball.squash.to(0, at: snap + 0.5, .breathe)
+            ball.trail = 2
+            script.drop.to(-2, at: snap, .snapUp)
+            script.sides(0, at: snap, .tuck)
+            // 바닥까지 갔다가 고무줄처럼 되돌아 노치로 빨려 든다.
+            let rise = snap + 0.62
+            ball.y.to(30, at: rise, .fling)
+            ball.squash.to(-0.22, at: rise, .snapUp)
+            ball.size.to(0, at: rise + 0.2, .gulp)
+            script.drop.to(30, at: rise + 0.18, .gulp)
+            script.sides(18, at: rise + 0.18, .gulp)
+            script.balls = [ball]
+            let bloom = rise + 0.4
+            script.bloom(at: bloom)
+            script.reveal = bloom + 0.06
+            script.glow = bloom + 0.45
+            script.breathe(from: bloom + 1.05)
+            script.length = bloom + 2.85
+            return script
+
+        case .merge:
+            // 노치가 양옆으로 귀를 내밀고, 귀 끝에서 방울이 하나씩 떨어진다.
+            // 둘이 가운데로 흔들려 와 부딪히며 하나가 되고, 떡 줄에 끌려 올라가 로고가 된다.
+            var script = IntroScript(reveal: 0, glow: nil, length: 0)
+            script.sides(64, at: 0, .peek)
+            script.sides(0, at: 0.52, .tuck)
+            let start = half + 34
+            var balls: [IntroBall] = []
+            for side in [-1.0, 1.0] {
+                var ball = IntroBall(x: IntroTrack(side * start), y: IntroTrack(20))
+                ball.stretchesWithSpeed = true
+                ball.size.to(12, at: 0.14, .pop)
+                ball.y.to(86, at: 0.36, .drop)
+                ball.squash.to(-0.18, at: 0.36, .drip)
+                ball.squash.to(0, at: 0.62, .breathe)
+                // 가운데로 그네 타듯 쓸려 온다. 오른쪽이 조금 늦어 맞붙는 순간이 한쪽으로 쏠린다.
+                let swing = side < 0 ? 0.78 : 0.82
+                ball.x.to(side * 9, at: swing, .slide)
+                ball.y.to(102, at: swing, .slide)
+                balls.append(ball)
+            }
+            // 맞붙는다. 왼쪽이 오른쪽을 삼켜 크게 옆으로 퍼졌다가 둥글어진다.
+            let hit = 1.12
+            balls[0].x.to(0, at: hit, .gulp)
+            balls[0].size.to(17, at: hit, .pop)
+            balls[0].squash.to(0.32, at: hit - 0.02, .plop)
+            balls[0].squash.to(0, at: hit + 0.2, .breathe)
+            balls[1].x.to(0, at: hit, .gulp)
+            balls[1].size.to(0, at: hit + 0.04, .gulp)
+            // 떡 줄이 내려와 붙잡고 무겁게 끌어올린다. 다 오면 꿀꺽.
+            let lift = hit + 0.42
+            balls[0].tether.to(1, at: lift, .pull)
+            balls[0].y.to(62, at: lift + 0.1, .pull)
+            balls[0].squash.to(-0.12, at: lift + 0.1, .pull)
+            script.drop.to(8, at: lift, .pull)
+            let swallow = lift + 0.62
+            balls[0].y.to(28, at: swallow, .recoil)
+            balls[0].size.to(0, at: swallow + 0.14, .gulp)
+            balls[0].tether.to(0, at: swallow + 0.14, .snapUp)
+            script.drop.to(30, at: swallow + 0.1, .gulp)
+            script.sides(14, at: swallow + 0.1, .gulp)
+            script.balls = balls
+            let bloom = swallow + 0.32
+            script.bloom(at: bloom)
+            script.reveal = bloom + 0.06
+            script.glow = bloom + 0.45
+            script.breathe(from: bloom + 1.05)
+            script.length = bloom + 2.85
+            return script
+
+        case .melt:
+            // 노치가 녹아 세 가닥이 왼쪽부터 차례로 흘러내리고, 끝에 맺힌 방울이 흔들린다.
+            // 오른쪽부터 한 가닥씩 후루룩 빨려 들고, 삼킬 때마다 노치가 한 칸씩 넓어지다 로고가 된다.
+            var script = IntroScript(reveal: 0, glow: nil, length: 0)
+            script.drop.to(5, at: 0, .drip)
+            let spread = min(64, half * 0.6)
+            var balls: [IntroBall] = []
+            for index in 0..<3 {
+                let at = 0.04 + Double(index) * 0.17
+                let x = Double(index - 1) * spread
+                var ball = IntroBall(x: IntroTrack(x), y: IntroTrack(30))
+                ball.stretchesWithSpeed = true
+                ball.size.to(index == 1 ? 12 : 10, at: at, .pop)
+                ball.y.to(index == 1 ? 94 : 84, at: at, .drop)
+                // 줄을 조금 가늘게 해야 끝에 방울이 맺힌 것처럼 보인다. 더 가늘면 가운데가 끊긴다.
+                ball.tether.to(0.88, at: at, .peek)
+                ball.squash.to(-0.14, at: at, .drip)
+                ball.squash.to(0, at: at + 0.34, .breathe)
+                // 매달린 채 한 번 흔들린다. 이웃끼리 반대로.
+                let sway = index % 2 == 0 ? 6.0 : -6.0
+                ball.x.to(x + sway, at: at + 0.3, .breathe)
+                ball.x.to(x, at: at + 0.85, .breathe)
+                balls.append(ball)
+            }
+            let slurp = 1.32
+            for (order, index) in [2, 1, 0].enumerated() {
+                let at = slurp + Double(order) * 0.17
+                balls[index].y.to(26, at: at, .recoil)
+                balls[index].squash.to(-0.24, at: at, .snapUp)
+                balls[index].size.to(0, at: at + 0.11, .gulp)
+                balls[index].tether.to(0, at: at + 0.12, .snapUp)
+                script.drop.to(12 + Double(order) * 7, at: at + 0.08, .gulp)
+                script.sides(22 + Double(order) * 24, at: at + 0.08, .peek)
+            }
+            script.balls = balls
+            let bloom = slurp + 0.34 + 0.3
+            script.bloom(at: bloom)
+            script.reveal = bloom + 0.06
+            script.glow = bloom + 0.45
+            script.breathe(from: bloom + 1.05)
+            script.length = bloom + 2.85
             return script
         }
     }

@@ -61,7 +61,7 @@ enum L10n {
         case receiving, preparing
         case shelfSideTitle, shelfSideOn, shelfSideOff
         case languageTitle, languageSubtitle
-        case introMochi, introTaffy
+        case introMochi, introTaffy, introDrop, introMerge, introMelt
         case airdropIdle, airdropArmed
         case shelfTitle, shelfEmpty, shelfRoom, shelfFull
         case shelfArmedFull, shelfArmedSome, shelfArmed, shelfLimit
@@ -128,6 +128,9 @@ enum L10n {
             .languageSubtitle: "노치에 보이는 말",
             .introMochi: "모찌",
             .introTaffy: "늘리기",
+            .introDrop: "방울",
+            .introMerge: "합체",
+            .introMelt: "녹기",
             .airdropIdle: "여기에 놓으면 보내요",
             .airdropArmed: "놓으면 기기를 골라요",
             .shelfTitle: "맡기기",
@@ -242,6 +245,9 @@ enum L10n {
             .languageSubtitle: "ノッチの表示言語",
             .introMochi: "もち",
             .introTaffy: "のばす",
+            .introDrop: "しずく",
+            .introMerge: "がったい",
+            .introMelt: "とろり",
             .airdropIdle: "ここに置くと送れます",
             .airdropArmed: "置くと送信先を選びます",
             .shelfTitle: "預ける",
@@ -356,6 +362,9 @@ enum L10n {
             .languageSubtitle: "Words on the notch",
             .introMochi: "Mochi",
             .introTaffy: "Stretch",
+            .introDrop: "Drop",
+            .introMerge: "Merge",
+            .introMelt: "Melt",
             .airdropIdle: "Drop here to send",
             .airdropArmed: "Drop to choose a device",
             .shelfTitle: "Keep",
@@ -470,6 +479,9 @@ enum L10n {
             .languageSubtitle: "刘海上的语言",
             .introMochi: "麻糬",
             .introTaffy: "拉长",
+            .introDrop: "水滴",
+            .introMerge: "合体",
+            .introMelt: "融化",
             .airdropIdle: "放在这里就能发送",
             .airdropArmed: "放下后选择设备",
             .shelfTitle: "暂存",

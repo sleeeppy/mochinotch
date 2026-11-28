@@ -403,8 +403,8 @@ private struct MenuDropdown: View {
 
 private struct IntroMenu: View {
     static let width: CGFloat = 132
-    /// 여백 8, 줄 2개, 줄 사이 2.
-    static let height: CGFloat = 8 + 28 * 2 + 2
+    /// 여백 8, 줄마다 28, 줄 사이 2.
+    static let height: CGFloat = 8 + 28 * CGFloat(IntroStudy.allCases.count) + 2 * CGFloat(IntroStudy.allCases.count - 1)
     @Environment(AppModel.self) private var model
     var onPick: () -> Void
 
