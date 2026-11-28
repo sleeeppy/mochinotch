@@ -296,7 +296,7 @@ struct IslandActivity: Identifiable, Equatable {
         case .notice(let appName, _, _, _):
             return appName
         case .setup:
-            return "もちノッチ"
+            return "Mochinotch"
         case .update:
             return "새 업데이트"
         }
@@ -317,7 +317,7 @@ struct IslandActivity: Identifiable, Equatable {
         case .notice(let appName, _, _, _):
             return appName
         case .setup:
-            return "もちノッチ"
+            return "Mochinotch"
         case .update:
             return L10n.text(.newUpdate, language)
         }
