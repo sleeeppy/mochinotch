@@ -217,14 +217,27 @@ Claude와 Codex가 승인 창이나 질문 카드를 띄우면 노치에 주황�
 2. 파일을 열면 설치 창이 열려요. `Mochinotch.app`을 **Applications** 폴더로 끌어다 놓습니다.
 3. 앱을 엽니다.
 
+Homebrew를 쓴다면 터미널에서 설치할 수도 있어요. 처음 열 때 뜨는 경고 없이 바로 열립니다.
+
+```sh
+brew trust sleeeppy/tap
+brew install --cask sleeeppy/tap/mochinotch
+```
+
 새 버전이 나오면 노치에 알려 주고, 설정 맨 아래에 **업데이트**가 생겨요. **v0.3.5 이상**이면 누르면 새 버전을 받아 그 자리에서 바꾸고 다시 켭니다. 켜 둔 권한과 AI 연결은 그대로예요. v0.3.4 이하는 여기서 받아 설치하면, 그다음부터는 앱 안에서 업데이트돼요.
 
 **Windows**는 노치 없이, 확인과 완료만 화면 위쪽에 작게 뜹니다. 설정은 트레이 아이콘에서 엽니다.
 
 1. [Releases](https://github.com/sleeeppy/mochinotch/releases/latest)에서 `Mochinotch-win-x64-setup.exe`를 받아 실행합니다.
 2. 안내를 따라 **다음**을 누르면 설치됩니다. 관리자 권한은 필요 없어요. [.NET 10 런타임](https://dotnet.microsoft.com/download/dotnet/10.0)이 없으면 설치 프로그램이 받아서 같이 설치합니다.
-3. 시작 메뉴의 **Mochinotch**로 엽니다. 지우려면 **설정 → 앱**에서 Mochinotch를 제거합니다.
+3. 시작 메뉴의 **Mochinotch**로 엽니다. 지우려면 **설정 → 앱**에서 Mochinotch를 제거합니다. AI 도구 설정에 넣은 연결도 같이 빠지고, 다른 설정은 그대로 둡니다.
 4. 새 버전이 나오면 설정 아래에 **업데이트**가 생깁니다. 누르면 창 없이 같은 자리에 바꾸고 다시 켜요.
+
+winget으로도 설치할 수 있어요. 필요하면 .NET 10 런타임도 같이 설치됩니다.
+
+```powershell
+winget install sleeeppy.Mochinotch
+```
 
 예전에 `Mochinotch-win-x64.exe`를 따로 두고 쓰던 경우, 업데이트를 누르면 설치 창이 한 번 뜹니다. 설치가 끝나면 AI 연결과 로그인 시 실행이 새 위치로 옮겨져요. 예전 exe는 지워도 됩니다.
 
@@ -337,6 +350,7 @@ Xcode에서 서명을 **Sign to Run Locally**로 두고 Run 합니다. 터미널
 | `scripts/install-hooks.sh` | 빌드한 앱으로 `--install-hooks` 실행 |
 | `scripts/make-dmg.sh` | Release 앱으로 설치용 DMG 만들기 |
 | `scripts/make-win-installer.sh` | Windows 설치 프로그램(`Mochinotch-win-x64-setup.exe`) 만들기. `brew install makensis` 필요 |
+| `scripts/publish-packages.sh` | GitHub 릴리즈를 올린 뒤 Homebrew tap과 winget에 새 버전 올리기. `brew install komac` 필요 |
 | `scripts/make-installer-art.swift` | DMG 배경과 Windows 설치 화면 그림 다시 그리기 |
 | `windows/installer/` | Windows 설치 프로그램(NSIS) 스크립트 |
 | `hooks/` | 도구별 설정 예시 |

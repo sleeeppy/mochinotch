@@ -279,6 +279,12 @@ SectionEnd
 Section "Uninstall"
   !insertmacro CloseApp
 
+  ; AI 도구 설정에 넣은 hook을 뺀다. 그대로 두면 지운 exe를 계속 부른다.
+  ${If} ${FileExists} "$INSTDIR\Mochinotch.exe"
+    nsExec::Exec '"$INSTDIR\Mochinotch.exe" --unlink'
+    Pop $0
+  ${EndIf}
+
   Delete "$INSTDIR\Mochinotch.exe"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"

@@ -634,6 +634,68 @@ public class HookInstallerTests
     }
 
     [Fact]
+    public void Remove_takes_out_only_our_hooks_and_keeps_the_rest()
+    {
+        var home = TempHome();
+        var exe = @"C:\Users\me\AppData\Local\Programs\Mochinotch\Mochinotch.exe";
+        Directory.CreateDirectory(Path.Combine(home, ".claude"));
+        File.WriteAllText(Path.Combine(home, ".claude", "settings.json"), """
+            {"model":"opus","hooks":{"Stop":[{"hooks":[{"type":"command","command":"say done"}]}]}}
+            """);
+        Directory.CreateDirectory(Path.Combine(home, ".codex"));
+        File.WriteAllText(Path.Combine(home, ".codex", "config.toml"), "model = \"o3\"\n\n[tui]\nx = 1\n");
+        HookInstaller.Install(home, exe, [HookTool.Claude, HookTool.Cursor, HookTool.Kiro, HookTool.Codex, HookTool.Antigravity]);
+
+        var result = HookInstaller.Remove(home);
+
+        Assert.Empty(result.Failures);
+        Assert.Equal(5, result.Changed.Count);
+        var claude = File.ReadAllText(Path.Combine(home, ".claude", "settings.json"));
+        Assert.Contains("say done", claude);
+        Assert.Contains("\"model\": \"opus\"", claude);
+        Assert.DoesNotContain("--hook", claude);
+        Assert.DoesNotContain("PermissionRequest", claude);
+        Assert.DoesNotContain("--hook", File.ReadAllText(Path.Combine(home, ".cursor", "hooks.json")));
+        Assert.False(File.Exists(Path.Combine(home, ".kiro", "hooks", "mochinotch.json")));
+        Assert.Equal("{}\n", File.ReadAllText(Path.Combine(home, ".gemini", "config", "hooks.json")));
+        Assert.Equal("model = \"o3\"\n\n[tui]\nx = 1\n", File.ReadAllText(Path.Combine(home, ".codex", "config.toml")));
+        foreach (var tool in Enum.GetValues<HookTool>())
+            Assert.False(HookInstaller.IsConnected(home, tool, ""));
+        Assert.Empty(HookInstaller.Remove(home).Changed);
+    }
+
+    [Fact]
+    public void Remove_restores_the_codex_notify_we_chained()
+    {
+        var home = TempHome();
+        Directory.CreateDirectory(Path.Combine(home, ".codex"));
+        var path = Path.Combine(home, ".codex", "config.toml");
+        File.WriteAllText(path, "notify = [\"python3\", \"notify.py\"]\n");
+        HookInstaller.Install(home, @"C:\Mochinotch\Mochinotch.exe", [HookTool.Codex]);
+        Assert.Contains("--chain", File.ReadAllText(path));
+
+        HookInstaller.Remove(home);
+
+        Assert.Equal("notify = [\"python3\", \"notify.py\"]\n", File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void Remove_keeps_other_antigravity_entries()
+    {
+        var home = TempHome();
+        var path = Path.Combine(home, ".gemini", "config", "hooks.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, """{"other":{"Stop":[{"type":"command","command":"echo hi"}]}}""");
+        HookInstaller.Install(home, @"C:\Mochinotch\Mochinotch.exe", [HookTool.Antigravity]);
+
+        HookInstaller.Remove(home);
+
+        var text = File.ReadAllText(path);
+        Assert.Contains("echo hi", text);
+        Assert.DoesNotContain("mochinotch", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Relink_moves_only_tools_already_connected_elsewhere()
     {
         var home = TempHome();
