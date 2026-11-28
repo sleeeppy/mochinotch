@@ -224,10 +224,10 @@ It fits best on a MacBook with a notch. On a Mac without one, or on an external 
 With Homebrew, you can paste this line into Terminal instead. The app then opens without the first-launch warning.
 
 ```sh
-brew trust --cask sleeeppy/tap/mochinotch && brew install --cask sleeeppy/tap/mochinotch
+brew tap sleeeppy/tap && brew trust --cask sleeeppy/tap/mochinotch && brew install --cask sleeeppy/tap/mochinotch
 ```
 
-Homebrew asks once before it installs an app that is not in its official list (`brew trust`). The first part allows Mochinotch only.
+Homebrew asks once before it installs an app that is not in its official list (`brew trust`). The `brew trust` part allows Mochinotch only.
 
 A new version is announced on the notch, and **Update** appears at the bottom of Settings. On **v0.3.5 or later**, pressing it downloads the new version, replaces the app, and relaunches. Permissions and AI connections stay. v0.3.4 and earlier: install from here once, then later versions update inside the app.
 
