@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Mochinotch.Win</RootNamespace>
     <AssemblyName>Mochinotch</AssemblyName>
-    <Version>0.8.0</Version>
+    <Version>0.8.1</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Mochinotch.ico</ApplicationIcon>
     <Product>Mochinotch</Product>
